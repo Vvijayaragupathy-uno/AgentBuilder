@@ -5,6 +5,7 @@ AICCORE_BACKEND_ONLY = "false"
 [phases.install]
 dependsOn = ["setup"]
 cmds = [
+    "python -m pip install --upgrade pip",
     "pip install -r requirements.txt",
     "pip install ./langflow/src/lfx",
     "pip install ./langflow/src/backend/base",

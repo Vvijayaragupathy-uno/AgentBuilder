@@ -14,3 +14,5 @@ bcrypt
 python-multipart
 alembic
 sqlmodel
+fastapi-pagination>=0.13.1
+networkx>=3.4.2
