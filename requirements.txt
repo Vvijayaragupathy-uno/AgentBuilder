@@ -31,7 +31,7 @@ langchain-openai>=0.3.0
 langchain-anthropic>=0.3.0
 langchain-google-genai>=2.0.0
 
-# 3. Data & Utilities
+# 3. Data & Utilities 
 pandas>=2.0.0
 numpy
 scipy
@@ -52,6 +52,9 @@ chardet>=5.2.0
 defusedxml>=0.7.1
 pypdf>=6.4.0
 python-docx>=1.1.0
+json-repair>=0.30.3
+nanoid>=2.0.0
+markitdown>=0.1.4
 
 # 4. LLM & Connectivity
 openai>=1.0.0

@@ -1,6 +1,6 @@
 [variables]
 NIXPACKS_PYTHON_VERSION = "3.11"
-PYTHONPATH = ".:./langflow/src/backend/base"
+PYTHONPATH = ".:./langflow/src/backend/base:./langflow/src/lfx/src"
 AICCORE_BACKEND_ONLY = "false"
 
 [phases.install]
