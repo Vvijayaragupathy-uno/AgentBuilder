@@ -1,6 +1,6 @@
 # 1. External dependencies (installed by Railpack/Nixpacks)
 
-# 2. AICCORE Wrapper & Multi-user dependencies
+# AICCORE Wrapper & Multi-user dependencies
 fastapi>=0.115.2
 uvicorn>=0.30.0
 sqlalchemy
@@ -15,4 +15,4 @@ python-multipart
 alembic
 sqlmodel
 fastapi-pagination>=0.13.1
-networkx>=3.4.2
+networkx
