@@ -1,0 +1,19 @@
+# 1. Install local engine components first (Editable mode)
+-e ./langflow/src/lfx
+-e ./langflow/src/backend/base
+-e ./langflow
+
+# 2. AICCORE Wrapper & Multi-user dependencies
+fastapi>=0.115.2
+uvicorn>=0.30.0
+sqlalchemy
+httpx
+pydantic-settings
+psycopg2-binary  # Required for Railway PostgreSQL
+python-dotenv
+loguru
+passlib
+bcrypt
+python-multipart
+alembic
+sqlmodel

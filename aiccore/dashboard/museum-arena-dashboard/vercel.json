@@ -1,0 +1,9 @@
+{
+    "version": 2,
+    "buildCommand": "npm run build",
+    "installCommand": "npm install",
+    "framework": "nextjs",
+    "env": {
+        "NEXT_PUBLIC_AICCORE_API_URL": "REPLACE_WITH_YOUR_RAILWAY_URL"
+    }
+}
