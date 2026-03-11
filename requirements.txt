@@ -3,62 +3,64 @@
 
 # 1. Infrastructure & Core Services
 fastapi>=0.115.2
-uvicorn>=0.30.0
+uvicorn>=0.34.3
 gunicorn>=22.0.0
 sqlalchemy[postgresql_psycopg2binary]>=2.0.38
 psycopg2-binary
 sqlmodel==0.0.22
 alembic>=1.13.0
 pydantic~=2.11.0
-pydantic-settings>=2.2.0
+pydantic-settings>=2.10.1
 python-dotenv>=1.0.0
-loguru>=0.7.1
-structlog>=24.0.0
+loguru>=0.7.3
+structlog>=25.4.0
 httpx[http2]>=0.27.0
 python-multipart>=0.0.12
 passlib>=1.7.4
 bcrypt==4.0.1
-filelock>=3.13.0
+filelock>=3.20.1
 fastapi-pagination>=0.13.1
-networkx>=3.2.1
-validators>=0.20.0
-cryptography>=41.0.0
+networkx>=3.4.2
+validators>=0.34.0
+cryptography>=43.0.0
 nanoid>=2.0.0
 nest-asyncio>=1.6.0
-platformdirs>=4.0.0
-cachetools>=5.3.0
-emoji>=2.0.0
+platformdirs>=4.3.8
+cachetools>=6.0.0
+emoji>=2.14.1
 chardet>=5.2.0
 defusedxml>=0.7.1
-pypdf>=5.0.0
+pypdf>=6.4.0
 python-docx>=1.1.0
 json-repair>=0.30.3
-Pillow>=10.0.0
+Pillow>=11.1.0
+docstring-parser>=0.16
+ag-ui-protocol>=0.1.10
 
 # 2. Langflow Core & LangChain Essentials
-langchain~=0.3.0
-langchain-community>=0.3.0
-langchain-core>=0.3.0
-langchainhub~=0.1.0
+langchain~=0.3.27
+langchain-community>=0.3.28
+langchain-core>=0.3.81
+langchainhub~=0.1.15
 langchain-experimental>=0.3.0
 langchain-openai>=0.3.0
-langchain-anthropic>=0.3.0
-langchain-google-genai>=2.0.0
+langchain-anthropic>=0.3.14
+langchain-google-genai>=2.0.6
 
 # 3. Data & Utilities 
-pandas>=2.0.0
+pandas==2.2.3
 numpy
-scipy~=1.13.1
+scipy>=1.13.1
 beautifulsoup4>=4.12.3
 lxml>=5.0.0
 aiofile>=3.9.0
 aiofiles>=24.1.0
 aiosqlite>=0.20.0
-orjson>=3.10.0
+orjson==3.10.15
 rich>=13.7.0
-typer>=0.12.0
-tomli>=2.0.0
-typing-extensions>=4.0.0
+typer>=0.16.0
+tomli>=2.2.1
+typing-extensions>=4.14.0
 greenlet>=3.1.1
 multiprocess>=0.70.14
 duckdb>=1.0.0
@@ -67,13 +69,15 @@ pyperclip>=1.8.2
 uncurl>=0.0.11
 grandalf>=0.8.0
 diskcache>=5.6.3
-clickhouse-connect>=0.7.0
+clickhouse-connect==0.7.19
 assemblyai>=0.33.0
 jsonquerylang>=1.1.1
 jaraco-context>=6.1.0
+setuptools>=80.0.0
+wheel>=0.46.2
 
 # 4. LLM & Connectivity
-openai>=1.50.0
+openai>=1.68.2
 anthropic>=0.3.0
 google-generativeai
 huggingface-hub
