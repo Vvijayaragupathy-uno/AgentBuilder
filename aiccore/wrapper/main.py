@@ -24,7 +24,7 @@ from typing import Optional, Dict, Any, List
 
 # Import AICCORE backend
 from aiccore.backend.database import init_db, get_session, engine
-from aiccore.backend.models import Session as AICSession, User, Station, Submission, Event, Challenge, Achievement, ChallengeRegistration
+from aiccore.backend.models import Session as AICSession, Participant as User, Station, Submission, Event, Challenge, Achievement, ChallengeRegistration
 from aiccore.backend.middleware import AICCoreEventMiddleware
 from aiccore.backend.eraser import purge_langflow_workspace
 from aiccore.backend.broadcast import broadcast_manager
