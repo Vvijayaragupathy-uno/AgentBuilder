@@ -5,7 +5,7 @@ import { Calendar, MapPin, Users, ArrowRight, ExternalLink, Shield, Rocket, Spar
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 import Link from "next/link"
 
 interface Challenge {
@@ -29,8 +29,8 @@ export default function ChallengesPage() {
     useEffect(() => {
         const fetchChallenges = async () => {
             try {
-                const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-                const res = await fetch(`http://${host}:7860/api/v1/aiccore/challenges`)
+                const apiBase = getApiBase()
+                const res = await fetch(`${apiBase}/api/v1/aiccore/challenges`)
                 if (res.ok) setChallenges(await res.json())
             } catch (err) {
                 console.error(err)

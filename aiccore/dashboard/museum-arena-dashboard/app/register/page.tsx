@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 import Link from "next/link"
 
 function RegisterContent() {
@@ -26,19 +26,19 @@ function RegisterContent() {
     const [error, setError] = useState<string | null>(null)
     const [successData, setSuccessData] = useState<{ code: string; nickname: string } | null>(null)
 
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-
     const handleCreateAccount = async (e: React.FormEvent) => {
         e.preventDefault()
         setLoading(true)
         setError(null)
 
         try {
+            const apiBase = getApiBase()
             // 1. Create/Login User
-            const userRes = await fetch(`http://${host}:7860/api/v1/aiccore/users`, {
+            const userRes = await fetch(`${apiBase}/api/v1/aiccore/users`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ nickname, username, password })
+                body: JSON.stringify({ nickname, username, password }),
+                credentials: "include"
             })
 
             if (!userRes.ok) {
@@ -50,10 +50,11 @@ function RegisterContent() {
 
             // 2. Register for Challenge if ID exists
             if (challengeId) {
-                const regRes = await fetch(`http://${host}:7860/api/v1/aiccore/challenges/${challengeId}/register`, {
+                const regRes = await fetch(`${apiBase}/api/v1/aiccore/challenges/${challengeId}/register`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ user_id: userData.id })
+                    body: JSON.stringify({ user_id: userData.id }),
+                    credentials: "include"
                 })
 
                 if (!regRes.ok) {

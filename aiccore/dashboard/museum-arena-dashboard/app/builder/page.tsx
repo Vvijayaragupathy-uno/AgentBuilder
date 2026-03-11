@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { Shield, Rocket, RefreshCw, Trophy, CheckCircle2, Zap, BarChart3, Medal, Megaphone, X, FileText, Clock } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 
 export default function BuilderPage() {
     const [session, setSession] = useState<{ id: string; nickname: string } | null>(null)
@@ -36,8 +36,8 @@ export default function BuilderPage() {
     const handleReset = async () => {
         if (session) {
             try {
-                const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-                await fetch(`http://${host}:7860/api/v1/aiccore/session/${session.id}/deactivate`, {
+                const apiBase = getApiBase()
+                await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/deactivate`, {
                     method: "POST",
                     credentials: "include"
                 })
@@ -62,8 +62,8 @@ export default function BuilderPage() {
 
         const checkStatus = async () => {
             try {
-                const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-                const response = await fetch(`http://${host}:7860/api/v1/aiccore/session/${session.id}/status`, {
+                const apiBase = getApiBase()
+                const response = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/status`, {
                     credentials: "include"
                 })
 
@@ -103,8 +103,9 @@ export default function BuilderPage() {
 
     // WebSocket Listener for Broadcasts & Ceremony
     useEffect(() => {
-        const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-        const ws = new WebSocket(`ws://${host}:7860/api/v1/aiccore/ws`)
+        const apiBase = getApiBase()
+        const wsUrl = apiBase.replace(/^http/, "ws")
+        const ws = new WebSocket(`${wsUrl}/api/v1/aiccore/ws`)
 
         ws.onmessage = (event) => {
             try {
@@ -127,13 +128,12 @@ export default function BuilderPage() {
         return () => ws.close()
     }, [])
 
-    // Fetch challenge assets URL
     useEffect(() => {
         if (!session) return
         const fetchChallenge = async () => {
-            const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
             try {
-                const res = await fetch(`http://${host}:7860/api/v1/aiccore/system/status`)
+                const apiBase = getApiBase()
+                const res = await fetch(`${apiBase}/api/v1/aiccore/system/status`)
                 const status = await res.json()
                 if (status.starter_assets_url) {
                     setChallengeAssets(status.starter_assets_url)
@@ -175,8 +175,8 @@ export default function BuilderPage() {
         if (!session || isSubmitting || isSubmitted) return
         setIsSubmitting(true)
         try {
-            const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-            const res = await fetch(`http://${host}:7860/api/v1/aiccore/session/${session.id}/submit`, {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/submit`, {
                 method: "POST"
             })
             if (res.ok) {
@@ -355,7 +355,7 @@ export default function BuilderPage() {
                 )}
 
                 <iframe
-                    src={`http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:5173/?session_id=${session.id}`} // Point to Langflow Frontend Dev Server
+                    src={`${getApiBase().replace(":7860", ":5173")}/?session_id=${session.id}`} // Point to Langflow Frontend Dev Server
                     className={cn(
                         "h-full w-full border-0 transition-opacity duration-700",
                         iframeLoaded ? "opacity-100" : "opacity-0"

@@ -13,7 +13,7 @@ import {
   Zap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 
 type StudentStatus = "REGISTERED" | "PARTICIPATING" | "SUBMITTED"
 
@@ -93,8 +93,8 @@ export function Leaderboard({
 
   const fetchLeaderboard = async () => {
     try {
-      const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-      const response = await fetch(`http://${host}:7860/api/v1/aiccore/leaderboard`)
+      const apiBase = getApiBase()
+      const response = await fetch(`${apiBase}/api/v1/aiccore/leaderboard`)
       const data = await response.json()
       setStudents(data)
       if (onDataUpdate) {
@@ -111,8 +111,9 @@ export function Leaderboard({
     fetchLeaderboard()
     const interval = setInterval(fetchLeaderboard, 5000)
 
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-    const ws = new WebSocket(`ws://${host}:7860/api/v1/aiccore/ws`)
+    const apiBase = getApiBase()
+    const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws";
+    const ws = new WebSocket(wsUrl)
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)

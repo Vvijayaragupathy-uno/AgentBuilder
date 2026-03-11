@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Calendar, MapPin, Users, ArrowRight, Rocket, Shield, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 import Link from "next/link"
 
 interface Challenge {
@@ -26,12 +26,11 @@ export function ChallengesCatalog() {
     const [challenges, setChallenges] = useState<Challenge[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-
     useEffect(() => {
         const fetchChallenges = async () => {
             try {
-                const res = await fetch(`http://${host}:7860/api/v1/aiccore/challenges`)
+                const apiBase = getApiBase()
+                const res = await fetch(`${apiBase}/api/v1/aiccore/challenges`)
                 if (res.ok) setChallenges(await res.json())
             } catch (err) {
                 console.error(err)

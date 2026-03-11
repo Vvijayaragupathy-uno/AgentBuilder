@@ -14,7 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 
 interface Station {
     id: string
@@ -27,11 +27,11 @@ interface Station {
 export function StationStatus() {
     const [stations, setStations] = useState<Station[]>([])
     const [isLoading, setIsLoading] = useState(true)
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
 
     const fetchStations = async () => {
         try {
-            const res = await fetch(`http://${host}:7860/api/v1/aiccore/stations`)
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/stations`)
             if (res.ok) {
                 const data = await res.json()
                 setStations(data)

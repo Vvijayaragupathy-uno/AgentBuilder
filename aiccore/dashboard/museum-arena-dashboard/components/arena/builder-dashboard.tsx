@@ -13,7 +13,7 @@ import { StationStatus } from "./station-status"
 import { LoginPage } from "./login-page"
 import { LiveChallenges } from "./live-challenges"
 import { ChallengesCatalog } from "./challenges-catalog"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 
 export function BuilderDashboard() {
   const [activeTab, setActiveTab] = useState("live")
@@ -31,8 +31,9 @@ export function BuilderDashboard() {
   useEffect(() => {
     if (!isAuthenticated) return
 
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-    const ws = new WebSocket(`ws://${host}:7860/api/v1/aiccore/ws`)
+    const apiBase = getApiBase()
+    const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws";
+    const ws = new WebSocket(wsUrl)
 
     ws.onmessage = (event) => {
       try {
@@ -51,8 +52,8 @@ export function BuilderDashboard() {
   }, [isAuthenticated])
 
   const handleLogin = async (password: string) => {
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-    const response = await fetch(`http://${host}:7860/api/v1/aiccore/auth/admin-login`, {
+    const apiBase = getApiBase()
+    const response = await fetch(`${apiBase}/api/v1/aiccore/auth/admin-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),

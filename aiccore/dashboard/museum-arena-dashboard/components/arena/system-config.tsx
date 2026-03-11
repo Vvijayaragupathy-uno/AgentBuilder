@@ -52,7 +52,7 @@ import {
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 
 interface Challenge {
     id: string
@@ -121,11 +121,12 @@ export function SystemConfig() {
 
     const fetchData = async () => {
         try {
+            const apiBase = getApiBase()
             const [cRes, aRes, sRes, uRes] = await Promise.all([
-                fetch(`http://${host}:7860/api/v1/aiccore/challenges`),
-                fetch(`http://${host}:7860/api/v1/aiccore/achievements`),
-                fetch(`http://${host}:7860/api/v1/aiccore/system/status`),
-                fetch(`http://${host}:7860/api/v1/aiccore/users`)
+                fetch(`${apiBase}/api/v1/aiccore/challenges`),
+                fetch(`${apiBase}/api/v1/aiccore/achievements`),
+                fetch(`${apiBase}/api/v1/aiccore/system/status`),
+                fetch(`${apiBase}/api/v1/aiccore/users`)
             ])
             if (cRes.ok) setChallenges(await cRes.json())
             if (aRes.ok) setAchievements(await aRes.json())
@@ -144,7 +145,8 @@ export function SystemConfig() {
     }, [])
 
     const handleToggleLock = async () => {
-        const res = await fetch(`http://${host}:7860/api/v1/aiccore/system/lock`, { method: "POST" })
+        const apiBase = getApiBase()
+        const res = await fetch(`${apiBase}/api/v1/aiccore/system/lock`, { method: "POST" })
         if (res.ok) {
             const data = await res.json()
             setArenaLocked(data.locked)
@@ -153,7 +155,8 @@ export function SystemConfig() {
 
     const handleBroadcast = async () => {
         if (!broadcastMessage) return
-        const res = await fetch(`http://${host}:7860/api/v1/aiccore/broadcast`, {
+        const apiBase = getApiBase()
+        const res = await fetch(`${apiBase}/api/v1/aiccore/broadcast`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: broadcastMessage })
@@ -166,7 +169,8 @@ export function SystemConfig() {
 
     const handleFinalize = async () => {
         if (!confirm("This will lock all stations and trigger the Award Ceremony! Proceed?")) return
-        const res = await fetch(`http://${host}:7860/api/v1/aiccore/system/finalize`, { method: "POST" })
+        const apiBase = getApiBase()
+        const res = await fetch(`${apiBase}/api/v1/aiccore/system/finalize`, { method: "POST" })
         if (res.ok) {
             setArenaLocked(true)
             fetchData()
@@ -174,16 +178,18 @@ export function SystemConfig() {
     }
 
     const handleExport = () => {
-        window.location.href = `http://${host}:7860/api/v1/aiccore/system/export`
+        const apiBase = getApiBase()
+        window.location.href = `${apiBase}/api/v1/aiccore/system/export`
     }
 
     const handleSaveChallenge = async (e: React.FormEvent) => {
         e.preventDefault()
         setIsSubmitting(true)
         try {
+            const apiBase = getApiBase()
             const url = editingId
-                ? `http://${host}:7860/api/v1/aiccore/challenges/${editingId}`
-                : `http://${host}:7860/api/v1/aiccore/challenges`
+                ? `${apiBase}/api/v1/aiccore/challenges/${editingId}`
+                : `${apiBase}/api/v1/aiccore/challenges`
 
             const res = await fetch(url, {
                 method: editingId ? "PATCH" : "POST",
@@ -219,13 +225,14 @@ export function SystemConfig() {
         formData.append("file", file)
 
         try {
-            const res = await fetch(`http://${host}:7860/api/v1/aiccore/upload`, {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/upload`, {
                 method: "POST",
                 body: formData
             })
             if (res.ok) {
                 const data = await res.json()
-                setChallengeForm(prev => ({ ...prev, bannerImageUrl: `http://${host}:7860${data.url}` }))
+                setChallengeForm(prev => ({ ...prev, bannerImageUrl: `${apiBase}${data.url}` }))
             }
         } catch (err) {
             console.error("Upload failed", err)
@@ -240,13 +247,14 @@ export function SystemConfig() {
         formData.append("file", file)
 
         try {
-            const res = await fetch(`http://${host}:7860/api/v1/aiccore/upload`, {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/upload`, {
                 method: "POST",
                 body: formData
             })
             if (res.ok) {
                 const data = await res.json()
-                setChallengeForm(prev => ({ ...prev, starterAssetsUrl: `http://${host}:7860${data.url}` }))
+                setChallengeForm(prev => ({ ...prev, starterAssetsUrl: `${apiBase}${data.url}` }))
             }
         } catch (err) {
             console.error("Assets upload failed", err)
@@ -299,12 +307,14 @@ export function SystemConfig() {
     }
 
     const handleToggleChallenge = async (id: string) => {
-        await fetch(`http://${host}:7860/api/v1/aiccore/challenges/${id}/toggle`, { method: "POST" })
+        const apiBase = getApiBase()
+        await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle`, { method: "POST" })
         fetchData()
     }
 
     const handleToggleRegistration = async (id: string) => {
-        await fetch(`http://${host}:7860/api/v1/aiccore/challenges/${id}/toggle-registration`, { method: "POST" })
+        const apiBase = getApiBase()
+        await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle-registration`, { method: "POST" })
         fetchData()
     }
 

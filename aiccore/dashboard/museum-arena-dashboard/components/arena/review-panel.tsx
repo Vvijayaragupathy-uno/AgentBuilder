@@ -23,7 +23,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 
 interface Achievement {
   id: string
@@ -94,7 +94,8 @@ function SubmissionCard({
       return
     }
     try {
-      const res = await fetch(`http://${host}:7860/api/v1/aiccore/session/${sub.session_id}/events`)
+      const apiBase = getApiBase()
+      const res = await fetch(`${apiBase}/api/v1/aiccore/session/${sub.session_id}/events`)
       const events = await res.json()
       const snapshots = events.filter((e: any) => (e.event_type === "flow_saved" || e.event_type === "submitted") && e.payload?.snapshot)
       setHistory(snapshots)
@@ -106,7 +107,8 @@ function SubmissionCard({
   }
 
   const handleDownload = () => {
-    window.location.href = `http://${host}:7860/api/v1/aiccore/submissions/${sub.id}/download`
+    const apiBase = getApiBase()
+    window.location.href = `${apiBase}/api/v1/aiccore/submissions/${sub.id}/download`
   }
 
   return (
@@ -199,7 +201,7 @@ function SubmissionCard({
               </DialogHeader>
               <div className="flex-1 bg-zinc-900 overflow-hidden relative">
                 <iframe
-                  src={`http://${host}:5173/?session_id=${sub.session_id}`}
+                  src={`${getApiBase().replace(':7860', ':5173')}/?session_id=${sub.session_id}`}
                   className="w-full h-full border-0"
                   title="Builder Inspection"
                 />
@@ -337,9 +339,10 @@ export function ReviewPanel() {
 
   const fetchData = async () => {
     try {
+      const apiBase = getApiBase()
       const [sRes, aRes] = await Promise.all([
-        fetch(`http://${host}:7860/api/v1/aiccore/submissions`),
-        fetch(`http://${host}:7860/api/v1/aiccore/achievements`)
+        fetch(`${apiBase}/api/v1/aiccore/submissions`),
+        fetch(`${apiBase}/api/v1/aiccore/achievements`)
       ])
 
       if (sRes.ok) {
@@ -396,7 +399,8 @@ export function ReviewPanel() {
 
   async function handlePublishWinner(id: string) {
     try {
-      const res = await fetch(`http://${host}:7860/api/v1/aiccore/submissions/${id}/winner`, {
+      const apiBase = getApiBase()
+      const res = await fetch(`${apiBase}/api/v1/aiccore/submissions/${id}/winner`, {
         method: "POST"
       })
       if (res.ok) {
@@ -409,7 +413,8 @@ export function ReviewPanel() {
 
   async function handleAwardHonor(userId: string, achievementId: string) {
     try {
-      const res = await fetch(`http://${host}:7860/api/v1/aiccore/users/${userId}/award/${achievementId}`, {
+      const apiBase = getApiBase()
+      const res = await fetch(`${apiBase}/api/v1/aiccore/users/${userId}/award/${achievementId}`, {
         method: "POST"
       })
       if (res.ok) {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { FlowPreviewCard } from "./flow-preview-card"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 import { Monitor } from "lucide-react"
 
 interface MosaicSession {
@@ -24,8 +24,7 @@ export function MosaicDisplay() {
         // 1. Fetch initial active sessions
         const fetchSessions = async () => {
             try {
-                const apiBase = process.env.NEXT_PUBLIC_AICCORE_API_URL ||
-                    (typeof window !== 'undefined' ? `http://${window.location.hostname}:7860` : 'http://localhost:7860');
+                const apiBase = getApiBase()
                 const response = await fetch(`${apiBase}/api/v1/aiccore/sessions/active`)
                 const data = await response.json()
 
@@ -73,9 +72,8 @@ export function MosaicDisplay() {
         fetchSessions()
 
         // 2. Connect to WebSocket
-        const apiBase = process.env.NEXT_PUBLIC_AICCORE_API_URL ||
-            (typeof window !== 'undefined' ? `http://${window.location.hostname}:7860` : 'http://localhost:7860');
-        const wsUrl = apiBase.replace("http", "ws") + "/api/v1/aiccore/ws";
+        const apiBase = getApiBase()
+        const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws";
         const ws = new WebSocket(wsUrl)
 
         ws.onmessage = (event) => {

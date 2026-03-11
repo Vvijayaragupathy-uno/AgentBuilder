@@ -5,7 +5,7 @@ import { Rocket, Clock, Users, ArrowRight, ShieldCheck, Zap } from "lucide-react
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 import Link from "next/link"
 
 interface Challenge {
@@ -24,11 +24,10 @@ export function LiveChallenges() {
     const [challenges, setChallenges] = useState<Challenge[]>([])
     const [loading, setLoading] = useState(true)
 
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-
     const fetchChallenges = async () => {
         try {
-            const res = await fetch(`http://${host}:7860/api/v1/aiccore/challenges`)
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/challenges`)
             if (res.ok) {
                 const data = await res.json()
                 // Only show active or open challenges for spectator deck

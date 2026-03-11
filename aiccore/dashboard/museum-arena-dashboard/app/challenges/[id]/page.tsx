@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 import Link from "next/link"
 
 interface Challenge {
@@ -39,7 +39,8 @@ export default function ChallengeDetailsPage() {
     useEffect(() => {
         const fetchChallenge = async () => {
             try {
-                const res = await fetch(`http://${host}:7860/api/v1/aiccore/challenges`)
+                const apiBase = getApiBase()
+                const res = await fetch(`${apiBase}/api/v1/aiccore/challenges`)
                 if (res.ok) {
                     const all = await res.json()
                     const found = all.find((c: any) => c.id === params.id)

@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { cn } from "@/lib/utils"
+import { cn, getApiBase } from "@/lib/utils"
 import {
     Loader2,
     ArrowRight,
@@ -46,8 +46,8 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
         if (view === "register") {
             const fetchChallenges = async () => {
                 try {
-                    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-                    const response = await fetch(`http://${host}:7860/api/v1/aiccore/challenges`)
+                    const apiBase = getApiBase()
+                    const response = await fetch(`${apiBase}/api/v1/aiccore/challenges`)
                     const data = await response.json()
                     setChallenges(Array.isArray(data) ? data : [])
                 } catch (err) {
@@ -66,8 +66,8 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
         setError(null)
 
         try {
-            const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-            const response = await fetch(`http://${host}:7860/api/v1/aiccore/auth/unlock`, {
+            const apiBase = getApiBase()
+            const response = await fetch(`${apiBase}/api/v1/aiccore/auth/unlock`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ unlock_code: code }),
@@ -99,8 +99,8 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
         setError(null)
 
         try {
-            const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-            const response = await fetch(`http://${host}:7860/api/v1/aiccore/users`, {
+            const apiBase = getApiBase()
+            const response = await fetch(`${apiBase}/api/v1/aiccore/users`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
