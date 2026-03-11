@@ -3,11 +3,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Add Langflow backend to path to allow imports from langflow
-# Since langflow is in a subdirectory, we need to point to its source
+# Add Langflow backend and LFX to path to allow imports
 project_root = Path(__file__).resolve().parent.parent.parent
 langflow_src = project_root / "langflow" / "src" / "backend" / "base"
-sys.path.insert(0, str(langflow_src))
+lfx_src = project_root / "langflow" / "src" / "lfx" / "src"
+
+# Ensure these are at the front of sys.path
+for path_to_add in [str(lfx_src), str(langflow_src)]:
+    if path_to_add not in sys.path:
+        sys.path.insert(0, path_to_add)
 
 # Import Langflow's app creator
 from langflow.main import setup_app
