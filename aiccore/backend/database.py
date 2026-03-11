@@ -31,8 +31,13 @@ def _create_schema_if_needed():
     if not DATABASE_URL.startswith(("postgresql", "postgres")):
         return
 
-    # AICCORE tables that were incorrectly placed in 'public' schema
-    OLD_PUBLIC_TABLES = [
+    # Tables to completely remove from 'public' schema to allow a clean boot
+    # Includes AICCORE's old tables AND all Langflow tables
+    # This forces Langflow's create_all() and migrations to start from scratch.
+    TABLES_TO_DROP = [
+        "alembic_version", 
+        "user", "flow", "folder", "message", "variable", "apikey",
+        "transaction", "vertex_build", "job", "flowstyle",
         "event", "submission", "challenge_registration",
         "station", "session", "achievement", "challenge",
     ]
@@ -40,24 +45,13 @@ def _create_schema_if_needed():
     with engine.connect() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
 
-        # Drop old AICCORE tables from public schema (CASCADE to handle FKs)
-        for table in OLD_PUBLIC_TABLES:
-            conn.execute(text(f"DROP TABLE IF EXISTS public.{table} CASCADE"))
-            print(f"🧹 AICCORE cleanup: dropped public.{table} (if existed)")
-
-        # Also remove AICCORE's old custom columns from the Langflow user table
-        # so Langflow's migration check passes cleanly
-        old_user_cols = [
-            ("unlock_code",              "VARCHAR"),
-            ("unlock_code_generated_at", "TIMESTAMP WITH TIME ZONE"),
-            ("honors",                   "JSON"),
-            ("nickname",                 "VARCHAR"),
-            ("created_at",               "TIMESTAMP WITH TIME ZONE"),
-        ]
-        for col, _ in old_user_cols:
-            conn.execute(text(
-                f"ALTER TABLE IF EXISTS public.user DROP COLUMN IF EXISTS {col}"
-            ))
+        # Drop conflicting tables from public schema
+        for table in TABLES_TO_DROP:
+            try:
+                conn.execute(text(f"DROP TABLE IF EXISTS public.{table} CASCADE"))
+                print(f"🧹 AICCORE cleanup: dropped public.{table}")
+            except Exception as e:
+                print(f"⚠️ AICCORE cleanup: could not drop {table}: {e}")
 
         conn.commit()
         print("✅ AICCORE: public schema cleanup complete")
