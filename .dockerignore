@@ -1,47 +1,35 @@
-# Version control
+# Version control & OS
 .git
 .gitignore
-
-# macOS
 .DS_Store
 
-# Python
+# Python artifacts
 __pycache__
 *.pyc
 *.pyo
-*.pyd
 *.egg-info
-*.egg
 dist/
 build/
 .eggs/
 .pytest_cache/
 .mypy_cache/
-.ruff_cache/
 
-# Node / JS (dashboard build artifacts)
+# Node / JS
 node_modules/
 .npm/
 
-# Environment
+# Environment & IDE
 .env
 .env.*
-
-# IDE
 .vscode/
 .idea/
 
-# Temporary files
-/tmp/
-*.log
-
-# Railway / CI
-.railway/
-
 # ─────────────────────────────────────────────
-# CRITICAL: Exclude the ENTIRE langflow monorepo (3.9GB)
-# Only the custom `lfx` package is needed — it is copied explicitly in the Dockerfile
+# Exclude the ENTIRE langflow monorepo (3.9GB)
+# langflow-base is now installed from PyPI — no local files needed
 # ─────────────────────────────────────────────
 langflow/
-!langflow/src/
-!langflow/src/lfx/
+
+# Misc
+*.log
+.railway/
