@@ -1,16 +1,31 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from pathlib import Path
 
-# Use SQLite by default for development
-DEFAULT_DB_URL = "sqlite:///./aiccore.db"
-DATABASE_URL = os.getenv("AICCORE_DATABASE_URL", DEFAULT_DB_URL)
+# AICCORE uses its own env var (AICCORE_DATABASE_URL).
+# Falls back to Railway's DATABASE_URL, then SQLite for local dev.
+_raw_url = os.getenv("AICCORE_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./aiccore.db"
 
-engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-)
+# For Postgres: ensure we use the psycopg2 driver (not psycopg3)
+# and that AICCORE tables are created in a dedicated 'aiccore' schema
+# so Langflow's Alembic checker (which scans only 'public') never sees them.
+if _raw_url.startswith("postgres"):
+    DATABASE_URL = _raw_url.replace("postgresql://", "postgresql+psycopg2://", 1) \
+                           .replace("postgres://", "postgresql+psycopg2://", 1)
+    engine = create_engine(DATABASE_URL)
+
+    # Set search_path so all AICCORE tables land in the 'aiccore' schema
+    @event.listens_for(engine, "connect")
+    def set_search_path(dbapi_conn, conn_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("CREATE SCHEMA IF NOT EXISTS aiccore")
+        cursor.execute("SET search_path TO aiccore")
+        cursor.close()
+        dbapi_conn.commit()
+else:
+    DATABASE_URL = _raw_url
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 def init_db():
     from .models import Base, Challenge

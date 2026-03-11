@@ -14,6 +14,18 @@ ENV PYTHONPATH=/app
 # Run backend-only mode (no frontend to serve)
 ENV AICCORE_BACKEND_ONLY=true
 
+# ── Database separation ───────────────────────────────────────────────────────
+# Both Langflow and AICCORE use the same Railway Postgres, but in DIFFERENT schemas:
+#   Langflow  → LANGFLOW_DATABASE_URL → public schema (its own tables)
+#   AICCORE   → DATABASE_URL → aiccore schema (Session, Challenge, Submission, etc.)
+# Langflow's Alembic checker only scans 'public' — it never sees the 'aiccore' schema.
+#
+# ACTION REQUIRED in Railway dashboard:
+#   Set LANGFLOW_DATABASE_URL = <your Railway Postgres URL>
+#   (AICCORE will automatically use DATABASE_URL that Railway already injects)
+# ─────────────────────────────────────────────────────────────────────────────
+ENV LANGFLOW_AUTO_LOGIN=true
+
 WORKDIR /app
 
 # System deps for psycopg2 (libpq) and compiling native extensions
