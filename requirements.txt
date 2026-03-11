@@ -10,6 +10,7 @@ uvicorn
 gunicorn
 sqlalchemy[postgresql_psycopg2binary]
 psycopg2-binary
+psycopg[binary]
 sqlmodel
 alembic
 pydantic
