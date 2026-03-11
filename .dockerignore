@@ -1,0 +1,39 @@
+# Version control
+.git
+.gitignore
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+*.egg
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / JS (dashboard build artifacts)
+node_modules/
+.npm/
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+/tmp/
+*.log
+
+# Railway / CI
+.railway/
