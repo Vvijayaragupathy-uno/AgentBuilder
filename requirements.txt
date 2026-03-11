@@ -1,10 +1,10 @@
 # Consolidating to essential dependencies for Reliable Railway Deployment
 # Relaxed versioning as requested to allow Railway to resolve best matches
 
-# 1. Local Engine Components (Editable Mode)
--e ./langflow/src/lfx
--e ./langflow/src/backend/base
--e ./langflow
+# 1. Local Engine Components
+langflow/src/lfx
+langflow/src/backend/base
+langflow
 
 # 2. Infrastructure & Core Services
 fastapi

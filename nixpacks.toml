@@ -6,9 +6,9 @@ AICCORE_BACKEND_ONLY = "true"
 [phases.install]
 dependsOn = ["setup"]
 cmds = [
-    "python -m pip install --upgrade pip",
+    "pip install --upgrade pip",
     "pip install -r requirements.txt"
 ]
 
 [start]
-cmd = "python -m uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 4"
+cmd = "uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 4"
