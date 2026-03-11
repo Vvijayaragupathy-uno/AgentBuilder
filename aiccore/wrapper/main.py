@@ -3,8 +3,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# /app/aiccore/wrapper/main.py → parent×3 = /app (project root in container)
+project_root = Path(__file__).resolve().parent.parent.parent
+
 print(f"--- DEBUG: Starting AICCORE Wrapper ---")
 print(f"Current File: {__file__}")
+print(f"Project Root: {project_root}")
 print(f"Python path: {sys.path[:3]}")
 
 
