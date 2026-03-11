@@ -8,10 +8,19 @@ project_root = Path(__file__).resolve().parent.parent.parent
 langflow_src = project_root / "langflow" / "src" / "backend" / "base"
 lfx_src = project_root / "langflow" / "src" / "lfx" / "src"
 
+print(f"--- DEBUG: Starting AICCORE Wrapper ---")
+print(f"Current File: {__file__}")
+print(f"Project Root Detected: {project_root}")
+print(f"Langflow Source: {langflow_src} (Exists: {langflow_src.exists()})")
+print(f"LFX Source: {lfx_src} (Exists: {lfx_src.exists()})")
+
 # Ensure these are at the front of sys.path
 for path_to_add in [str(lfx_src), str(langflow_src)]:
     if path_to_add not in sys.path:
+        print(f"Adding to sys.path: {path_to_add}")
         sys.path.insert(0, path_to_add)
+
+print(f"Final sys.path: {sys.path[:3]}")
 
 # Import Langflow's app creator
 from langflow.main import setup_app
