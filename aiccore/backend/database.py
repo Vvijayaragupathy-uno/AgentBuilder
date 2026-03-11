@@ -17,11 +17,50 @@ else:
 
 
 def _create_schema_if_needed():
-    """Create the 'aiccore' Postgres schema if it doesn't exist yet."""
-    if DATABASE_URL.startswith(("postgresql", "postgres")):
-        with engine.connect() as conn:
-            conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
-            conn.commit()
+    """
+    Create the 'aiccore' Postgres schema and clean up any old AICCORE tables
+    that were accidentally created in the 'public' schema in earlier deploys.
+
+    Why: Before schema separation was added, AICCORE tables (session, challenge,
+    etc.) were created in 'public'. Langflow's Alembic checker sees them, treats
+    them as unknown, and crashes with 'mismatch between models and database'.
+
+    Safe to drop: These are exclusively AICCORE tables. They are immediately
+    recreated in the 'aiccore' schema by Base.metadata.create_all() below.
+    """
+    if not DATABASE_URL.startswith(("postgresql", "postgres")):
+        return
+
+    # AICCORE tables that were incorrectly placed in 'public' schema
+    OLD_PUBLIC_TABLES = [
+        "event", "submission", "challenge_registration",
+        "station", "session", "achievement", "challenge",
+    ]
+
+    with engine.connect() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
+
+        # Drop old AICCORE tables from public schema (CASCADE to handle FKs)
+        for table in OLD_PUBLIC_TABLES:
+            conn.execute(text(f"DROP TABLE IF EXISTS public.{table} CASCADE"))
+            print(f"🧹 AICCORE cleanup: dropped public.{table} (if existed)")
+
+        # Also remove AICCORE's old custom columns from the Langflow user table
+        # so Langflow's migration check passes cleanly
+        old_user_cols = [
+            ("unlock_code",              "VARCHAR"),
+            ("unlock_code_generated_at", "TIMESTAMP WITH TIME ZONE"),
+            ("honors",                   "JSON"),
+            ("nickname",                 "VARCHAR"),
+            ("created_at",               "TIMESTAMP WITH TIME ZONE"),
+        ]
+        for col, _ in old_user_cols:
+            conn.execute(text(
+                f"ALTER TABLE IF EXISTS public.user DROP COLUMN IF EXISTS {col}"
+            ))
+
+        conn.commit()
+        print("✅ AICCORE: public schema cleanup complete")
 
 
 def init_db():
