@@ -37,3 +37,11 @@ node_modules/
 
 # Railway / CI
 .railway/
+
+# ─────────────────────────────────────────────
+# CRITICAL: Exclude the ENTIRE langflow monorepo (3.9GB)
+# Only the custom `lfx` package is needed — it is copied explicitly in the Dockerfile
+# ─────────────────────────────────────────────
+langflow/
+!langflow/src/
+!langflow/src/lfx/

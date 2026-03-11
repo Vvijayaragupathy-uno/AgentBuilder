@@ -12,25 +12,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     curl \
     git \
-    && rm -rf /var/lib/apt/lib/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
 WORKDIR /app
 
-# Copy the entire project structure
-# This ensures that the local paths needed by pip are available
-COPY . /app/
+# Step 1: Install langflow + langflow-base from PyPI (fast, no source needed)
+# These are the published versions matching our local monorepo
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        "langflow==1.8.0" \
+        "langflow-base==0.8.0"
 
-# Upgrade pip
-RUN pip install --no-cache-dir --upgrade pip
+# Step 2: Copy ONLY the custom lfx package (small, not on PyPI)
+COPY langflow/src/lfx /app/langflow/src/lfx
+RUN pip install --no-cache-dir /app/langflow/src/lfx
 
-# Install local engine components in the correct order
-# We do this explicitly to guarantee they are found and installed
-RUN pip install --no-cache-dir ./langflow/src/lfx && \
-    pip install --no-cache-dir ./langflow/src/backend/base && \
-    pip install --no-cache-dir ./langflow
+# Step 3: Copy the AICCORE application code
+COPY aiccore /app/aiccore
+COPY requirements.txt /app/requirements.txt
 
-# Install remaining requirements
+# Step 4: Install remaining application dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose the port used by the FastAPI wrapper
