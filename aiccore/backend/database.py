@@ -18,43 +18,39 @@ else:
 
 def _create_schema_if_needed():
     """
-    Create the 'aiccore' Postgres schema and clean up any old AICCORE tables
-    that were accidentally created in the 'public' schema in earlier deploys.
-
-    Why: Before schema separation was added, AICCORE tables (session, challenge,
-    etc.) were created in 'public'. Langflow's Alembic checker sees them, treats
-    them as unknown, and crashes with 'mismatch between models and database'.
-
-    Safe to drop: These are exclusively AICCORE tables. They are immediately
-    recreated in the 'aiccore' schema by Base.metadata.create_all() below.
+    Nuclear Reset: Drops ALL tables in the 'public' schema and creates 'aiccore' schema.
+    
+    Why: Langflow 1.8.0 crashes if any tables exist in 'public' that are even 
+    slightly out of sync with its models. Identifying every single table name 
+    (file, sso_config, etc.) is a game of Whac-A-Mole. 
+    
+    This function discovers every table in 'public' and drops it, ensuring 
+    Langflow gets the 100% clean slate it requires to boot.
     """
     if not DATABASE_URL.startswith(("postgresql", "postgres")):
         return
 
-    # Tables to completely remove from 'public' schema to allow a clean boot
-    # Includes AICCORE's old tables AND all Langflow tables
-    # This forces Langflow's create_all() and migrations to start from scratch.
-    TABLES_TO_DROP = [
-        "alembic_version", 
-        "user", "flow", "folder", "message", "variable", "apikey",
-        "transaction", "vertex_build", "job", "flowstyle",
-        "event", "submission", "challenge_registration",
-        "station", "session", "achievement", "challenge",
-    ]
-
     with engine.connect() as conn:
+        # 1. Ensure aiccore schema exists
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
 
-        # Drop conflicting tables from public schema
-        for table in TABLES_TO_DROP:
-            try:
-                conn.execute(text(f"DROP TABLE IF EXISTS public.{table} CASCADE"))
-                print(f"🧹 AICCORE cleanup: dropped public.{table}")
-            except Exception as e:
-                print(f"⚠️ AICCORE cleanup: could not drop {table}: {e}")
+        # 2. Discover all tables in the 'public' schema
+        result = conn.execute(text(
+            "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
+        ))
+        public_tables = [row[0] for row in result]
 
+        if public_tables:
+            print(f"☢️  AICCORE Nuclear Reset: Found {len(public_tables)} tables in public schema.")
+            for table in public_tables:
+                try:
+                    conn.execute(text(f"DROP TABLE public.\"{table}\" CASCADE"))
+                    print(f"🧹 Dropped public.{table}")
+                except Exception as e:
+                    print(f"⚠️ Failed to drop public.{table}: {e}")
+        
         conn.commit()
-        print("✅ AICCORE: public schema cleanup complete")
+        print("✅ AICCORE: public schema cleanup complete.")
 
 
 def init_db():
