@@ -2,9 +2,7 @@
 # Relaxed versioning as requested to allow Railway to resolve best matches
 
 # 1. Local Engine Components
-./langflow/src/lfx
-./langflow/src/backend/base
-./langflow
+# (Installed via nixpacks.toml for reliability)
 
 # 2. Infrastructure & Core Services
 fastapi

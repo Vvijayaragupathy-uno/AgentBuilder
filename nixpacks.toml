@@ -6,8 +6,15 @@ AICCORE_BACKEND_ONLY = "true"
 [phases.install]
 dependsOn = ["setup"]
 cmds = [
-    "ls -R langflow/src/lfx | head -n 5",
+    "echo '--- Diagnostics ---'",
+    "pwd",
+    "ls -F",
+    "ls -F langflow/src/",
+    "echo '--- Installing Dependencies ---'",
     "pip install --upgrade pip",
+    "pip install ./langflow/src/lfx",
+    "pip install ./langflow/src/backend/base",
+    "pip install ./langflow",
     "pip install -r requirements.txt"
 ]
 
