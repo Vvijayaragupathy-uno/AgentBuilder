@@ -1,25 +1,40 @@
 # Consolidating to essential dependencies for Reliable Railway Deployment
 # Focused on Core Engine + Major LLM Providers (Python 3.11)
 
-# 1. Infrastructure & Database
+# 1. Infrastructure & Core Services
 fastapi>=0.115.2
 uvicorn>=0.30.0
 gunicorn>=22.0.0
 sqlalchemy[postgresql_psycopg2binary]>=2.0.38
 psycopg2-binary
-sqlmodel>=0.0.22
+sqlmodel==0.0.22
 alembic>=1.13.0
-pydantic>=2.11.0
+pydantic~=2.11.0
 pydantic-settings>=2.2.0
 python-dotenv>=1.0.0
 loguru>=0.7.3
+structlog>=25.4.0
 httpx[http2]>=0.27.0
 python-multipart>=0.0.12
 passlib>=1.7.4
-bcrypt>=4.0.1
+bcrypt==4.0.1
 filelock>=3.20.1
 fastapi-pagination>=0.13.1
 networkx>=3.4.2
+validators>=0.34.0
+cryptography>=43.0.0
+ag-ui-protocol>=0.1.10
+nanoid>=2.0.0
+nest-asyncio>=1.6.0
+platformdirs>=4.2.0
+cachetools>=6.0.0
+emoji>=2.12.0
+chardet>=5.2.0
+defusedxml>=0.7.1
+pypdf>=6.4.0
+python-docx>=1.1.0
+json-repair>=0.30.3
+markitdown>=0.1.4
 
 # 2. Langflow Core & LangChain Essentials
 langchain>=0.3.27
@@ -30,6 +45,8 @@ langchain-experimental>=0.3.0
 langchain-openai>=0.3.0
 langchain-anthropic>=0.3.0
 langchain-google-genai>=2.0.0
+langchain-google-vertexai>=2.0.7
+langchain-google-community>=2.0.3
 
 # 3. Data & Utilities 
 pandas>=2.0.0
@@ -45,16 +62,19 @@ rich>=13.7.0
 typer>=0.13.0
 tomli>=2.0.0
 typing-extensions>=4.0.0
-platformdirs>=4.2.0
-cachetools>=6.0.0
-emoji>=2.12.0
-chardet>=5.2.0
-defusedxml>=0.7.1
-pypdf>=6.4.0
-python-docx>=1.1.0
-json-repair>=0.30.3
-nanoid>=2.0.0
-markitdown>=0.1.4
+greenlet>=3.1.1
+multiprocess>=0.70.14
+duckdb>=1.0.0
+jq>=1.7.0
+pyperclip>=1.8.2
+uncurl>=0.0.11
+grandalf>=0.8.0
+diskcache>=5.6.3
+clickhouse-connect==0.7.19
+assemblyai>=0.33.0
+mcp>=1.17.0
+jsonquerylang>=1.1.1
+jaraco-context>=6.1.0
 
 # 4. LLM & Connectivity
 openai>=1.0.0
@@ -63,3 +83,11 @@ google-generativeai
 huggingface-hub
 simplejson
 pyyaml
+
+# 5. Monitoring & Telemetry
+sentry-sdk[fastapi,loguru]>=2.5.1
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-prometheus>=0.46b0
+opentelemetry-instrumentation-fastapi>=0.46b0
+prometheus-client>=0.20.0
