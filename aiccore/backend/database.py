@@ -1,34 +1,32 @@
 import os
-from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import sessionmaker, Session
-from pathlib import Path
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 # AICCORE uses its own env var (AICCORE_DATABASE_URL).
 # Falls back to Railway's DATABASE_URL, then SQLite for local dev.
 _raw_url = os.getenv("AICCORE_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./aiccore.db"
 
-# For Postgres: ensure we use the psycopg2 driver (not psycopg3)
-# and that AICCORE tables are created in a dedicated 'aiccore' schema
-# so Langflow's Alembic checker (which scans only 'public') never sees them.
 if _raw_url.startswith("postgres"):
+    # Ensure psycopg2 driver (not psycopg3) and fix scheme
     DATABASE_URL = _raw_url.replace("postgresql://", "postgresql+psycopg2://", 1) \
                            .replace("postgres://", "postgresql+psycopg2://", 1)
     engine = create_engine(DATABASE_URL)
-
-    # Set search_path so all AICCORE tables land in the 'aiccore' schema
-    @event.listens_for(engine, "connect")
-    def set_search_path(dbapi_conn, conn_record):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("CREATE SCHEMA IF NOT EXISTS aiccore")
-        cursor.execute("SET search_path TO aiccore")
-        cursor.close()
-        dbapi_conn.commit()
 else:
     DATABASE_URL = _raw_url
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
+
+def _create_schema_if_needed():
+    """Create the 'aiccore' Postgres schema if it doesn't exist yet."""
+    if DATABASE_URL.startswith(("postgresql", "postgres")):
+        with engine.connect() as conn:
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
+            conn.commit()
+
+
 def init_db():
-    from .models import Base, Challenge
+    from .models import Base, Challenge, Participant
+    _create_schema_if_needed()        # ensure aiccore schema exists before create_all
     Base.metadata.create_all(engine)
     
     # Populate default challenges if none exist (Google Standard Onboarding)
