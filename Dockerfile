@@ -51,4 +51,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 7860
 
 # Use sh -c so Railway's $PORT env var gets expanded by the shell
-CMD ["sh", "-c", "uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 4"]
+CMD ["sh", "-c", "python -m uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]

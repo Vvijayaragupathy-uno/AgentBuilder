@@ -18,14 +18,11 @@ else:
 
 def _create_schema_if_needed():
     """
-    Nuclear Reset: Drops ALL tables in the 'public' schema and creates 'aiccore' schema.
+    Nuclear Reset with Race-Condition Protection.
     
-    Why: Langflow 1.8.0 crashes if any tables exist in 'public' that are even 
-    slightly out of sync with its models. Identifying every single table name 
-    (file, sso_config, etc.) is a game of Whac-A-Mole. 
-    
-    This function discovers every table in 'public' and drops it, ensuring 
-    Langflow gets the 100% clean slate it requires to boot.
+    Why: Multi-worker uvicorn (e.g. workers=5) triggers this concurrently.
+    We use a 'deployment_lock' table in the 'aiccore' schema as a sentinel.
+    If the table exists, we assume cleanup already happened and skip it.
     """
     if not DATABASE_URL.startswith(("postgresql", "postgres")):
         return
@@ -33,24 +30,40 @@ def _create_schema_if_needed():
     with engine.connect() as conn:
         # 1. Ensure aiccore schema exists
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
+        conn.commit()
 
-        # 2. Discover all tables in the 'public' schema
+        # 2. Check if we already cleaned up this deployment
+        # We look for a sentinel table in our isolated schema
+        result = conn.execute(text(
+            "SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'aiccore' AND tablename = 'deployment_lock'"
+        ))
+        if result.first():
+            print("🚀 AICCORE: Cleanup already performed, skipping nuclear reset.")
+            return
+
+        # 3. Discover all tables in the 'public' schema
         result = conn.execute(text(
             "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
         ))
         public_tables = [row[0] for row in result]
 
         if public_tables:
-            print(f"☢️  AICCORE Nuclear Reset: Found {len(public_tables)} tables in public schema.")
+            print(f"☢️  AICCORE Nuclear Reset: Found {len(public_tables)} tables in public. Resetting...")
             for table in public_tables:
                 try:
+                    # Use a separate transaction for each drop to handle 'current transaction is aborted' errors
                     conn.execute(text(f"DROP TABLE public.\"{table}\" CASCADE"))
-                    print(f"🧹 Dropped public.{table}")
+                    conn.commit()
+                    print(f"  🧹 Dropped public.{table}")
                 except Exception as e:
-                    print(f"⚠️ Failed to drop public.{table}: {e}")
-        
+                    # Rollback if it failed so the NEXT drop can proceed
+                    conn.rollback()
+                    print(f"  ⚠️ Skipping public.{table} (maybe already dropped?): {e}")
+
+        # 4. Create the sentinel so other workers skip this next time
+        conn.execute(text("CREATE TABLE aiccore.deployment_lock (id SERIAL PRIMARY KEY, cleaned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"))
         conn.commit()
-        print("✅ AICCORE: public schema cleanup complete.")
+        print("✅ AICCORE: Public schema cleanup complete. Lock created.")
 
 
 def init_db():
