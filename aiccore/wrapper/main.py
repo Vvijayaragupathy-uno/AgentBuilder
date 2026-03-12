@@ -151,11 +151,25 @@ def create_aiccore_app():
         # We need to remove these to allow embedding in the arena dashboard
         if "X-Frame-Options" in response.headers:
             del response.headers["X-Frame-Options"]
-        # Adjust CSP to allow framing from our own domain/localhost
+        # Build the list of allowed frame-ancestor origins dynamically
+        frame_ancestors = [
+            "'self'",
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+        ]
+        # Include Railway service URLs when available
+        dashboard_url = os.getenv("RAILWAY_SERVICE_AICCORE_DASHBOARD_URL")
+        if dashboard_url:
+            frame_ancestors.append(f"https://{dashboard_url}")
+        happy_cat_url = os.getenv("RAILWAY_SERVICE_HAPPY_CAT_URL")
+        if happy_cat_url:
+            frame_ancestors.append(f"https://{happy_cat_url}")
+
         csp = response.headers.get("Content-Security-Policy", "")
         if csp:
-            # Add frame-ancestors to allow our dashboard
-            new_csp = csp + " frame-ancestors 'self' http://localhost:3000 http://localhost:3001 http://127.0.0.1:3000 http://127.0.0.1:3001;"
+            new_csp = csp + " frame-ancestors " + " ".join(frame_ancestors) + ";"
             response.headers["Content-Security-Policy"] = new_csp
         return response
 
