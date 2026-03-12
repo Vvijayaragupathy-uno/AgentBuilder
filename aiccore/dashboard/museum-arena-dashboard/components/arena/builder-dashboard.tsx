@@ -62,7 +62,8 @@ export function BuilderDashboard() {
     if (response.ok) {
       setIsAuthenticated(true)
     } else {
-      throw new Error("Invalid administrator passcode")
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || "Invalid administrator passcode")
     }
   }
 

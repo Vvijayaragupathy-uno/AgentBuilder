@@ -104,10 +104,11 @@ def create_aiccore_app():
     app = setup_app(backend_only=backend_only)
 
     # Enable CORS for the Dashboard (Broadened for Local Arena Deployment)
+    # Note: allow_origins=["*"] is restricted when allow_credentials=True
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"], # Allow all origins for local network flexibility
-        allow_credentials=True,
+        allow_origins=["*"],
+        allow_credentials=False, # Changed to False to allow "*" wildcard on Railway
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -911,7 +912,9 @@ def create_aiccore_app():
     async def admin_login(req: AdminLoginRequest):
         # Professional standard: Simple admin pass for museum local LAN
         # In a real cloud app, we'd use proper hashes
-        if req.password == "aiccore2024":
+        admin_pass = os.getenv("AICCORE_ADMIN_PASS", "aiccore2024")
+        
+        if req.password == admin_pass:
             from fastapi.responses import JSONResponse
             res = JSONResponse(content={"status": "authenticated", "role": "admin"})
             res.set_cookie(
@@ -922,6 +925,8 @@ def create_aiccore_app():
                 max_age=86400 # 1 day
             )
             return res
+        
+        print(f"❌ Admin login failed: Incorrect password attempt.")
         raise HTTPException(status_code=401, detail="Invalid admin password")
 
     # Removed duplicate @app.get("/api/v1/aiccore/users")
