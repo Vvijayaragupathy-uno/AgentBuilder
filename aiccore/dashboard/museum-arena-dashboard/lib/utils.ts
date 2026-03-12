@@ -26,3 +26,22 @@ export function getApiBase() {
   }
   return 'http://localhost:7860'
 }
+
+export function getLangflowUrl() {
+  const envUrl = process.env.NEXT_PUBLIC_LANGFLOW_URL
+  if (envUrl) {
+    return envUrl
+  }
+
+  // Fallback for local development
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol
+    const hostname = window.location.hostname
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return `${protocol}//${hostname}:5173`
+    }
+  }
+
+  // Last resort fallback
+  return 'http://localhost:5173'
+}

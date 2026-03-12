@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { Shield, Rocket, RefreshCw, Trophy, CheckCircle2, Zap, BarChart3, Medal, Megaphone, X, FileText, Clock } from "lucide-react"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, getApiBase, getLangflowUrl } from "@/lib/utils"
 
 export default function BuilderPage() {
     const [session, setSession] = useState<{ id: string; nickname: string } | null>(null)
@@ -355,7 +355,7 @@ export default function BuilderPage() {
                 )}
 
                 <iframe
-                    src={`${getApiBase().replace(":7860", ":5173")}/?session_id=${session.id}`} // Point to Langflow Frontend Dev Server
+                    src={`${getLangflowUrl()}/?session_id=${session.id}`} // Support dynamic Langflow Engine UI URL
                     className={cn(
                         "h-full w-full border-0 transition-opacity duration-700",
                         iframeLoaded ? "opacity-100" : "opacity-0"
