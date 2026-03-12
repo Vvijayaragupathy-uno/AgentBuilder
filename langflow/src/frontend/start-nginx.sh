@@ -5,15 +5,10 @@ case "$BACKEND_URL" in
     http://*|https://*) ;;
     *) 
         if [ -n "$BACKEND_URL" ]; then
-            # If it's a Railway internal address, it should be http and usually port 7860
+            # If it's a Railway internal address, it should be http
             if echo "$BACKEND_URL" | grep -q ".internal"; then
                 echo "Info: Internal address detected. Prepending http://"
                 export BACKEND_URL="http://$BACKEND_URL"
-                # Add port 7860 if no port is specified
-                if ! echo "$BACKEND_URL" | grep -q ":[0-9]*$"; then
-                    echo "Info: No port detected. Adding default port :7860"
-                    export BACKEND_URL="$BACKEND_URL:7860"
-                fi
             else
                 echo "Info: Public address assumed. Prepending https://"
                 export BACKEND_URL="https://$BACKEND_URL"
