@@ -18,7 +18,7 @@ case "$BACKEND_URL" in
 esac
 
 # Set default backend URL if not provided (internal Railway hostname)
-export BACKEND_URL=${BACKEND_URL:-"http://agentbuilder.railway.internal:8080"}
+export BACKEND_URL=${BACKEND_URL:-"http://agentbuilder.railway.internal"}
 
 # Handle Railway dynamic PORT environment variable
 CONTAINER_PORT=${PORT:-80}
