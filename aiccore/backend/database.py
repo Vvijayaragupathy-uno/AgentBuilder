@@ -28,7 +28,13 @@ def _create_schema_if_needed():
         return
 
     with engine.connect() as conn:
-        # 1. Ensure aiccore schema exists
+        # 1. Force Reset if requested (fixes stale constraints/indexes)
+        if os.getenv("AICCORE_RESET_DB") == "true":
+            print("☢️  AICCORE Force Reset: Dropping 'aiccore' schema...")
+            conn.execute(text("DROP SCHEMA IF EXISTS aiccore CASCADE"))
+            conn.commit()
+
+        # 2. Ensure aiccore schema exists
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
         conn.commit()
 
