@@ -92,6 +92,53 @@ class StationRegisterRequest(BaseModel):
     id: str
     ip_address: str
 
+def _patch_langflow_auth():
+    """
+    Monkey-patch the installed langflow-base auth service so that
+    LANGFLOW_AUTO_LOGIN=true + LANGFLOW_SKIP_AUTH_AUTO_LOGIN=true also bypasses
+    JWT/cookie authentication (not only API-key auth as upstream ships it).
+
+    Without this patch, Langflow's React frontend fires authenticated requests
+    (whoami, variables/, projects/) concurrently with auto_login.  Those
+    requests arrive before the browser has stored the access_token_lf cookie
+    and receive 403 — leaving the UI stuck on initialisation.
+
+    The patch is applied here, at import time, so it covers all FastAPI routes
+    regardless of when they were registered.
+    """
+    try:
+        from langflow.services.auth.service import AuthService
+        from langflow.services.auth.constants import AUTO_LOGIN_WARNING
+        from langflow.services.auth.exceptions import MissingCredentialsError
+        from langflow.services.database.models.user.model import UserRead
+        from langflow.services.database.models.user.crud import get_user_by_username
+        from lfx.log.logger import logger
+
+        _original = AuthService.authenticate_with_credentials
+
+        async def _patched(self, token, api_key, db):
+            try:
+                return await _original(self, token, api_key, db)
+            except MissingCredentialsError:
+                # When no credentials are present, honour skip_auth_auto_login
+                # for ALL auth paths (not just the API-key path as shipped).
+                s = self.settings.auth_settings
+                if s.AUTO_LOGIN and s.skip_auth_auto_login and s.SUPERUSER:
+                    result = await get_user_by_username(db, s.SUPERUSER)
+                    if result:
+                        logger.warning(AUTO_LOGIN_WARNING)
+                        return UserRead.model_validate(result, from_attributes=True)
+                raise
+
+        AuthService.authenticate_with_credentials = _patched
+        print("✅ AICCORE Auth Patch: skip_auth_auto_login extended to JWT path.")
+    except Exception as e:
+        print(f"⚠️ AICCORE Auth Patch failed (non-fatal): {e}")
+
+
+_patch_langflow_auth()
+
+
 def create_aiccore_app():
     """
     Creates the AICCORE application by wrapping the Langflow setup_app.
