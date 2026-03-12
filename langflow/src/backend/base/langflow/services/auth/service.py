@@ -128,7 +128,20 @@ class AuthService(BaseAuthService):
                 msg = "API key authentication failed"
                 raise InvalidCredentialsError(msg) from e
 
-        # No credentials provided
+        # No credentials provided — check AUTO_LOGIN + skip_auth_auto_login before raising
+        # This covers the race condition where the browser fires authenticated requests
+        # concurrently with auto_login, before the resulting cookie has been stored.
+        settings_service = self.settings
+        if (
+            settings_service.auth_settings.AUTO_LOGIN
+            and settings_service.auth_settings.skip_auth_auto_login
+            and settings_service.auth_settings.SUPERUSER
+        ):
+            result = await get_user_by_username(db, settings_service.auth_settings.SUPERUSER)
+            if result:
+                logger.warning(AUTO_LOGIN_WARNING)
+                return UserRead.model_validate(result, from_attributes=True)
+
         msg = "No authentication credentials provided"
         raise MissingCredentialsError(msg)
 
