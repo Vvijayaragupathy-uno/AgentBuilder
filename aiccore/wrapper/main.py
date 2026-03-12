@@ -103,12 +103,31 @@ def create_aiccore_app():
     print(f"🚀 Starting Langflow with backend_only={backend_only}")
     app = setup_app(backend_only=backend_only)
 
-    # Enable CORS for the Dashboard (Broadened for Local Arena Deployment)
-    # Note: allow_origins=["*"] is restricted when allow_credentials=True
+    # Dynamic origins for CORS
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ]
+    
+    # Add Railway service URLs if they exist
+    dashboard_url = os.getenv("RAILWAY_SERVICE_AICCORE_DASHBOARD_URL")
+    if dashboard_url:
+        allowed_origins.append(f"https://{dashboard_url}")
+        
+    langflow_url = os.getenv("RAILWAY_SERVICE_HAPPY_CAT_URL")
+    if langflow_url:
+        allowed_origins.append(f"https://{langflow_url}")
+
+    # Allow the specific internal domain too if used by frontend
+    allowed_origins.append("http://agentbuilder.railway.internal")
+    allowed_origins.append("http://agentbuilder.railway.internal:8080")
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False, # Changed to False to allow "*" wildcard on Railway
+        allow_origins=allowed_origins,
+        allow_credentials=True, # Required for cookies/auth with explicit origins
         allow_methods=["*"],
         allow_headers=["*"],
     )
