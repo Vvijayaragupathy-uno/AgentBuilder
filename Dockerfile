@@ -25,6 +25,11 @@ ENV AICCORE_BACKEND_ONLY=true
 #   (AICCORE will automatically use DATABASE_URL that Railway already injects)
 # ─────────────────────────────────────────────────────────────────────────────
 ENV LANGFLOW_AUTO_LOGIN=true
+# Required alongside AUTO_LOGIN: makes skip_auth_auto_login apply to all
+# auth paths (JWT + API-key), not just API-key. Without this the Langflow
+# React frontend gets 403 on whoami/variables/projects during initialisation
+# because those requests race ahead of the auto_login cookie being stored.
+ENV LANGFLOW_SKIP_AUTH_AUTO_LOGIN=true
 
 WORKDIR /app
 

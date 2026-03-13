@@ -6,10 +6,7 @@ from pathlib import Path
 # /app/aiccore/wrapper/main.py → parent×3 = /app (project root in container)
 project_root = Path(__file__).resolve().parent.parent.parent
 
-print(f"--- DEBUG: Starting AICCORE Wrapper ---")
-print(f"Current File: {__file__}")
-print(f"Project Root: {project_root}")
-print(f"Python path: {sys.path[:3]}")
+print(f"🚀 AICCORE Wrapper starting — root: {project_root}")
 
 
 # Import Langflow's app creator
@@ -52,6 +49,7 @@ class UserCreateRequest(BaseModel):
     username: str
     nickname: Optional[str] = None
     password: Optional[str] = None
+    challenge_id: Optional[str] = None
 
 class AdminLoginRequest(BaseModel):
     password: str
@@ -166,10 +164,6 @@ def create_aiccore_app():
     langflow_url = os.getenv("RAILWAY_SERVICE_HAPPY_CAT_URL")
     if langflow_url:
         allowed_origins.append(f"https://{langflow_url}")
-
-    # Allow the specific internal domain too if used by frontend
-    allowed_origins.append("http://agentbuilder.railway.internal")
-    allowed_origins.append("http://agentbuilder.railway.internal:8080")
 
     app.add_middleware(
         CORSMiddleware,
@@ -990,10 +984,10 @@ def create_aiccore_app():
 
     @app.post("/api/v1/aiccore/auth/admin-login")
     async def admin_login(req: AdminLoginRequest):
-        # Professional standard: Simple admin pass for museum local LAN
-        # In a real cloud app, we'd use proper hashes
-        admin_pass = os.getenv("AICCORE_ADMIN_PASS", "aiccore2024")
-        
+        admin_pass = os.getenv("AICCORE_ADMIN_PASS")
+        if not admin_pass:
+            raise HTTPException(status_code=503, detail="Admin authentication not configured. Set AICCORE_ADMIN_PASS.")
+
         if req.password == admin_pass:
             from fastapi.responses import JSONResponse
             res = JSONResponse(content={"status": "authenticated", "role": "admin"})
@@ -1076,9 +1070,22 @@ def create_aiccore_app():
                 unlock_code_generated_at=datetime.now(timezone.utc)
             )
             db_session.add(new_user)
+            db_session.flush()  # get new_user.id before committing
+
+            # Register the user to the chosen challenge if provided
+            if req.challenge_id:
+                try:
+                    challenge_uuid = UUID(req.challenge_id)
+                    challenge = db_session.get(Challenge, challenge_uuid)
+                    if challenge:
+                        reg = ChallengeRegistration(user_id=new_user.id, challenge_id=challenge_uuid)
+                        db_session.add(reg)
+                except (ValueError, TypeError):
+                    pass  # invalid UUID — ignore silently
+
             db_session.commit()
             db_session.refresh(new_user)
-            
+
             # Broadcast registry update
             await broadcast_manager.broadcast({"type": "REGISTRY_UPDATE", "data": {"user_id": str(new_user.id)}})
             
@@ -1136,10 +1143,13 @@ def create_aiccore_app():
     @app.post("/api/v1/aiccore/sync/push")
     async def push_to_cloud():
         """
-        Simulates the Sync Gateway pushing winners and honors to the cloud.
-        In a real deployment, this would be a background task calling an external API.
+        Returns the current arena state. Background sync to an external cloud hub
+        is handled automatically by the sync_to_cloud() worker when
+        AICCORE_CLOUD_API_URL is configured.
         """
-        return {"status": "synced", "items_pushed": 5, "timestamp": datetime.now(timezone.utc).isoformat()}
+        from aiccore.backend.sync import get_arena_state
+        state = await get_arena_state()
+        return {"status": "ok", "data": state}
 
     # Attach AICCORE Telemetry Middleware
     app.add_middleware(AICCoreEventMiddleware)
