@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
-import { Shield, Rocket, RefreshCw, Trophy, CheckCircle2, Zap, BarChart3, Medal, Megaphone, X, FileText, Clock } from "lucide-react"
+import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut } from "lucide-react"
 import { cn, getApiBase, getLangflowUrl } from "@/lib/utils"
 
 export default function BuilderPage() {
@@ -16,6 +16,8 @@ export default function BuilderPage() {
     const [timeLeft, setTimeLeft] = useState<number | null>(null)
     const [challengeInfo, setChallengeInfo] = useState<{ start_time: string; duration: number } | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [hasActiveChallenge, setHasActiveChallenge] = useState(false)
+    const [isBeforeStart, setIsBeforeStart] = useState(false)
 
     // Handle unlock from LockScreen
     const handleUnlock = (sessionId: string, nickname: string, userStats?: any) => {
@@ -138,11 +140,15 @@ export default function BuilderPage() {
                 if (status.starter_assets_url) {
                     setChallengeAssets(status.starter_assets_url)
                 }
+                // Track whether there is any active challenge at all
+                setHasActiveChallenge(!!status.active_challenge)
                 if (status.start_time && status.duration_minutes) {
                     setChallengeInfo({
                         start_time: status.start_time,
                         duration: status.duration_minutes
                     })
+                    // Pre-compute before-start so the UI is correct on first render
+                    setIsBeforeStart(Date.now() < new Date(status.start_time).getTime())
                 }
             } catch (e) { }
         }
@@ -157,8 +163,16 @@ export default function BuilderPage() {
             const start = new Date(challengeInfo.start_time).getTime()
             const end = start + (challengeInfo.duration * 60 * 1000)
             const now = Date.now()
-            const remaining = Math.max(0, Math.floor((end - now) / 1000))
 
+            // Event hasn't started yet — show "awaiting start" state, no countdown
+            if (now < start) {
+                setIsBeforeStart(true)
+                setTimeLeft(null)
+                return
+            }
+
+            setIsBeforeStart(false)
+            const remaining = Math.max(0, Math.floor((end - now) / 1000))
             setTimeLeft(remaining)
 
             if (remaining === 0 && !isSubmitted && !isSystemLocked) {
@@ -206,42 +220,39 @@ export default function BuilderPage() {
             <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] overflow-hidden">
                 <div className="absolute inset-0 bg-primary/5 [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]" />
 
-                <div className="relative flex flex-col items-center gap-8 text-center p-8 max-w-lg z-20">
-                    <div className="relative group">
-                        <div className="absolute -inset-8 rounded-full bg-primary/20 blur-3xl opacity-50 group-hover:opacity-100 transition-opacity" />
-                        <div className="relative flex h-32 w-32 items-center justify-center rounded-3xl bg-black ring-1 ring-white/10 shadow-2xl">
-                            {isSystemLocked ? <Trophy className="h-16 w-16 text-amber-400 animate-bounce" /> : <Trophy className="h-16 w-16 text-amber-400" />}
-                        </div>
-                    </div>
+                <div className="relative flex flex-col items-center gap-6 text-center p-8 max-w-md z-20">
+                    <Trophy className="h-16 w-16 text-amber-400" />
 
-                    <div className="space-y-3">
-                        <h1 className="text-5xl font-black tracking-tighter uppercase italic leading-none">
-                            {isSystemLocked ? "Station Locked" : "Mission Complete"}
+                    <div className="space-y-2">
+                        <h1 className="text-3xl font-bold text-foreground">
+                            {isSystemLocked ? "Time's Up" : "All Done!"}
                         </h1>
-                        <p className="text-muted-foreground font-medium leading-relaxed">
-                            {isSystemLocked ? "The mission window has closed. All stations are locked for evaluation." : "Agent successfully deployed to the AICCORE Registry!"}
+                        <p className="text-muted-foreground leading-relaxed">
+                            {isSystemLocked
+                                ? "The challenge has ended. Your work has been saved."
+                                : "Your work has been submitted successfully. Great job!"}
                         </p>
                     </div>
 
-                    <div className="w-full mt-4 flex flex-col gap-2 rounded-2xl bg-secondary/50 p-6 ring-1 ring-border">
-                        <div className="flex items-center justify-between gap-4">
-                            <span className="text-sm text-muted-foreground uppercase font-bold tracking-widest">Builder</span>
-                            <span className="text-lg font-black text-foreground">{session.nickname}</span>
+                    <div className="w-full flex flex-col gap-2 rounded-2xl bg-secondary/50 p-5 ring-1 ring-border">
+                        <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Participant</span>
+                            <span className="text-sm font-semibold text-foreground">{session.nickname}</span>
                         </div>
-                        <div className="flex items-center justify-between gap-4 border-t border-border pt-2 mt-2">
-                            <span className="text-sm text-muted-foreground uppercase font-bold tracking-widest">Status</span>
-                            <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                        <div className="flex items-center justify-between border-t border-border pt-2 mt-1">
+                            <span className="text-sm text-muted-foreground">Status</span>
+                            <div className="flex items-center gap-1.5 text-emerald-400 font-semibold text-sm">
                                 <CheckCircle2 className="h-4 w-4" />
-                                <span>{isSystemLocked ? "FINISHED" : "SUBMITTED"}</span>
+                                <span>{isSystemLocked ? "Finished" : "Submitted"}</span>
                             </div>
                         </div>
                     </div>
 
                     <button
                         onClick={handleReset}
-                        className="group relative flex h-16 w-full items-center justify-center rounded-2xl bg-primary font-black text-primary-foreground transition-all hover:scale-[1.02] active:scale-[0.98] shadow-xl shadow-primary/20 uppercase tracking-widest mt-4"
+                        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.98] shadow-lg shadow-primary/20"
                     >
-                        Return to Start
+                        Start Over
                     </button>
                 </div>
             </div>
@@ -250,112 +261,101 @@ export default function BuilderPage() {
 
     return (
         <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
-            {/* Live Broadcast Overlay */}
+            {/* Announcement Banner */}
             {broadcast && (
-                <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xl animate-in fade-in slide-in-from-top-8 duration-500">
-                    <div className="bg-sky-500 text-white p-4 rounded-2xl shadow-2xl flex items-center gap-4 border border-white/20 ring-4 ring-sky-500/20">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20">
-                            <Megaphone className="h-6 w-6 animate-bounce" />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">Message from System Command</span>
-                            <span className="text-sm font-bold">{broadcast}</span>
-                        </div>
-                        <button onClick={() => setBroadcast(null)} className="ml-auto p-1 hover:bg-white/10 rounded">
+                <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] w-full max-w-lg animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="bg-sky-500 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-white/20">
+                        <Megaphone className="h-4 w-4 shrink-0" />
+                        <span className="text-sm font-medium flex-1">{broadcast}</span>
+                        <button onClick={() => setBroadcast(null)} className="p-1 hover:bg-white/10 rounded transition-colors">
                             <X className="h-4 w-4" />
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* Mini Header for the builder */}
-            <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4">
+            {/* Header */}
+            <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4 shrink-0">
+                {/* Left: brand + participant name */}
                 <div className="flex items-center gap-3">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/25">
-                        <Shield className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-xs font-bold tracking-tight text-foreground">AICCORE Agent Builder</span>
-                        <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-widest">Builder Mode</span>
-                    </div>
+                    <span className="text-sm font-semibold text-foreground">AICCORE</span>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-sm text-muted-foreground">{session.nickname}</span>
                 </div>
 
-                <div className="flex items-center gap-4">
+                {/* Right: file link · timer · submit · exit */}
+                <div className="flex items-center gap-2">
                     {challengeAssets && (
                         <a
                             href={challengeAssets}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-2 rounded-md bg-emerald-500/10 px-3 py-1 text-[10px] font-black text-emerald-400 ring-1 ring-emerald-500/30 hover:bg-emerald-500/20 transition-all uppercase tracking-widest"
+                            className="hidden sm:flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
                         >
                             <FileText className="h-3 w-3" />
-                            Download Mission Directive
+                            Challenge Guide
                         </a>
                     )}
 
-                    {stats && (
-                        <div className="flex items-center gap-3 border-r border-border pr-4">
-                            <div className="flex items-center gap-1.5 opacity-70">
-                                <BarChart3 className="h-3 w-3 text-primary" />
-                                <span className="text-[10px] font-bold font-mono tracking-tighter uppercase">{stats.flows} FLOWS</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 opacity-70">
-                                <Medal className="h-3 w-3 text-amber-500" />
-                                <span className="text-[10px] font-bold font-mono tracking-tighter uppercase">{stats.achievements} BADGES</span>
-                            </div>
-                        </div>
-                    )}
-
-                    {timeLeft !== null && (
+                    {/* Timer */}
+                    {timeLeft !== null ? (
                         <div className={cn(
-                            "flex items-center gap-2 px-3 py-1 rounded-md border text-[10px] font-black tracking-widest uppercase",
-                            timeLeft < 300 ? "bg-rose-500/10 text-rose-500 border-rose-500/20 animate-pulse" : "bg-primary/5 text-primary border-primary/10"
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border",
+                            timeLeft < 300
+                                ? "bg-rose-500/10 text-rose-400 border-rose-500/20 animate-pulse"
+                                : "bg-secondary text-foreground border-border"
                         )}>
                             <Clock className="h-3 w-3" />
-                            <span>Mission Ends: {formatTime(timeLeft)}</span>
+                            <span>{formatTime(timeLeft)}</span>
                         </div>
-                    )}
+                    ) : isBeforeStart ? (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-400 text-xs font-medium">
+                            <Clock className="h-3 w-3" />
+                            <span>Not started yet</span>
+                        </div>
+                    ) : null}
 
-                    <div className="h-4 w-[1px] bg-border" />
-
+                    {/* Submit — the primary action */}
                     <button
                         onClick={handleSubmit}
-                        disabled={isSubmitting || isSubmitted || isSystemLocked}
+                        disabled={isSubmitting || isSubmitted || isSystemLocked || isBeforeStart || !hasActiveChallenge}
+                        title={
+                            isBeforeStart ? "The challenge hasn't started yet" :
+                            !hasActiveChallenge ? "No active challenge" :
+                            isSystemLocked ? "The challenge has ended" : "Submit your work"
+                        }
                         className={cn(
-                            "flex items-center gap-2 rounded-md px-4 py-1.5 text-[10px] font-black uppercase tracking-widest shadow-lg transition-all active:scale-95",
-                            isSubmitting ? "bg-muted cursor-not-allowed" : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/20"
+                            "flex items-center gap-2 rounded-lg px-5 py-1.5 text-sm font-semibold transition-all active:scale-95",
+                            (isSubmitting || isBeforeStart || !hasActiveChallenge || isSystemLocked)
+                                ? "bg-muted cursor-not-allowed opacity-40 text-muted-foreground"
+                                : "bg-primary text-primary-foreground hover:opacity-90"
                         )}
                     >
-                        <Rocket className={cn("h-3 w-3", isSubmitting && "animate-spin")} />
-                        {isSubmitting ? "Deploying..." : "Submit Mission"}
+                        <Rocket className={cn("h-3.5 w-3.5", isSubmitting && "animate-spin")} />
+                        {isSubmitting ? "Submitting…" : "Submit"}
                     </button>
 
-                    <div className="flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 ring-1 ring-primary/20">
-                        <div className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                        <span className="text-[10px] font-bold text-foreground">Participant: {session.nickname}</span>
-                    </div>
-
+                    {/* Exit */}
                     <button
                         onClick={handleReset}
-                        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-bold text-muted-foreground hover:bg-secondary hover:text-foreground transition-all uppercase tracking-tighter"
+                        title="Exit"
+                        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                     >
-                        <RefreshCw className="h-3 w-3" />
-                        Reset Station
+                        <LogOut className="h-3.5 w-3.5" />
                     </button>
                 </div>
             </header>
 
-            {/* Langflow IFrame */}
-            <main className="relative flex-1 bg-secondary/20">
+            {/* Builder iframe */}
+            <main className="relative flex-1">
                 {!iframeLoaded && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-                        <Rocket className="h-8 w-8 animate-bounce text-primary" />
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-[0.2em]">Launching Building Deck...</p>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background">
+                        <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                        <p className="text-xs text-muted-foreground">Loading…</p>
                     </div>
                 )}
-
                 <iframe
-                    src={`${getLangflowUrl()}/?session_id=${session.id}`} // Support dynamic Langflow Engine UI URL
+                    src={`${getLangflowUrl()}/?session_id=${session.id}`}
                     className={cn(
                         "h-full w-full border-0 transition-opacity duration-700",
                         iframeLoaded ? "opacity-100" : "opacity-0"
@@ -364,18 +364,6 @@ export default function BuilderPage() {
                     title="AICCORE Agent Builder"
                 />
             </main>
-
-            {/* Footer / Status */}
-            <footer className="flex h-8 items-center justify-between border-t border-border bg-card px-4 text-[10px] text-muted-foreground font-mono">
-                <div className="flex gap-4">
-                    <span>STATION_LOCAL</span>
-                    <span>LATENCY: 12ms</span>
-                </div>
-                <div className="flex gap-2 items-center">
-                    <Zap className="h-3 w-3 text-amber-400 fill-amber-400 animate-pulse" />
-                    <span>LIVE TELEMETRY ACTIVE</span>
-                </div>
-            </footer>
         </div>
     )
 }

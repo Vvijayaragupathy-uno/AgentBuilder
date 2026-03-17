@@ -10,26 +10,27 @@
 
 @layer base {
   :root {
+    /* --- Color Tokens --- */
     --background: 229 25% 6%;
     --foreground: 210 20% 95%;
     --card: 228 22% 9%;
     --card-foreground: 210 20% 95%;
     --popover: 228 22% 9%;
     --popover-foreground: 210 20% 95%;
-    --primary: 245 58% 61%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 38 92% 52%;
+    --primary-foreground: 0 0% 0%;
     --secondary: 230 18% 14%;
     --secondary-foreground: 210 20% 85%;
     --muted: 230 16% 15%;
     --muted-foreground: 215 14% 55%;
-    --accent: 245 58% 61%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 38 92% 52%;
+    --accent-foreground: 0 0% 0%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 230 14% 16%;
-    --input: 230 14% 18%;
-    --ring: 245 58% 61%;
-    --chart-1: 245 58% 61%;
+    --border: 230 14% 18%;
+    --input: 230 14% 20%;
+    --ring: 38 92% 52%;
+    --chart-1: 38 92% 52%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
@@ -37,29 +38,77 @@
     --radius: 0.625rem;
     --sidebar-background: 229 25% 6%;
     --sidebar-foreground: 210 20% 85%;
-    --sidebar-primary: 245 58% 61%;
-    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-primary: 38 92% 52%;
+    --sidebar-primary-foreground: 0 0% 0%;
     --sidebar-accent: 230 18% 14%;
     --sidebar-accent-foreground: 210 20% 85%;
     --sidebar-border: 230 14% 16%;
-    --sidebar-ring: 245 58% 61%;
+    --sidebar-ring: 38 92% 52%;
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 0%;
+
+    /* --- Motion Tokens (Google Material-style easing) --- */
+    --duration-fast: 100ms;
+    --duration-base: 200ms;
+    --duration-slow: 350ms;
+    --duration-page: 500ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+    --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+
+  /* --- Global Scrollbar --- */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(215 14% 35%);
+  }
+
+  /* --- Text Selection --- */
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+
+  /* --- Focus Visible (accessibility baseline) --- */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) - 2px);
   }
 }
 
 @layer utilities {
+  /* Glass surfaces */
   .glass {
     background: rgba(15, 17, 28, 0.6);
     backdrop-filter: blur(16px);
@@ -72,8 +121,10 @@
     -webkit-backdrop-filter: blur(24px);
     border: 1px solid hsl(230 14% 16%);
   }
-  .glow-violet {
-    box-shadow: 0 0 20px rgba(124, 92, 252, 0.3), 0 0 60px rgba(124, 92, 252, 0.1);
+
+  /* Glow effects */
+  .glow-amber {
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.3), 0 0 60px rgba(245, 158, 11, 0.1);
   }
   .glow-green {
     box-shadow: 0 0 20px rgba(34, 197, 94, 0.3), 0 0 60px rgba(34, 197, 94, 0.1);
@@ -81,4 +132,64 @@
   .glow-gold {
     box-shadow: 0 0 24px rgba(251, 191, 36, 0.4), 0 0 80px rgba(251, 191, 36, 0.15);
   }
+
+  /* Skeleton shimmer — directional shimmer replaces flat pulse */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--secondary)) 25%,
+      hsl(var(--border)) 50%,
+      hsl(var(--secondary)) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border-radius: calc(var(--radius) - 2px);
+  }
+
+  /* Subtle dot-grid background for content areas */
+  .bg-dot-grid {
+    background-image: radial-gradient(
+      circle,
+      hsl(var(--border) / 0.55) 1px,
+      transparent 1px
+    );
+    background-size: 24px 24px;
+  }
+
+  /* Tab / page entry animation */
+  .animate-tab-enter {
+    animation: tab-enter var(--duration-slow) var(--ease-decelerate) both;
+  }
+
+  /* Slow bounce — for active mission indicator */
+  .animate-bounce-slow {
+    animation: bounce-slow 2s ease-in-out infinite;
+  }
+}
+
+/* --- Keyframes --- */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes tab-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounce-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }

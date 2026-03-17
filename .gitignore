@@ -1,3 +1,7 @@
+# Local env secrets (copy .env.example → .env.local)
+.env.local
+.env
+
 # Python
 .venv/
 __pycache__/

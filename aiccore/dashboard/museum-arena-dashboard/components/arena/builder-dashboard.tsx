@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { BuilderHeader } from "./builder-header"
 import { BuilderSidebar } from "./builder-sidebar"
 import { MobileTabs } from "./mobile-tabs"
@@ -13,76 +14,99 @@ import { StationStatus } from "./station-status"
 import { LoginPage } from "./login-page"
 import { LiveChallenges } from "./live-challenges"
 import { ChallengesCatalog } from "./challenges-catalog"
+import { ChallengeDetail } from "./challenge-detail"
 import { cn, getApiBase } from "@/lib/utils"
 
-export function BuilderDashboard() {
-  const [activeTab, setActiveTab] = useState("live")
+const TAB_LABELS: Record<string, string> = {
+  live:        "Leaderboard",
+  challenges:  "Challenges",
+  mosaic:      "Display",
+  contestants: "Participants",
+  review:      "Submissions",
+  stations:    "Stations",
+  settings:    "Settings",
+  login:       "Admin Login",
+}
+
+const VALID_TABS = new Set(["live", "challenges", "mosaic", "contestants", "review", "stations", "settings"])
+
+function BuilderDashboardInner() {
+  const searchParams = useSearchParams()
+  const tabParam = searchParams.get("tab")
+  const initialTab = tabParam && VALID_TABS.has(tabParam) ? tabParam : "live"
+
+  const [activeTab, setActiveTab] = useState(initialTab)
+  const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null)
   const [stationCount, setStationCount] = useState(8)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [showAdminLogin, setShowAdminLogin] = useState(false)
 
   useEffect(() => {
-    // Check for auth cookie/flag
     const isAuth = document.cookie.includes("aiccore_admin=true")
     setIsAuthenticated(isAuth)
   }, [])
 
-  // Real-time Update Listener (Google Standard Pattern)
+  // Real-time updates for admin
   useEffect(() => {
     if (!isAuthenticated) return
-
-    const apiBase = getApiBase()
-    const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws";
+    const wsUrl = getApiBase().replace(/^http/, "ws") + "/api/v1/aiccore/ws"
     const ws = new WebSocket(wsUrl)
-
     ws.onmessage = (event) => {
       try {
-        const message = JSON.parse(event.data)
-        if (message.type === "REGISTRY_UPDATE" || message.type === "LEADERBOARD_UPDATE" || message.type === "SUBMISSION_UPDATE") {
-          console.log("🚀 Real-time update received:", message.type)
-          setRefreshKey(prev => prev + 1)
+        const msg = JSON.parse(event.data)
+        if (["REGISTRY_UPDATE", "LEADERBOARD_UPDATE", "SUBMISSION_UPDATE"].includes(msg.type)) {
+          setRefreshKey(k => k + 1)
         }
-      } catch (e) {
-        console.error("WS Parse error", e)
-      }
+      } catch {}
     }
-
-    ws.onerror = () => console.log("WS connection stalled. Reverting to polling.")
     return () => ws.close()
   }, [isAuthenticated])
 
   const handleLogin = async (password: string) => {
-    const apiBase = getApiBase()
-    const response = await fetch(`${apiBase}/api/v1/aiccore/auth/admin-login`, {
+    const res = await fetch(`${getApiBase()}/api/v1/aiccore/auth/admin-login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     })
-
-    if (response.ok) {
+    if (res.ok) {
       setIsAuthenticated(true)
+      setShowAdminLogin(false)
+      setActiveTab("contestants") // land on first admin tab
     } else {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || "Invalid administrator passcode")
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || "Incorrect password")
     }
   }
 
   const handleLogout = () => {
-    document.cookie = "aiccore_admin=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
+    document.cookie = "aiccore_admin=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/"
     setIsAuthenticated(false)
+    setActiveTab("live")
   }
 
-  // Determine if the current tab is a management/private tab
-  const isManagementTab = ["review", "contestants", "settings", "stations"].includes(activeTab)
+  const handleAdminButtonClick = () => {
+    if (isAuthenticated) return
+    setShowAdminLogin(true)
+    setActiveTab("live") // keep public tab active underneath
+  }
 
   if (isAuthenticated === null) {
-    return <div className="h-screen w-screen bg-black flex items-center justify-center">
-      <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"></div>
-    </div>
+    return (
+      <div className="h-screen w-screen bg-background bg-dot-grid flex flex-col items-center justify-center gap-4">
+        <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-[0.2em]">
+          Initializing
+        </span>
+      </div>
+    )
   }
 
-  // If selecting a management tab while not logged in, show login
-  const showLogin = isManagementTab && !isAuthenticated
+  const currentLabel = showAdminLogin
+    ? "Admin Login"
+    : activeTab === "challenges" && selectedChallengeId
+      ? "Challenge Detail"
+      : TAB_LABELS[activeTab] ?? activeTab
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
@@ -96,79 +120,58 @@ export function BuilderDashboard() {
       <div className="flex flex-1 overflow-hidden">
         <BuilderSidebar
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={(tab) => { setActiveTab(tab); setShowAdminLogin(false); setSelectedChallengeId(null) }}
           isAuthenticated={!!isAuthenticated}
+          onAdminLogin={handleAdminButtonClick}
+          onAdminLogout={handleLogout}
         />
 
-        <main className="flex-1 overflow-auto bg-background/50 backdrop-blur-3xl">
+        <main className="flex-1 overflow-auto bg-background bg-dot-grid">
           <div className="p-6">
-            {/* View title */}
-            <div className="mb-6 flex items-center justify-between border-b border-white/5 pb-6">
-              <div className="flex flex-col gap-1">
-                <h1 className="text-xl font-black tracking-tighter text-foreground uppercase italic">
-                  {showLogin ? "Administrator Authentication" :
-                    activeTab === "live" ? "Builder Leaderboard" :
-                      activeTab === "challenges" ? "Mission Catalog" :
-                        activeTab === "mosaic" ? "Visual Display" :
-                          activeTab === "contestants" ? "Contestant Monitor" :
-                            activeTab === "settings" ? "System Config" :
-                              activeTab === "stations" ? "Station Status" :
-                                "Deployment Review"}
-                </h1>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                  {showLogin ? "Secure access required for management utilities" :
-                    activeTab === "live"
-                      ? "Real-time engagement telemetry for active units"
-                      : activeTab === "challenges"
-                        ? "Active and upcoming mission deployments for builders"
-                        : activeTab === "mosaic"
-                          ? "Multi-stream visualization of builder workflows"
-                          : activeTab === "contestants"
-                            ? "Real-time telemetry and status monitoring for all builders"
-                            : activeTab === "settings"
-                              ? "Core logic, mission rules, and system configurations"
-                              : activeTab === "stations"
-                                ? "Real-time health monitoring for local builder stations"
-                                : "Post-deployment evaluation and honor awarding platform"}
-                </p>
+            {/* Page title row */}
+            <div className="mb-6 pb-5 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-sm font-bold text-foreground tracking-widest uppercase">{currentLabel}</h1>
+                <span className="text-border text-xs">·</span>
+                <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-widest">AICCORE Arena</span>
               </div>
-
-              {/* Google Engineer Suggestion: System Pulse */}
-              <div className="hidden md:flex items-center gap-4 px-4 py-2 rounded-xl bg-emerald-500/5 ring-1 ring-emerald-500/20">
-                <div className="flex flex-col items-end">
-                  <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">System Pulse</span>
-                  <span className="text-[10px] font-mono text-foreground tracking-tighter">OPTIMAL - 99.8%</span>
-                </div>
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-4 w-1 bg-emerald-500/40 rounded-full animate-pulse" style={{ animationDelay: `${i * 200}ms` }} />)}
-                </div>
-              </div>
+              {isAuthenticated && (
+                <span className="text-[10px] font-bold text-primary bg-primary/10 ring-1 ring-primary/20 px-2.5 py-1 rounded-full uppercase tracking-widest">
+                  Admin
+                </span>
+              )}
             </div>
 
-            {/* Content with smooth transition */}
+            {/* Content */}
             <div
-              className={cn(
-                "transition-all duration-300 ease-out",
-                "animate-slide-in h-min-screen h-full"
-              )}
-              key={activeTab + (showLogin ? "-login" : "")}
+              className="animate-tab-enter"
+              key={activeTab + (showAdminLogin ? "-login" : "")}
             >
-              {showLogin ? (
+              {showAdminLogin ? (
                 <LoginPage onLogin={handleLogin} />
+              ) : activeTab === "mosaic" ? (
+                <div className="h-[calc(100vh-180px)]">
+                  <MosaicDisplay />
+                </div>
               ) : (
                 <div className="pb-10">
                   {activeTab === "live" ? (
                     <div className="flex flex-col gap-8">
-                      <LiveChallenges />
+                      <LiveChallenges
+                        onViewAll={() => setActiveTab("challenges")}
+                        onSelectChallenge={(id) => { setSelectedChallengeId(id); setActiveTab("challenges") }}
+                      />
                       <Leaderboard onDataUpdate={setStationCount} refreshKey={refreshKey} />
                     </div>
-                  ) :
-                    activeTab === "challenges" ? <ChallengesCatalog /> :
-                      activeTab === "mosaic" ? <MosaicDisplay /> :
-                        activeTab === "contestants" ? <UserRegistry refreshKey={refreshKey} /> :
-                          activeTab === "settings" ? <SystemConfig /> :
-                            activeTab === "stations" ? <StationStatus /> :
-                              <ReviewPanel />}
+                  ) : activeTab === "challenges" ? (
+                    selectedChallengeId
+                      ? <ChallengeDetail challengeId={selectedChallengeId} onBack={() => setSelectedChallengeId(null)} />
+                      : <ChallengesCatalog onSelectChallenge={setSelectedChallengeId} />
+                  )
+                    : activeTab === "contestants" ? <UserRegistry refreshKey={refreshKey} />
+                      : activeTab === "settings" ? <SystemConfig />
+                        : activeTab === "stations" ? <StationStatus />
+                          : <ReviewPanel />}
                 </div>
               )}
             </div>
@@ -176,5 +179,18 @@ export function BuilderDashboard() {
         </main>
       </div>
     </div>
+  )
+}
+
+export function BuilderDashboard() {
+  return (
+    <Suspense fallback={
+      <div className="h-screen w-screen bg-background bg-dot-grid flex flex-col items-center justify-center gap-4">
+        <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-[0.2em]">Loading</span>
+      </div>
+    }>
+      <BuilderDashboardInner />
+    </Suspense>
   )
 }

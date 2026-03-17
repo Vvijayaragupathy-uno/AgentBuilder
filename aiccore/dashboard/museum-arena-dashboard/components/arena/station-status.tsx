@@ -5,10 +5,7 @@ import {
     Cpu,
     Activity,
     Wifi,
-    WifiOff,
     Thermometer,
-    MemoryStick,
-    HardDrive,
     AlertCircle
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -22,6 +19,15 @@ interface Station {
     ip: string
     load: number
     temp: number
+    last_active: string | null
+}
+
+function formatLastActive(lastActive: string | null): string {
+    if (!lastActive) return "N/A"
+    const diff = Math.floor((Date.now() - new Date(lastActive).getTime()) / 1000)
+    if (diff < 60) return `${diff}s ago`
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m ago`
 }
 
 export function StationStatus() {
@@ -49,6 +55,12 @@ export function StationStatus() {
         return () => clearInterval(interval)
     }, [])
 
+    const onlineCount = stations.filter(s => s.status !== "maintenance" && s.status !== "offline").length
+    const totalCount = stations.length
+    const pulseLabel = totalCount === 0 ? "OFFLINE" : onlineCount === totalCount ? "OPTIMAL" : onlineCount > totalCount / 2 ? "DEGRADED" : "CRITICAL"
+    const pulseColorClass = pulseLabel === "OPTIMAL" ? "text-emerald-400" : pulseLabel === "DEGRADED" ? "text-amber-400" : "text-rose-400"
+    const pulseDotClass = pulseLabel === "OPTIMAL" ? "bg-emerald-400" : pulseLabel === "DEGRADED" ? "bg-amber-400" : "bg-rose-400"
+
     return (
         <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* System Status Header */}
@@ -65,17 +77,16 @@ export function StationStatus() {
                         <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">System Pulse</span>
                         <div className="flex items-center gap-2">
                             <div className="relative flex h-2 w-2">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${pulseDotClass} opacity-75`}></span>
+                                <span className={`relative inline-flex rounded-full h-2 w-2 ${pulseDotClass}`}></span>
                             </div>
-                            <span className="text-xl font-black text-emerald-400 tracking-tight">OPTIMAL</span>
-                            <span className="text-xs font-mono text-emerald-400/60">99.8%</span>
+                            <span className={`text-xl font-black tracking-tight ${pulseColorClass}`}>{pulseLabel}</span>
                         </div>
                     </div>
                     <div className="h-8 w-px bg-white/10" />
                     <div className="flex flex-col">
                         <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Active Units</span>
-                        <span className="text-xl font-black">{stations.filter(s => s.status !== "maintenance").length} / {stations.length}</span>
+                        <span className="text-xl font-black">{onlineCount} / {totalCount}</span>
                     </div>
                 </div>
             </div>
@@ -129,15 +140,15 @@ export function StationStatus() {
                                 </div>
                                 <div className="space-y-1">
                                     <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-muted-foreground/70">
-                                        <Wifi className="h-3 w-3" /> Signal
+                                        <Wifi className="h-3 w-3" /> Heartbeat
                                     </div>
-                                    <p className="text-sm font-bold text-foreground">Excellent</p>
+                                    <p className="text-sm font-bold text-foreground">{formatLastActive(s.last_active)}</p>
                                 </div>
                             </div>
 
                             <div className="flex items-center justify-between pt-2 border-t border-primary/5 mt-auto">
                                 <Badge variant="outline" className="text-[9px] text-muted-foreground font-mono px-2 py-0 border-0">
-                                    UPTIME: 14h 22m
+                                    LAST SEEN: {formatLastActive(s.last_active)}
                                 </Badge>
                                 {s.status === "maintenance" && (
                                     <div className="flex items-center gap-1 text-rose-400 animate-pulse">

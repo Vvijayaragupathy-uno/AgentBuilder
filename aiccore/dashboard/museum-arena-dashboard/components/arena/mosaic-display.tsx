@@ -12,7 +12,7 @@ interface MosaicSession {
     nodes: any[]
     edges: any[]
     runningNodes: string[]
-    status: "idle" | "running" | "error"
+    status: "idle" | "running" | "error" | "submitted"
     lastUpdate: number
 }
 
@@ -56,7 +56,7 @@ export function MosaicDisplay() {
                             nodes: mappedNodes,
                             edges: mappedEdges,
                             runningNodes: [],
-                            status: "idle",
+                            status: s.is_submitted ? "submitted" : "idle",
                             lastUpdate: new Date(s.last_update).getTime()
                         }
                         ids.push(s.session_id)
@@ -83,6 +83,7 @@ export function MosaicDisplay() {
             if (data.event_type === "flow_saved" || data.event_type === "submitted") {
                 const payload = data.payload
                 const snapshot = payload.snapshot || {}
+                const isSubmission = data.event_type === "submitted"
 
                 const mappedNodes = (snapshot.nodes || []).map((n: any) => {
                     const x = n.position?.x || (n.x ?? 0)
@@ -115,10 +116,10 @@ export function MosaicDisplay() {
                             id: data.session_id,
                             nickname: payload.nickname || existing?.nickname || "Anonymous",
                             station: payload.station_id || existing?.station || "0",
-                            nodes: mappedNodes,
-                            edges: mappedEdges,
-                            runningNodes: existing?.runningNodes || [],
-                            status: existing?.status || "idle",
+                            nodes: mappedNodes.length > 0 ? mappedNodes : (existing?.nodes || []),
+                            edges: mappedEdges.length > 0 ? mappedEdges : (existing?.edges || []),
+                            runningNodes: isSubmission ? [] : (existing?.runningNodes || []),
+                            status: isSubmission ? "submitted" : (existing?.status || "idle"),
                             lastUpdate: Date.now()
                         }
                     }
@@ -170,7 +171,7 @@ export function MosaicDisplay() {
         return (
             <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground opacity-50">
                 <Monitor className="h-12 w-12 stroke-[1.5]" />
-                <p className="text-sm font-medium uppercase tracking-[0.2em]">Awaiting Builder Activity</p>
+                <p className="text-sm font-medium uppercase tracking-[0.2em]">Waiting for builders to connect</p>
             </div>
         )
     }
@@ -181,7 +182,12 @@ export function MosaicDisplay() {
                 const session = sessions[id]
                 if (!session) return null
                 return (
-                    <div key={id} className="glass relative flex flex-col overflow-hidden rounded-2xl border-primary/10 ring-1 ring-primary/5 transition-all">
+                    <div key={id} className={cn(
+                        "glass relative flex flex-col overflow-hidden rounded-2xl ring-1 transition-all",
+                        session.status === "submitted"
+                            ? "border-amber-500/30 ring-amber-500/20"
+                            : "border-primary/10 ring-primary/5"
+                    )}>
                         <div className="flex items-center justify-between border-b border-primary/5 bg-primary/5 px-4 py-2">
                             <div className="flex items-center gap-2">
                                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
@@ -191,7 +197,7 @@ export function MosaicDisplay() {
                             </div>
                             <div className="flex items-center gap-1.5 opacity-50">
                                 <Monitor className="h-3 w-3" />
-                                <span className="font-mono text-[10px] font-bold italic">STATION #{session.station}</span>
+                                <span className="font-mono text-[10px] font-bold">Station {session.station}</span>
                             </div>
                         </div>
 
@@ -206,17 +212,20 @@ export function MosaicDisplay() {
 
                         <div className="absolute bottom-3 right-3 flex items-center gap-1 scale-75">
                             <span className={cn(
-                                "flex h-1.5 w-1.5 rounded-full animate-pulse",
-                                session.status === "running" ? "bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]" :
-                                    session.status === "error" ? "bg-red-500" : "bg-emerald-400"
+                                "flex h-1.5 w-1.5 rounded-full",
+                                session.status === "running" ? "animate-pulse bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]" :
+                                    session.status === "error" ? "bg-red-500" :
+                                        session.status === "submitted" ? "bg-amber-400" : "animate-pulse bg-emerald-400"
                             )} />
                             <span className={cn(
                                 "text-[10px] font-bold uppercase tracking-tighter",
                                 session.status === "running" ? "text-primary" :
-                                    session.status === "error" ? "text-red-400" : "text-emerald-400/80"
+                                    session.status === "error" ? "text-red-400" :
+                                        session.status === "submitted" ? "text-amber-400" : "text-emerald-400/80"
                             )}>
-                                {session.status === "running" ? "Processing..." :
-                                    session.status === "error" ? "Error" : "Live"}
+                                {session.status === "running" ? "Running" :
+                                    session.status === "error" ? "Error" :
+                                        session.status === "submitted" ? "Submitted" : "Active"}
                             </span>
                         </div>
                     </div>

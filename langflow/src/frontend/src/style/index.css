@@ -255,53 +255,42 @@
   }
 
   .dark {
-    --foreground: 0 0% 100%;
-    /* hsl(0, 0%, 100%) */
-    --background: 240 6% 10%;
-    /* hsl(240, 6%, 10%) */
-    --muted: 240 4% 16%;
-    /* hsl(240, 4%, 16%) */
-    --muted-foreground: 240 5% 65%;
-    /* hsl(240, 5%, 65%) */
-    --card: 240 6% 10%;
-    /* hsl(240, 6%, 10%) */
-    --card-foreground: 0 0% 100%;
-    /* hsl(0, 0%, 100%) */
-    --popover: 240 6% 10%;
-    /* hsl(240, 6%, 10%) */
-    --popover-foreground: 0 0% 100%;
-    /* hsl(0, 0%, 100%) */
-    --border: 240 5% 26%;
-    /* hsl(240, 5%, 26%) */
-    --input: 240 5% 34%;
-    /* hsl(240, 5%, 34%) */
-    --primary: 0 72% 60%;
-    /* AICCORE Red (lighter for dark mode) */
+    --foreground: 210 20% 95%;
+    /* AICCORE light text on dark navy */
+    --background: 229 25% 6%;
+    /* AICCORE deep navy */
+    --muted: 230 16% 15%;
+    --muted-foreground: 215 14% 55%;
+    --card: 228 22% 9%;
+    /* AICCORE card navy */
+    --card-foreground: 210 20% 95%;
+    --popover: 228 22% 9%;
+    --popover-foreground: 210 20% 95%;
+    --border: 230 14% 18%;
+    /* AICCORE subtle border */
+    --input: 230 14% 20%;
+    --primary: 38 92% 52%;
+    /* AICCORE amber/gold */
     --primary-foreground: 0 0% 0%;
-    --secondary: 0 0% 0%;
-    /* hsl(0, 0%, 0%) */
-    --secondary-foreground: 240 6% 90%;
-    /* hsl(240, 6%, 90%) */
-    --accent: 240 4% 16%;
-    /* hsl(240, 4%, 16%) */
-    --accent-foreground: 0 0% 100%;
-    /* hsl(0, 0%, 100%) */
+    --secondary: 230 18% 14%;
+    /* AICCORE secondary navy */
+    --secondary-foreground: 210 20% 85%;
+    --accent: 230 18% 14%;
+    --accent-foreground: 210 20% 85%;
     --destructive: 0 84% 60%;
     /* hsl(0, 84%, 60%) */
     --destructive-foreground: 0 0% 100%;
     /* hsl(0, 0%, 100%) */
-    --ring: 0 0% 100%;
-    /* hsl(0, 0%, 100%) */
-    --primary-hover: 240 6% 90%;
-    /* hsl(240, 6%, 90%) */
-    --secondary-hover: 240 4% 16%;
-    /* hsl(240, 4%, 16%) */
-    --placeholder-foreground: 240 4% 46%;
-    /* hsl(240, 4%, 46%) */
-    --canvas: 0 0% 0%;
-    /* hsl(0, 0%, 0%) */
-    --canvas-dot: 240 5.3% 26.1%;
-    /* hsl(240, 5.3%, 26.1%) */
+    --ring: 38 92% 52%;
+    /* AICCORE amber focus ring */
+    --primary-hover: 38 80% 42%;
+    /* Darker amber on hover */
+    --secondary-hover: 230 16% 20%;
+    --placeholder-foreground: 215 14% 42%;
+    --canvas: 229 25% 4%;
+    /* Very dark navy flow canvas */
+    --canvas-dot: 230 14% 20%;
+    /* Subtle dot grid on canvas */
 
     --accent-emerald: 164 86% 16%;
     /* hsl(164, 86%, 16%) */
@@ -323,99 +312,111 @@
     --tooltip: 0 0% 100%;
     /* hsl(0, 0%, 100%) */
 
-    --jse-theme-color: hsl(240, 4%, 16%) !important;
-    --jse-theme-color-highlight: hsl(240, 4%, 16%);
-    --jse-panel-background: hsl(240, 4%, 16%);
-    --jse-menu-color: hsl(240, 5%, 26%);
+    --jse-theme-color: hsl(230, 18%, 14%) !important;
+    /* AICCORE secondary navy */
+    --jse-theme-color-highlight: hsl(230, 18%, 18%);
+    --jse-panel-background: hsl(229, 22%, 10%);
+    --jse-menu-color: hsl(230, 14%, 18%);
 
-    --jse-main-border: hsl(240, 5%, 26%);
-    --jse-background-color: hsl(240, 4%, 16%);
-    --jse-text-color: hsl(0, 0%, 100%);
-    --jse-selection-background-color: hsl(240, 5%, 65%, 0.2);
-    --jse-selection-background-inactive-color: hsl(240, 5%, 65%, 0.15);
-    --jse-hover-background-color: hsl(240, 4%, 16%);
-    --jse-active-line-background-color: hsl(240, 4%, 16%);
-    --jse-search-match-background-color: hsl(240, 4%, 16%);
-    --jse-search-match-color: hsl(234, 89%, 74%);
-    --jse-text-readonly: hsl(240, 5%, 65%);
+    --jse-main-border: hsl(230, 14%, 18%);
+    --jse-background-color: hsl(229, 22%, 10%);
+    --jse-text-color: hsl(210, 20%, 95%);
+    --jse-selection-background-color: hsl(38, 92%, 52%, 0.2);
+    /* Amber selection */
+    --jse-selection-background-inactive-color: hsl(38, 92%, 52%, 0.1);
+    --jse-hover-background-color: hsl(230, 18%, 18%);
+    --jse-active-line-background-color: hsl(230, 18%, 14%);
+    --jse-search-match-background-color: hsl(230, 18%, 14%);
+    --jse-search-match-color: hsl(38, 92%, 52%);
+    /* AICCORE amber highlight */
+    --jse-text-readonly: hsl(215, 14%, 55%);
     --jse-error-color: hsl(0, 84%, 60%);
-    --jse-warning-color: hsl(45, 97%, 65%);
-    --jse-info-color: hsl(221, 83%, 53%);
-    --jse-success-color: hsl(142, 76%, 36%);
+    --jse-warning-color: hsl(38, 92%, 52%);
+    /* Amber for warnings */
+    --jse-info-color: hsl(210, 80%, 55%);
+    --jse-success-color: hsl(142, 71%, 45%);
 
     --jse-theme: dark;
-    --jse-text-color-inverse: #4d4d4d;
-    --jse-modal-background: #2f2f2f;
-    --jse-modal-overlay-background: rgba(0, 0, 0, 0.5);
-    --jse-modal-code-background: #2f2f2f;
+    --jse-text-color-inverse: #1a1f2e;
+    --jse-modal-background: #141722;
+    /* AICCORE card navy */
+    --jse-modal-overlay-background: rgba(5, 7, 14, 0.7);
+    --jse-modal-code-background: #141722;
     --jse-tooltip-color: var(--jse-text-color);
-    --jse-tooltip-background: #4b4b4b;
-    --jse-tooltip-border: 1px solid #737373;
+    --jse-tooltip-background: #1e2336;
+    --jse-tooltip-border: 1px solid hsl(230, 14%, 22%);
     --jse-tooltip-action-button-color: inherit;
-    --jse-tooltip-action-button-background: #737373;
-    --jse-panel-background-border: 1px solid #464646;
+    --jse-tooltip-action-button-background: hsl(230, 14%, 26%);
+    --jse-panel-background-border: 1px solid hsl(230, 14%, 18%);
     --jse-panel-color: var(--jse-text-color);
-    --jse-panel-color-readonly: #737373;
-    --jse-panel-border: 1px solid #3c3c3c;
-    --jse-panel-button-color-highlight: #e5e5e5;
+    --jse-panel-color-readonly: hsl(215, 14%, 50%);
+    --jse-panel-border: 1px solid hsl(230, 14%, 18%);
+    --jse-panel-button-color-highlight: hsl(210, 20%, 95%);
 
-    --jse-panel-button-background-highlight: #464646;
-    --jse-navigation-bar-background: #656565;
-    --jse-navigation-bar-background-highlight: #7e7e7e;
+    --jse-panel-button-background-highlight: hsl(230, 14%, 22%);
+    --jse-navigation-bar-background: hsl(230, 18%, 14%);
+    --jse-navigation-bar-background-highlight: hsl(230, 18%, 18%);
     --jse-navigation-bar-dropdown-color: var(--jse-text-color);
-    --jse-context-menu-background: #4b4b4b;
-    --jse-context-menu-background-highlight: #595959;
-    --jse-context-menu-separator-color: #595959;
+    --jse-context-menu-background: #1e2336;
+    --jse-context-menu-background-highlight: #252c40;
+    --jse-context-menu-separator-color: hsl(230, 14%, 22%);
     --jse-context-menu-color: var(--jse-text-color);
-    --jse-context-menu-pointer-background: #737373;
-    --jse-context-menu-pointer-background-highlight: #818181;
+    --jse-context-menu-pointer-background: hsl(230, 14%, 26%);
+    --jse-context-menu-pointer-background-highlight: hsl(230, 14%, 30%);
     --jse-context-menu-pointer-color: var(--jse-context-menu-color);
-    --jse-key-color: #9cdcfe;
+    --jse-key-color: #93c5fd;
+    /* Sky blue keys */
     --jse-value-color: var(--jse-text-color);
-    --jse-value-color-number: #b5cea8;
-    --jse-value-color-boolean: #569cd6;
-    --jse-value-color-null: #569cd6;
-    --jse-value-color-string: #ce9178;
-    --jse-value-color-url: #ce9178;
-    --jse-delimiter-color: #949494;
-    --jse-edit-outline: 2px solid var(--jse-text-color);
-    --jse-search-match-background-color: #343434;
-    --jse-collapsed-items-background-color: #333333;
-    --jse-collapsed-items-selected-background-color: #565656;
-    --jse-collapsed-items-link-color: #b2b2b2;
-    --jse-collapsed-items-link-color-highlight: #ec8477;
-    --jse-search-match-color: #724c27;
-    --jse-search-match-outline: 1px solid #966535;
-    --jse-search-match-active-color: #9f6c39;
-    --jse-search-match-active-outline: 1px solid #bb7f43;
-    --jse-tag-background: #444444;
-    --jse-tag-color: #bdbdbd;
-    --jse-table-header-background: #333333;
-    --jse-table-header-background-highlight: #424242;
-    --jse-table-row-odd-background: rgba(255, 255, 255, 0.1);
-    --jse-input-background: #3d3d3d;
+    --jse-value-color-number: #fbbf24;
+    /* Amber numbers */
+    --jse-value-color-boolean: #60a5fa;
+    --jse-value-color-null: #6b7280;
+    --jse-value-color-string: #86efac;
+    /* Emerald strings */
+    --jse-value-color-url: #86efac;
+    --jse-delimiter-color: hsl(215, 14%, 40%);
+    --jse-edit-outline: 2px solid hsl(38, 92%, 52%);
+    --jse-search-match-background-color: hsl(230, 18%, 14%);
+    --jse-collapsed-items-background-color: hsl(229, 22%, 10%);
+    --jse-collapsed-items-selected-background-color: hsl(230, 18%, 18%);
+    --jse-collapsed-items-link-color: hsl(215, 14%, 60%);
+    --jse-collapsed-items-link-color-highlight: hsl(38, 92%, 62%);
+    /* Amber on hover */
+    --jse-search-match-color: hsl(38, 70%, 30%);
+    --jse-search-match-outline: 1px solid hsl(38, 60%, 35%);
+    --jse-search-match-active-color: hsl(38, 80%, 38%);
+    --jse-search-match-active-outline: 1px solid hsl(38, 80%, 45%);
+    --jse-tag-background: hsl(230, 16%, 18%);
+    --jse-tag-color: hsl(215, 14%, 70%);
+    --jse-table-header-background: hsl(229, 22%, 10%);
+    --jse-table-header-background-highlight: hsl(230, 18%, 14%);
+    --jse-table-row-odd-background: rgba(245, 158, 11, 0.04);
+    /* Subtle amber tint */
+    --jse-input-background: hsl(230, 18%, 14%);
     --jse-input-border: var(--jse-main-border);
-    --jse-button-background: #808080;
-    --jse-button-background-highlight: #7a7a7a;
-    --jse-button-color: #e0e0e0;
-    --jse-button-secondary-background: #494949;
-    --jse-button-secondary-background-highlight: #5d5d5d;
-    --jse-button-secondary-background-disabled: #9d9d9d;
+    --jse-button-background: hsl(38, 92%, 52%);
+    /* Amber primary button */
+    --jse-button-background-highlight: hsl(38, 80%, 42%);
+    --jse-button-color: #000;
+    --jse-button-secondary-background: hsl(230, 18%, 18%);
+    --jse-button-secondary-background-highlight: hsl(230, 18%, 22%);
+    --jse-button-secondary-background-disabled: hsl(230, 14%, 26%);
     --jse-button-secondary-color: var(--jse-text-color);
-    --jse-a-color: #55abff;
-    --jse-a-color-highlight: #4387c9;
-    --jse-svelte-select-background: #3d3d3d;
-    --jse-svelte-select-border: 1px solid #4f4f4f;
-    --list-background: #3d3d3d;
-    --item-hover-bg: #505050;
-    --multi-item-bg: #5b5b5b;
-    --input-color: #d4d4d4;
-    --multi-clear-bg: #8a8a8a;
-    --multi-item-clear-icon-color: #d4d4d4;
-    --multi-item-outline: 1px solid #696969;
-    --list-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.4);
-    --jse-color-picker-background: #656565;
-    --jse-color-picker-border-box-shadow: #8c8c8c 0 0 0 1px;
+    --jse-a-color: hsl(38, 92%, 62%);
+    /* Amber links */
+    --jse-a-color-highlight: hsl(38, 92%, 52%);
+    --jse-svelte-select-background: hsl(230, 18%, 14%);
+    --jse-svelte-select-border: 1px solid hsl(230, 14%, 22%);
+    --list-background: hsl(230, 18%, 14%);
+    --item-hover-bg: hsl(230, 18%, 18%);
+    --multi-item-bg: hsl(230, 16%, 20%);
+    --input-color: hsl(210, 20%, 90%);
+    --multi-clear-bg: hsl(215, 14%, 45%);
+    --multi-item-clear-icon-color: hsl(210, 20%, 90%);
+    --multi-item-outline: 1px solid hsl(230, 14%, 22%);
+    --list-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.6);
+    --jse-color-picker-background: hsl(230, 18%, 14%);
+    --jse-color-picker-border-box-shadow: hsl(230, 14%, 22%) 0 0 0 1px;
 
     --tooltip-foreground: 0 0% 0%;
     /* hsl(0, 0%, 0%) */
@@ -442,12 +443,15 @@
     --warning-text: 0 0% 100%;
     /* hsl(0, 0%, 100%) */
 
-    --node-selected: 234 89% 74%;
+    --node-selected: 38 92% 52%;
+    /* AICCORE amber node selection */
 
     --ice: #60a5fa;
-    --hover: #1a202e;
+    --hover: #13172a;
+    /* AICCORE secondary hover */
     --disabled-run: #6366f1;
-    --selected: #0369a1;
+    --selected: #f59e0b;
+    /* AICCORE amber selected */
     --discord-color: #5765f2;
 
     --filter-foreground: #eef2ff;
@@ -455,15 +459,18 @@
 
     --round-btn-shadow: #00000063;
 
-    --success-background: #022c22;
-    --success-foreground: #ecfdf5;
+    --success-background: #061a14;
+    /* Navy-tinted dark green */
+    --success-foreground: #a7f3d0;
 
-    --error-foreground: #fef2f2;
-    --error-background: #450a0a;
-    --error: #991b1b;
+    --error-foreground: #fecaca;
+    --error-background: #2d0a0a;
+    /* Navy-tinted dark red */
+    --error: #ef4444;
 
-    --info-foreground: #eff6ff;
-    --info-background: #172554;
+    --info-foreground: #bfdbfe;
+    --info-background: #0f1829;
+    /* Navy-tinted dark blue */
 
     --high-indigo: #4338ca;
     --medium-indigo: #6366f1;
@@ -480,7 +487,8 @@
     --chat-send: #ffffff;
     --status-green: #4ade80;
     --status-blue: #2563eb;
-    --connection: #6d6c6c;
+    --connection: hsl(230, 12%, 30%);
+    /* AICCORE muted navy edge connections */
     --code-background: 240 6% 10%;
     --code-description-background: 0 0% 0%;
     --code-foreground: 240 6% 90%;
@@ -492,14 +500,16 @@
     --chat-bot-icon: #235d70;
     --chat-user-icon: #4f3d6e;
 
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 229 25% 6%;
+    /* AICCORE dark navy */
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 38 92% 52%;
+    /* AICCORE amber */
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 230 18% 14%;
+    --sidebar-accent-foreground: 210 20% 85%;
+    --sidebar-border: 230 14% 16%;
+    --sidebar-ring: 38 92% 52%;
     --placeholder: 240 5% 64.9%;
     --hard-zinc: 240 5.2% 33.9%;
     --smooth-red: 0 74.7% 15.5%;
@@ -546,14 +556,17 @@
     --datatype-orange: 20.5 90.2% 48.2%;
     --datatype-orange-foreground: 30.7 97.2% 72.4%;
 
-    --node-ring: 240 6% 90%;
+    --node-ring: 230 14% 22%;
+    /* AICCORE border for node ring */
 
-    --slider-input-border: #d4d4d8;
+    --slider-input-border: hsl(230, 14%, 28%);
 
-    --zinc-foreground: 240 5.2% 33.9%;
+    --zinc-foreground: 230 14% 30%;
 
-    --accent-amber: 22, 78%, 26%;
-    --accent-amber-foreground: 45.9 96.7% 64.5%;
+    --accent-amber: 38, 80%, 22%;
+    /* Darker amber surface */
+    --accent-amber-foreground: 38 92% 52%;
+    /* Amber text */
     --red-foreground: 0 72.2% 50.6%;
     --indigo-foreground: 234.5 89.5% 73.9%;
   }

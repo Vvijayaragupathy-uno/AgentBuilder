@@ -479,6 +479,7 @@ def create_aiccore_app():
                     "nickname": s.nickname,
                     "station_id": s.station_id,
                     "snapshot": snapshot,
+                    "is_submitted": s.is_submitted,
                     "last_update": latest_event.timestamp.isoformat() if latest_event else s.start_time.isoformat()
                 })
             return results

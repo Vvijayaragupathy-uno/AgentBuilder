@@ -1,83 +1,117 @@
-import { Activity, Radio, Shield, Zap, LogOut, Share2, Check } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useState } from "react"
+"use client"
+
+import { useState, useEffect } from "react"
+import { LogOut, Radio, Signal } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 export function BuilderHeader({
-  stationCount = 8,
   onLogout,
-  isAuthenticated = false
+  isAuthenticated = false,
+  stationCount,
 }: {
-  stationCount?: number,
-  onLogout?: () => void,
+  stationCount?: number
+  onLogout?: () => void
   isAuthenticated?: boolean
 }) {
-  const [copied, setCopied] = useState(false)
+  const [time, setTime] = useState("")
+  const [isOnline, setIsOnline] = useState(true)
 
-  const handleShare = () => {
-    const url = window.location.origin
-    navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+  useEffect(() => {
+    const tick = () => {
+      setTime(
+        new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        })
+      )
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [])
 
   return (
-    <header className="sticky top-0 z-50 glass-strong border-b border-border">
-      <div className="flex items-center justify-between px-6 py-3">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-              <Shield className="h-5 w-5 text-primary" />
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold tracking-wide text-foreground uppercase">
-                  AICCORE
-                </span>
-                <span className="text-muted-foreground text-xs font-light">|</span>
-                <span className="text-xs font-bold tracking-[0.2em] text-muted-foreground uppercase">
-                  AICCORE Agent Builder
-                </span>
-              </div>
-              <span className="text-[10px] font-mono text-muted-foreground/60 tracking-wider uppercase font-bold">
-                {isAuthenticated ? "Administrative Authority" : "Mission Overview Mode"}
-              </span>
-            </div>
-          </div>
+    <header className="sticky top-0 z-50 flex h-12 items-center justify-between border-b border-border bg-card/95 backdrop-blur-md px-5 gap-4">
+      {/* Brand */}
+      <div className="flex items-center gap-2.5 shrink-0">
+        <div className="h-6 w-6 rounded-md bg-primary flex items-center justify-center shrink-0 shadow-sm shadow-primary/30">
+          <span className="text-[9px] font-black text-primary-foreground leading-none tracking-tighter">AI</span>
         </div>
+        <span className="text-sm font-bold tracking-widest text-foreground uppercase">AICCORE</span>
+        <span className="hidden sm:block text-border mx-1">·</span>
+        <span className="hidden sm:block text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-widest">
+          Arena Command
+        </span>
+      </div>
 
-        <div className="flex items-center gap-5">
-          <div className="flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 ring-1 ring-border">
-            <Activity className="h-3.5 w-3.5 text-emerald-400 animate-pulse-glow" />
-            <span className="text-xs font-medium text-emerald-400">LIVE</span>
-            <span className="text-xs text-muted-foreground font-mono">{stationCount} active stations</span>
-          </div>
-
-          <div className="flex items-center gap-2 border-l border-border pl-5 ml-1">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 h-8 rounded-full border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary transition-all pr-4"
-              onClick={handleShare}
-            >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Share2 className="h-3.5 w-3.5" />}
-              <span className="text-[10px] font-bold uppercase tracking-wider">
-                {copied ? "Link Copied" : "Live Share"}
-              </span>
-            </Button>
-
-            {isAuthenticated && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground hover:bg-destructive/10 gap-2 h-8 px-3 rounded-full transition-all group"
-                onClick={onLogout}
-              >
-                <LogOut className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" />
-                <span className="text-xs font-medium uppercase tracking-tight">Logout</span>
-              </Button>
+      {/* Right cluster */}
+      <div className="flex items-center gap-2">
+        {/* Connection status */}
+        <div className={cn(
+          "hidden sm:flex items-center gap-1.5 glass rounded-md px-2.5 py-1 transition-colors duration-300",
+          isOnline ? "border-emerald-500/20" : "border-rose-500/20"
+        )}>
+          <div className="relative flex h-1.5 w-1.5 shrink-0">
+            {isOnline && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
             )}
+            <span className={cn(
+              "relative inline-flex h-1.5 w-1.5 rounded-full",
+              isOnline ? "bg-emerald-400" : "bg-rose-400"
+            )} />
           </div>
+          <span className={cn(
+            "text-[10px] font-bold uppercase tracking-widest",
+            isOnline ? "text-emerald-400" : "text-rose-400"
+          )}>
+            {isOnline ? "Live" : "Offline"}
+          </span>
         </div>
+
+        {/* Live clock */}
+        {time && (
+          <div className="hidden md:flex items-center gap-1.5 glass rounded-md px-2.5 py-1">
+            <Radio className="h-3 w-3 text-primary/50 shrink-0" />
+            <span className="font-mono text-[11px] font-bold text-foreground/70 tabular-nums">
+              {time}
+            </span>
+          </div>
+        )}
+
+        {/* Station count pill — only when authenticated */}
+        {isAuthenticated && stationCount !== undefined && (
+          <div className="hidden lg:flex items-center gap-1.5 glass rounded-md px-2.5 py-1">
+            <Signal className="h-3 w-3 text-primary/50 shrink-0" />
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              {stationCount} units
+            </span>
+          </div>
+        )}
+
+        {/* Admin logout */}
+        {isAuthenticated && onLogout && (
+          <button
+            onClick={onLogout}
+            title="Log out of admin"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-200"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Log out</span>
+          </button>
+        )}
       </div>
     </header>
   )
