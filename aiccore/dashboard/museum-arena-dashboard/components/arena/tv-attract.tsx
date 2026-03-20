@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Brain, Zap, Layers, Cpu, ArrowRight, Clock, Users, Rocket, CheckCircle2, Circle, Loader2, WifiOff, Wrench, PlayCircle } from "lucide-react"
 import { cn, getApiBase, skewedNow } from "@/lib/utils"
+import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import type { Challenge } from "./tv-display"
 
 const SLIDE_DURATION = 10_000  // ms each slide stays (default)
@@ -27,10 +28,10 @@ function HookSlide() {
       <div className="relative">
         <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl scale-[2]" />
         <div
-          className="relative h-24 w-24 rounded-3xl bg-primary/15 ring-2 ring-primary/40 flex items-center justify-center"
+          className="relative h-24 w-24 rounded-3xl bg-primary/15 ring-2 ring-primary/40 flex items-center justify-center overflow-hidden"
           style={{ animation: "tv-float 3s ease-in-out infinite" }}
         >
-          <Brain className="h-12 w-12 text-primary" />
+          <AiccoreLogo size={72} className="rounded-2xl shadow-lg shadow-black/20 ring-1 ring-white/15" />
         </div>
       </div>
 
@@ -63,7 +64,7 @@ function WhatSlide() {
       <div className="space-y-3">
         <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">What Is This?</span>
         <h2 className="text-[68px] font-black uppercase tracking-tighter leading-none text-foreground">
-          Langflow Arena
+          {AICCORE_MAKERSPACE}
         </h2>
         <p className="text-[24px] text-muted-foreground font-medium max-w-3xl">
           A live challenge where students visually assemble AI systems — then watch them run.
@@ -704,7 +705,7 @@ function LivePanel({ challenges }: { challenges: Challenge[] }) {
 
 function MarqueeTicker({ challenges }: { challenges: Challenge[] }) {
   const items = [
-    "Welcome to AICCORE Arena",
+    `Welcome to ${AICCORE_MAKERSPACE}`,
     `${challenges.length || "—"} challenge${challenges.length !== 1 ? "s" : ""} available today`,
     "Walk to any station to register and participate",
     "Build intelligent AI flows with Langflow — no coding needed",
@@ -839,8 +840,9 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
               />
               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Live</span>
             </div>
-            <span className="text-[13px] font-black uppercase tracking-[0.3em] text-white/55">
-              AICCORE Arena
+            <span className="flex items-center gap-2 text-[12px] font-bold tracking-wide text-white/70">
+              <AiccoreLogo size={22} forDarkBackground className="rounded-md ring-1 ring-white/15" />
+              {AICCORE_MAKERSPACE}
             </span>
           </div>
           {/* Clock */}

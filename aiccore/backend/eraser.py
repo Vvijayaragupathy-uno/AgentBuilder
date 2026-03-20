@@ -246,29 +246,33 @@ async def submit_workspace_as_flow(session_id: UUID):
                     )
                     db.add(sub_event)
                     db.commit()
+                    submit_id = str(new_submission.id)
+                    submit_nick = aic_session_obj.nickname
+                    submit_station = aic_session_obj.station_id
 
-                # Broadcast so TV display shows "X just submitted!" toast
-                import asyncio
                 from .broadcast import broadcast_manager
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(broadcast_manager.broadcast({
+
+                # Await (not fire-and-forget) so mosaic/TV reliably receive before HTTP returns
+                await broadcast_manager.broadcast(
+                    {
                         "session_id": str(session_id),
                         "event_type": "submitted",
                         "payload": {
-                            "submission_id": str(new_submission.id),
-                            "nickname": aic_session_obj.nickname,
-                            "station_id": aic_session_obj.station_id,
-                        }
-                    }))
-                    loop.create_task(broadcast_manager.broadcast({
+                            "submission_id": submit_id,
+                            "nickname": submit_nick,
+                            "station_id": submit_station,
+                            "snapshot": flow_snapshot,
+                        },
+                    }
+                )
+                await broadcast_manager.broadcast(
+                    {
                         "type": "SUBMISSION_UPDATE",
-                        "data": {"session_id": str(session_id)}
-                    }))
-                except RuntimeError:
-                    pass  # No running loop
+                        "data": {"session_id": str(session_id)},
+                    }
+                )
 
-                return str(new_submission.id)
+                return submit_id
     except Exception as e:
         logger.error(f"❌ AICCORE: Failed to submit workspace: {e}")
         raise e

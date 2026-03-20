@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { LogOut, Radio, Signal } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 
 export function BuilderHeader({
   onLogout,
@@ -47,14 +48,8 @@ export function BuilderHeader({
     <header className="sticky top-0 z-50 flex h-12 items-center justify-between border-b border-border bg-card/95 backdrop-blur-md px-5 gap-4">
       {/* Brand */}
       <div className="flex items-center gap-2.5 shrink-0">
-        <div className="h-6 w-6 rounded-md bg-primary flex items-center justify-center shrink-0 shadow-sm shadow-primary/30">
-          <span className="text-[9px] font-black text-primary-foreground leading-none tracking-tighter">AI</span>
-        </div>
-        <span className="text-sm font-bold tracking-widest text-foreground uppercase">AICCORE</span>
-        <span className="hidden sm:block text-border mx-1">·</span>
-        <span className="hidden sm:block text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-widest">
-          Arena Command
-        </span>
+        <AiccoreLogo size={24} className="ring-1 ring-border" />
+        <span className="text-sm font-bold tracking-wide text-foreground">{AICCORE_MAKERSPACE}</span>
       </div>
 
       {/* Right cluster */}

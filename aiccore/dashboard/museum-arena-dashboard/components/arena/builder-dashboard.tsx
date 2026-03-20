@@ -16,6 +16,7 @@ import { LiveChallenges } from "./live-challenges"
 import { ChallengesCatalog } from "./challenges-catalog"
 import { ChallengeDetail } from "./challenge-detail"
 import { cn, getApiBase } from "@/lib/utils"
+import { AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 
 const TAB_LABELS: Record<string, string> = {
   live:        "Leaderboard",
@@ -183,7 +184,7 @@ function BuilderDashboardInner() {
               <div className="flex items-center gap-2.5">
                 <h1 className="text-sm font-bold text-foreground tracking-widest uppercase">{currentLabel}</h1>
                 <span className="text-border text-xs">·</span>
-                <span className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-widest">AICCORE Arena</span>
+                <span className="text-[10px] font-medium text-muted-foreground/60 tracking-wide">{AICCORE_MAKERSPACE}</span>
               </div>
               {isAuthenticated && (
                 <span className="text-[10px] font-bold text-primary bg-primary/10 ring-1 ring-primary/20 px-2.5 py-1 rounded-full uppercase tracking-widest">

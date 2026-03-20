@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import langflowLogo from "@/assets/LangflowLogoColor.svg";
+import aiccoreLogo from "@/assets/AiccoreLogo.svg";
 import { handleOnNewValueType } from "@/CustomNodes/hooks/use-handle-new-value";
 import { useGetSystemMessageGenQuery } from "@/controllers/API/queries/assistant";
 import { useGetFlowId } from "@/modals/IOModal/hooks/useGetFlowId";
@@ -152,8 +152,8 @@ export const AssistantButton: React.FC<AssistantButtonProps> = ({
           />
         ) : (
           <img
-            src={langflowLogo}
-            alt="Langflow logo"
+            src={aiccoreLogo}
+            alt="AICCORE Makerspace"
             className={getIconClassName()}
           />
         )}

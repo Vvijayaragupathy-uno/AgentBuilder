@@ -1,7 +1,7 @@
 {
-  "name": "AICCORE Agent Builder",
+  "name": "AICCORE Makerspace",
   "short_name": "AICCORE",
-  "description": "AICCORE Agent Builder is a high-performance low-code platform for building sophisticated AI agents.",
+  "description": "AICCORE Makerspace — build and run AI agents with visual flows.",
   "icons": [
     {
       "src": "favicon.png",

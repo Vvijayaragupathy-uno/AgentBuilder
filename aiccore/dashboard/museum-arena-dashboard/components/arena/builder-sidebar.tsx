@@ -8,7 +8,6 @@ import {
   Settings,
   Users,
   Cpu,
-  Shield,
   Search,
   KeyRound,
   LogOut,
@@ -25,6 +24,7 @@ export const ADMIN_ONLY_TAB_IDS = [
 ] as const
 
 import { cn } from "@/lib/utils"
+import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 
 interface BuilderSidebarProps {
   activeTab: string
@@ -95,20 +95,17 @@ export function BuilderSidebar({
     >
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-4 py-4 border-b border-border">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 ring-1 ring-primary/20">
-          <Shield className="h-3.5 w-3.5 text-primary" />
-        </div>
-        <div className="flex flex-col">
-          <span className="text-sm font-bold tracking-wider text-foreground leading-none">AICCORE</span>
-          <span className="text-[9px] font-medium text-muted-foreground/50 uppercase tracking-widest mt-0.5">Dashboard</span>
-        </div>
+        <AiccoreLogo size={28} className="ring-1 ring-border shadow-sm" />
+        <span className="text-sm font-bold tracking-wide text-foreground leading-tight min-w-0">
+          {AICCORE_MAKERSPACE}
+        </span>
       </div>
 
       {/* Navigation */}
       <nav className="flex flex-col gap-0.5 p-3 flex-1 overflow-y-auto">
         {/* Public section */}
         <p className="text-[9px] font-bold text-muted-foreground/40 uppercase tracking-[0.15em] px-2 pb-1.5 pt-2">
-          Live Arena
+          Live
         </p>
         {publicItems.map(renderItem)}
 

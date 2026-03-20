@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { FlowPreviewCard } from "./flow-preview-card"
 import { cn, getApiBase } from "@/lib/utils"
 import { Monitor } from "lucide-react"
@@ -16,60 +16,72 @@ interface MosaicSession {
     lastUpdate: number
 }
 
-export function MosaicDisplay() {
+/** Server truth for who still appears on the mosaic (active + not yet submitted). */
+function parseActiveSessionsList(data: unknown): {
+    sessions: Record<string, MosaicSession>
+    ids: string[]
+} {
+    const initialSessions: Record<string, MosaicSession> = {}
+    const ids: string[] = []
+    if (!Array.isArray(data)) return { sessions: initialSessions, ids }
+
+    data.forEach((s: any) => {
+        const snapshot = s.snapshot || {}
+
+        const mappedNodes = (snapshot.nodes || []).map((n: any) => ({
+            id: n.id,
+            label: n.data?.node?.display_name || n.label || "Component",
+            type: n.data?.node?.display_name?.toLowerCase().includes("chat") ? "input" :
+                n.data?.node?.display_name?.toLowerCase().includes("llm") ? "llm" : "process",
+            x: n.position?.x || (n.x ?? 0),
+            y: n.position?.y || (n.y ?? 0)
+        }))
+
+        const mappedEdges = (snapshot.edges || []).map((e: any) => ({
+            from: e.source || e.from,
+            to: e.target || e.to
+        }))
+
+        initialSessions[s.session_id] = {
+            id: s.session_id,
+            nickname: s.nickname,
+            station: s.station_id || "0",
+            nodes: mappedNodes,
+            edges: mappedEdges,
+            runningNodes: [],
+            status: s.is_submitted ? "submitted" : "idle",
+            lastUpdate: new Date(s.last_update).getTime()
+        }
+        ids.push(s.session_id)
+    })
+
+    return { sessions: initialSessions, ids }
+}
+
+export type MosaicEmptyState = { title: string; subtitle?: string }
+
+export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState }) {
     const [sessions, setSessions] = useState<Record<string, MosaicSession>>({})
     const [activeIds, setActiveIds] = useState<string[]>([])
 
-    useEffect(() => {
-        // 1. Fetch initial active sessions
-        const fetchSessions = async () => {
-            try {
-                const apiBase = getApiBase()
-                const response = await fetch(`${apiBase}/api/v1/aiccore/sessions/active`)
-                const data = await response.json()
-
-                if (Array.isArray(data)) {
-                    const initialSessions: Record<string, MosaicSession> = {}
-                    const ids: string[] = []
-
-                    data.forEach((s: any) => {
-                        const snapshot = s.snapshot || {}
-
-                        const mappedNodes = (snapshot.nodes || []).map((n: any) => ({
-                            id: n.id,
-                            label: n.data?.node?.display_name || n.label || "Component",
-                            type: n.data?.node?.display_name?.toLowerCase().includes("chat") ? "input" :
-                                n.data?.node?.display_name?.toLowerCase().includes("llm") ? "llm" : "process",
-                            x: n.position?.x || (n.x ?? 0),
-                            y: n.position?.y || (n.y ?? 0)
-                        }))
-
-                        const mappedEdges = (snapshot.edges || []).map((e: any) => ({
-                            from: e.source || e.from,
-                            to: e.target || e.to
-                        }))
-
-                        initialSessions[s.session_id] = {
-                            id: s.session_id,
-                            nickname: s.nickname,
-                            station: s.station_id || "0",
-                            nodes: mappedNodes,
-                            edges: mappedEdges,
-                            runningNodes: [],
-                            status: s.is_submitted ? "submitted" : "idle",
-                            lastUpdate: new Date(s.last_update).getTime()
-                        }
-                        ids.push(s.session_id)
-                    })
-
-                    setSessions(initialSessions)
-                    setActiveIds(ids)
-                }
-            } catch (err) {
-                console.error("Failed to fetch initial sessions", err)
-            }
+    const syncFromServer = useCallback(async () => {
+        try {
+            const apiBase = getApiBase()
+            const response = await fetch(`${apiBase}/api/v1/aiccore/sessions/active`)
+            const data = await response.json()
+            const { sessions: next, ids } = parseActiveSessionsList(data)
+            setSessions(next)
+            setActiveIds(ids)
+        } catch (err) {
+            console.error("Failed to sync mosaic sessions", err)
         }
-        fetchSessions()
+    }, [])
+
+    useEffect(() => {
+        void syncFromServer()
+
+        // Poll — fixes stuck tiles if a WebSocket "submitted" was missed or no WS clients were connected
+        const poll = window.setInterval(() => void syncFromServer(), 5000)
 
         // 2. Connect to WebSocket with auto-reconnect
         let ws: WebSocket | null = null
@@ -197,10 +209,11 @@ export function MosaicDisplay() {
 
         return () => {
             destroyed = true
+            clearInterval(poll)
             if (reconnectTimer) clearTimeout(reconnectTimer)
             ws?.close()
         }
-    }, [])
+    }, [syncFromServer])
 
     // Dynamic grid: all active sessions (scroll if many — no silent cap at 9)
     const count = activeIds.length
@@ -208,9 +221,16 @@ export function MosaicDisplay() {
 
     if (count === 0) {
         return (
-            <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground opacity-50">
-                <Monitor className="h-12 w-12 stroke-[1.5]" />
-                <p className="text-sm font-medium uppercase tracking-[0.2em]">Waiting for builders to connect</p>
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-muted-foreground">
+                <Monitor className="h-12 w-12 stroke-[1.5] opacity-50" />
+                <p className="text-sm font-medium uppercase tracking-[0.2em] opacity-80">
+                    {emptyState?.title ?? "Waiting for builders to connect"}
+                </p>
+                {emptyState?.subtitle && (
+                    <p className="max-w-lg text-[13px] font-medium leading-snug text-muted-foreground/80 normal-case tracking-normal">
+                        {emptyState.subtitle}
+                    </p>
+                )}
             </div>
         )
     }

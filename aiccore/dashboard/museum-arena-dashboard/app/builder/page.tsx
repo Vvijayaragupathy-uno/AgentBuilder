@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
+import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut } from "lucide-react"
 import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
 
@@ -461,10 +462,13 @@ export default function BuilderPage() {
             {/* Header */}
             <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4 shrink-0">
                 {/* Left: brand + participant name */}
-                <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold text-foreground">AICCORE</span>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-sm text-muted-foreground">{session.nickname}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                    <AiccoreLogo size={22} className="ring-1 ring-border shrink-0" />
+                    <span className="text-[11px] font-bold tracking-wide text-foreground truncate min-w-0">
+                        {AICCORE_MAKERSPACE}
+                    </span>
+                    <span className="text-muted-foreground/40 shrink-0">·</span>
+                    <span className="text-sm text-muted-foreground truncate">{session.nickname}</span>
                 </div>
 
                 {/* Right: file link · timer · submit · exit */}
@@ -554,7 +558,7 @@ export default function BuilderPage() {
                         iframeLoaded ? "opacity-100" : "opacity-0"
                     )}
                     onLoad={() => setIframeLoaded(true)}
-                    title="AICCORE Agent Builder"
+                    title={AICCORE_MAKERSPACE}
                 />
             </main>
         </div>

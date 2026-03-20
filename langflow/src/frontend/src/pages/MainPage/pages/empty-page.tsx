@@ -6,7 +6,7 @@ import { DotBackgroundDemo } from "@/components/ui/dot-background";
 import { useFolderStore } from "@/stores/foldersStore";
 import useFileDrop from "../hooks/use-on-file-drop";
 
-const EMPTY_PAGE_TITLE = "AICCORE AGENT MAKER Arena";
+const EMPTY_PAGE_TITLE = "AICCORE Makerspace";
 const EMPTY_PAGE_DESCRIPTION = "Build AI agents. Claim missions. Win the challenge.";
 const EMPTY_PAGE_DRAG_AND_DROP_TEXT =
   "Already have a flow? Drag and drop to upload.";
@@ -34,7 +34,7 @@ export const EmptyPageCommunity = ({
               <div className="z-50 mb-2">
                 <img
                   src={logoDarkPng}
-                  alt="AICCORE Logo"
+                  alt="AICCORE Makerspace"
                   data-testid="empty_page_logo_dark"
                   className="h-24 w-auto pointer-events-none select-none"
                 />

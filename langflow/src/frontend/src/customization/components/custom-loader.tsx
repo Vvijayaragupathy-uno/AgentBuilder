@@ -23,7 +23,7 @@ const CustomLoader = ({ remSize = 30 }: CustomLoaderProps) => {
         <div className="relative animate-in fade-in zoom-in duration-700">
           <img
             src={LogoDark}
-            alt="AICCORE Logo"
+            alt="AICCORE Makerspace"
             className="h-20 w-auto object-contain"
           />
         </div>
@@ -41,7 +41,7 @@ const CustomLoader = ({ remSize = 30 }: CustomLoaderProps) => {
       </div>
 
       <p className="mt-4 animate-pulse text-xs font-medium tracking-[0.2em] text-muted-foreground uppercase">
-        Initializing AICCORE
+        Loading AICCORE Makerspace
       </p>
     </div>
   );

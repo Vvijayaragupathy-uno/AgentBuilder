@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { Shield, Lock, ArrowRight, Activity, Terminal } from "lucide-react"
+import { Lock, ArrowRight, Activity, Terminal } from "lucide-react"
+import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card"
@@ -39,15 +40,15 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             <div className="z-10 w-full max-w-[420px] animate-in fade-in zoom-in duration-500">
                 {/* Brand Header */}
                 <div className="flex flex-col items-center gap-6 mb-10">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20 shadow-2xl shadow-primary/20 scale-110">
-                        <Shield className="h-8 w-8 text-primary" />
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/5 ring-1 ring-white/10 shadow-2xl shadow-primary/10 scale-110 overflow-hidden">
+                        <AiccoreLogo size={56} forDarkBackground className="rounded-xl" />
                     </div>
                     <div className="flex flex-col items-center text-center">
                         <h1 className="text-3xl font-black tracking-tighter text-white sm:text-4xl text-glow-primary">
-                            AICCORE
+                            {AICCORE_MAKERSPACE}
                         </h1>
-                        <p className="text-xs font-mono font-medium tracking-[0.3em] text-muted-foreground/60 uppercase mt-1">
-                            Agent Builder Platform
+                        <p className="text-xs font-medium tracking-wide text-muted-foreground/70 mt-1">
+                            Command center
                         </p>
                     </div>
                 </div>

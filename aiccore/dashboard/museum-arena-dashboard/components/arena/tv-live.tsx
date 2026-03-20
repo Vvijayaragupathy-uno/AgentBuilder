@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Crown, Monitor, Rocket, Zap, UserCheck, Clock, Trophy } from "lucide-react"
-import { MosaicDisplay } from "./mosaic-display"
+import { MosaicDisplay, type MosaicEmptyState } from "./mosaic-display"
 import { FlowPreviewCard } from "./flow-preview-card"
 import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
 import type { Challenge, TVStudent } from "./tv-display"
@@ -256,6 +256,32 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
   const presenting = demo?.gate_open && demo.presenting
 
+  /** When the mission clock shows 00:00, explain why the mosaic is empty (normal after submit / demo gate). */
+  const mosaicEmptyState = useMemo((): MosaicEmptyState | undefined => {
+    if (timer !== "00:00") return undefined
+    if (!challenge.start_time) return undefined
+
+    const qlen = demo?.queue_length ?? 0
+    if (demo?.gate_open) {
+      if (qlen === 0) {
+        return {
+          title: "Build time ended",
+          subtitle:
+            "Demo queue is open. Presenters: join from your station. The TV will switch to full canvas when someone is in the queue.",
+        }
+      }
+      return {
+        title: "Demo queue ready",
+        subtitle: `${qlen} presenter${qlen !== 1 ? "s" : ""} in queue — playback starts shortly.`,
+      }
+    }
+    return {
+      title: "Build time ended",
+      subtitle:
+        "All builders have finished or left the mosaic. Facilitator can open the demo queue or end the mission from the dashboard.",
+    }
+  }, [timer, challenge.start_time, demo?.gate_open, demo?.queue_length])
+
   const complexityStyle =
     challenge.complexity_level === "Beginner"     ? "bg-emerald-500/20 text-emerald-400 ring-emerald-500/30" :
     challenge.complexity_level === "Intermediate" ? "bg-amber-500/20  text-amber-400  ring-amber-500/30"  :
@@ -351,7 +377,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
       ) : (
         <div className="flex flex-1 overflow-hidden">
           <div className="flex-1 overflow-hidden border-r border-white/5">
-            <MosaicDisplay />
+            <MosaicDisplay emptyState={mosaicEmptyState} />
           </div>
           <div className="w-[360px] shrink-0 overflow-hidden bg-black/20">
             <TVLeaderboard />

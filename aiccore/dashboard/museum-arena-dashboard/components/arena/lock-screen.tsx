@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react"
 import { cn, getApiBase, getOrCreateBuilderStationId } from "@/lib/utils"
 import { Loader2, ArrowRight, CheckCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 
 interface Challenge {
     id: string
@@ -124,8 +125,11 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
 
                     {/* Header */}
                     <div className="mb-6 text-center">
+                        <div className="flex justify-center mb-4">
+                            <AiccoreLogo size={40} className="ring-1 ring-border shadow-sm" />
+                        </div>
                         <h1 className="text-xl font-semibold text-foreground">
-                            {view === "unlock" ? "Welcome to AICCORE" :
+                            {view === "unlock" ? `Welcome to ${AICCORE_MAKERSPACE}` :
                                 view === "register" ? "Create an Account" : "Sign In"}
                         </h1>
                         <p className="mt-1 text-sm text-muted-foreground">
