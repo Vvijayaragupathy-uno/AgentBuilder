@@ -53,6 +53,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { cn, getApiBase } from "@/lib/utils"
+import { ChallengeDetail } from "./challenge-detail"
 
 interface Challenge {
     id: string
@@ -86,6 +87,45 @@ interface User {
     submissions_count: number
 }
 
+/** `datetime-local` value in local timezone */
+function formatDatetimeLocal(d: Date): string {
+    const y = d.getFullYear()
+    const mo = String(d.getMonth() + 1).padStart(2, "0")
+    const da = String(d.getDate()).padStart(2, "0")
+    const h = String(d.getHours()).padStart(2, "0")
+    const mi = String(d.getMinutes()).padStart(2, "0")
+    return `${y}-${mo}-${da}T${h}:${mi}`
+}
+
+function parseDatetimeLocal(s: string): Date | null {
+    if (!s?.trim()) return null
+    const d = new Date(s)
+    return Number.isNaN(d.getTime()) ? null : d
+}
+
+/** Allowed build window on the admin form: 1 minute up to 24 hours (backend stores any positive int). */
+const MISSION_DURATION_MIN = 1
+const MISSION_DURATION_MAX = 24 * 60 // 1440
+
+function clampMissionMinutes(mins: number): number {
+    return Math.min(MISSION_DURATION_MAX, Math.max(MISSION_DURATION_MIN, Math.round(mins)))
+}
+
+/** Minutes from start → end, or null if invalid */
+function minutesBetweenStartEnd(start: string, end: string): number | null {
+    const s = parseDatetimeLocal(start)
+    const e = parseDatetimeLocal(end)
+    if (!s || !e || e.getTime() <= s.getTime()) return null
+    return clampMissionMinutes((e.getTime() - s.getTime()) / 60000)
+}
+
+function endFromStartAndDuration(start: string, duration: number): string {
+    const s = parseDatetimeLocal(start)
+    if (!s) return ""
+    const mins = clampMissionMinutes(duration)
+    return formatDatetimeLocal(new Date(s.getTime() + mins * 60000))
+}
+
 export function SystemConfig() {
     const [challenges, setChallenges] = useState<Challenge[]>([])
     const [achievements, setAchievements] = useState<Achievement[]>([])
@@ -99,6 +139,7 @@ export function SystemConfig() {
     // Broadcast State
     const [isBroadcastOpen, setIsBroadcastOpen] = useState(false)
     const [broadcastMessage, setBroadcastMessage] = useState("")
+    const [catalogDetailChallengeId, setCatalogDetailChallengeId] = useState<string | null>(null)
 
     // New/Edit challenge form
     const [challengeForm, setChallengeForm] = useState({
@@ -108,6 +149,7 @@ export function SystemConfig() {
         maxParticipants: 10,
         duration: 60,
         startTime: "",
+        endTime: "",
         location: "Main Arena",
         isRegistrationOpen: true,
         starterAssetsUrl: "",
@@ -199,8 +241,67 @@ export function SystemConfig() {
         window.location.href = `${apiBase}/api/v1/aiccore/system/export`
     }
 
+    /** Keep `duration_minutes` aligned with mission start/end when both are set; otherwise extend end from start + duration. */
+    const applyMissionDurationMinutes = (mins: number) => {
+        const duration = clampMissionMinutes(mins)
+        setChallengeForm((prev) => ({
+            ...prev,
+            duration,
+            endTime: prev.startTime ? endFromStartAndDuration(prev.startTime, duration) : prev.endTime,
+        }))
+    }
+
+    const onMissionStartChange = (startTime: string) => {
+        setChallengeForm((prev) => {
+            if (!startTime) {
+                return { ...prev, startTime: "", endTime: "" }
+            }
+            if (prev.endTime) {
+                const m = minutesBetweenStartEnd(startTime, prev.endTime)
+                if (m != null) {
+                    return { ...prev, startTime, duration: m }
+                }
+                const endTime = endFromStartAndDuration(startTime, prev.duration)
+                return { ...prev, startTime, endTime }
+            }
+            return {
+                ...prev,
+                startTime,
+                endTime: endFromStartAndDuration(startTime, prev.duration),
+            }
+        })
+    }
+
+    const onMissionEndChange = (endTime: string) => {
+        setChallengeForm((prev) => {
+            if (!endTime) {
+                return { ...prev, endTime: "" }
+            }
+            if (!prev.startTime) {
+                return { ...prev, endTime }
+            }
+            const m = minutesBetweenStartEnd(prev.startTime, endTime)
+            if (m == null) {
+                return { ...prev, endTime }
+            }
+            return { ...prev, endTime, duration: m }
+        })
+    }
+
+    const missionScheduleInvalid =
+        Boolean(challengeForm.startTime) &&
+        Boolean(challengeForm.endTime) &&
+        minutesBetweenStartEnd(challengeForm.startTime, challengeForm.endTime) === null
+
     const handleSaveChallenge = async (e: React.FormEvent) => {
         e.preventDefault()
+        if (
+            challengeForm.startTime &&
+            challengeForm.endTime &&
+            minutesBetweenStartEnd(challengeForm.startTime, challengeForm.endTime) === null
+        ) {
+            return
+        }
         setIsSubmitting(true)
         try {
             const apiBase = getApiBase()
@@ -286,6 +387,7 @@ export function SystemConfig() {
             maxParticipants: 10,
             duration: 60,
             startTime: "",
+            endTime: "",
             location: "Main Arena",
             isRegistrationOpen: true,
             starterAssetsUrl: "",
@@ -309,6 +411,11 @@ export function SystemConfig() {
             formattedTime = `${year}-${month}-${day}T${hours}:${mins}`
         }
 
+        let formattedEnd = ""
+        if (formattedTime && (c.duration_minutes || 0) > 0) {
+            formattedEnd = endFromStartAndDuration(formattedTime, c.duration_minutes || 60)
+        }
+
         setChallengeForm({
             title: c.title,
             description: c.description,
@@ -316,6 +423,7 @@ export function SystemConfig() {
             maxParticipants: c.max_participants || 10,
             duration: c.duration_minutes || 60,
             startTime: formattedTime,
+            endTime: formattedEnd,
             location: c.location || "Main Building Station",
             isRegistrationOpen: c.is_registration_open,
             starterAssetsUrl: c.starter_assets_url || "",
@@ -456,18 +564,92 @@ export function SystemConfig() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="space-y-1.5 flex flex-col">
-                                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">Start Time</Label>
-                                    <Input
-                                        type="datetime-local"
-                                        value={challengeForm.startTime}
-                                        onChange={e => {
-                                            setChallengeForm({ ...challengeForm, startTime: e.target.value })
-                                        }}
-                                        className="bg-background/50 border-white/10 h-9 text-xs"
-                                    />
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+                                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                                    <Clock className="h-3.5 w-3.5 text-primary" />
+                                    Mission build window
                                 </div>
+                                <p className="text-[9px] text-muted-foreground leading-relaxed">
+                                    <strong className="text-foreground/80">Build duration</strong> (saved as <code className="text-[8px]">duration_minutes</code>) is the timer builders see once the mission is live.
+                                    Set <strong>start</strong> and <strong>end</strong> and the duration updates to match that window; or set start + minutes and end fills in automatically.
+                                    Allowed range here: <strong>{MISSION_DURATION_MIN}–{MISSION_DURATION_MAX} min</strong> (up to 24 hours).
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div className="space-y-1.5 flex flex-col">
+                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Mission start</Label>
+                                        <Input
+                                            type="datetime-local"
+                                            value={challengeForm.startTime}
+                                            onChange={(e) => onMissionStartChange(e.target.value)}
+                                            className="bg-background/50 border-white/10 h-9 text-xs"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5 flex flex-col">
+                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Mission end</Label>
+                                        <Input
+                                            type="datetime-local"
+                                            value={challengeForm.endTime}
+                                            onChange={(e) => onMissionEndChange(e.target.value)}
+                                            className="bg-background/50 border-white/10 h-9 text-xs"
+                                        />
+                                        <span className="text-[8px] text-muted-foreground/80">Optional until set; drives duration when start is set</span>
+                                    </div>
+                                    <div className="space-y-1.5 flex flex-col">
+                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Build duration (minutes)</Label>
+                                        <div className="flex gap-2 flex-wrap items-center">
+                                            <Input
+                                                type="number"
+                                                min={MISSION_DURATION_MIN}
+                                                max={MISSION_DURATION_MAX}
+                                                value={challengeForm.duration}
+                                                onChange={(e) => {
+                                                    const raw = Number(e.target.value)
+                                                    if (Number.isNaN(raw)) return
+                                                    applyMissionDurationMinutes(raw)
+                                                }}
+                                                className="bg-background/50 border-white/10 h-9 text-xs w-24"
+                                            />
+                                            <div className="flex gap-1 flex-wrap">
+                                                {([30, 45, 60, 90] as const).map((m) => (
+                                                    <Button
+                                                        key={m}
+                                                        type="button"
+                                                        variant={challengeForm.duration === m ? "default" : "outline"}
+                                                        size="sm"
+                                                        className="h-8 px-2 text-[10px] font-bold"
+                                                        onClick={() => applyMissionDurationMinutes(m)}
+                                                    >
+                                                        {m}m
+                                                    </Button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1.5 flex flex-col">
+                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Max participants</Label>
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            max={500}
+                                            value={challengeForm.maxParticipants}
+                                            onChange={(e) =>
+                                                setChallengeForm({
+                                                    ...challengeForm,
+                                                    maxParticipants: Math.min(500, Math.max(1, Number(e.target.value) || 10)),
+                                                })
+                                            }
+                                            className="bg-background/50 border-white/10 h-9 text-xs"
+                                        />
+                                    </div>
+                                </div>
+                                {missionScheduleInvalid && (
+                                    <p className="text-[9px] font-bold text-amber-500/90">
+                                        Mission end must be after mission start — duration not updated until fixed.
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-1.5 flex flex-col">
                                     <Label className="text-[10px] uppercase font-bold text-muted-foreground">Mission Guidelines (PDF/Doc)</Label>
                                     <div className="flex gap-2">
@@ -538,7 +720,9 @@ export function SystemConfig() {
                                 />
                             </div>
 
-                            <div className="flex items-center justify-between border-t border-white/5 pt-4">
+                            <div className="flex flex-col gap-2 border-t border-white/5 pt-4">
+                                <div className="flex items-center justify-between gap-4 flex-wrap">
+                                <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-2">
                                     <Switch
                                         id="registration-toggle"
@@ -546,6 +730,11 @@ export function SystemConfig() {
                                         onCheckedChange={(val) => setChallengeForm({ ...challengeForm, isRegistrationOpen: val })}
                                     />
                                     <Label htmlFor="registration-toggle" className="text-[10px] uppercase font-bold cursor-pointer">Open Public Registration</Label>
+                                </div>
+                                <p className="text-[9px] text-muted-foreground max-w-xl leading-relaxed pl-1">
+                                    No automatic timer: registration stays open until you turn this off (or use per-mission controls in the catalog).
+                                    Contestant <strong>unlock PINs</strong> are separate — they expire <strong>15 minutes</strong> after issue if unused (see Arena Registry).
+                                </p>
                                 </div>
                                 <div className="flex gap-2">
                                     {editingId && (
@@ -555,6 +744,7 @@ export function SystemConfig() {
                                         {editingId ? "Update Deployment" : "Activate Mission"}
                                     </Button>
                                 </div>
+                            </div>
                             </div>
                         </form>
                     </CardContent>
@@ -636,7 +826,13 @@ export function SystemConfig() {
                                                 <Button variant="ghost" size="sm" className="h-auto p-0 text-[10px] text-primary uppercase font-bold hover:scale-105 transition-transform" onClick={() => handleToggleRegistration(c.id)}>
                                                     {c.is_registration_open ? "Disable" : "Enable"}
                                                 </Button>
-                                                <Button variant="link" size="sm" className="h-auto p-0 text-[10px] text-primary gap-1">
+                                                <Button
+                                                    type="button"
+                                                    variant="link"
+                                                    size="sm"
+                                                    className="h-auto p-0 text-[10px] text-primary gap-1"
+                                                    onClick={() => setCatalogDetailChallengeId(c.id)}
+                                                >
                                                     Details <ExternalLink className="h-2.5 w-2.5" />
                                                 </Button>
                                             </div>
@@ -719,6 +915,27 @@ export function SystemConfig() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Mission catalog — full detail preview (same as builder challenge view) */}
+            <Dialog
+                open={!!catalogDetailChallengeId}
+                onOpenChange={(open) => {
+                    if (!open) setCatalogDetailChallengeId(null)
+                }}
+            >
+                <DialogContent className="max-w-4xl w-[min(100vw-2rem,56rem)] max-h-[min(90vh,900px)] overflow-y-auto border-border/60 bg-background/95 backdrop-blur-xl">
+                    <DialogHeader className="sr-only">
+                        <DialogTitle>Mission details</DialogTitle>
+                        <DialogDescription>Preview how builders see this challenge</DialogDescription>
+                    </DialogHeader>
+                    {catalogDetailChallengeId ? (
+                        <ChallengeDetail
+                            challengeId={catalogDetailChallengeId}
+                            onBack={() => setCatalogDetailChallengeId(null)}
+                        />
+                    ) : null}
+                </DialogContent>
+            </Dialog>
 
             {/* Broadcast Modal */}
             <Dialog open={isBroadcastOpen} onOpenChange={setIsBroadcastOpen}>

@@ -442,13 +442,16 @@ def create_aiccore_app():
                         ).scalar()
                         or 0
                     )
+                # NOTE: Langflow has ONE flow DB per server. Purge clears the whole DB; with >1 active
+                # AICCORE session we skip purge (so laptop B does not erase laptop A) and only merge
+                # restores — then every browser sees the same combined list of flows (not eraser "broken").
                 if active_n > 1:
-                    # Concurrent builders share one Langflow DB — do NOT global purge (would wipe others).
                     print(
-                        "ℹ️ AICCORE: Multiple active sessions — skipping global Langflow purge; "
-                        "restoring this user's workspace on top of shared state (merge by flow id)."
+                        f"ℹ️ AICCORE: active_aiccore_sessions={active_n} — skipping global Langflow purge; "
+                        "merge-restore only (all laptops share one Langflow workspace)."
                     )
                 else:
+                    print(f"ℹ️ AICCORE: active_aiccore_sessions={active_n} — purge Langflow then restore this user.")
                     await purge_langflow_workspace()
                 
                 # 5.5 Sync Persistence: Restore the FULL workspace from latest manifest
@@ -1242,6 +1245,11 @@ def create_aiccore_app():
                     "nickname": u.nickname,
                     "username": u.username,
                     "unlock_code": u.unlock_code,
+                    "unlock_code_generated_at": (
+                        u.unlock_code_generated_at.isoformat()
+                        if u.unlock_code_generated_at
+                        else None
+                    ),
                     "created_at": u.created_at.isoformat(),
                     "honors_count": len(u.honors or {}),
                     "submissions_count": sub_count

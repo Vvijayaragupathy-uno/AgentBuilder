@@ -29,7 +29,7 @@ interface User {
     id: string
     username: string
     nickname: string
-    unlock_code: string
+    unlock_code: string | null
     unlock_code_generated_at: string | null
     created_at: string
 }
@@ -131,7 +131,9 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
                     </div>
                     <div>
                         <h2 className="text-xl font-bold tracking-tight text-foreground">Arena Registry</h2>
-                        <p className="text-sm text-muted-foreground">Manage contestants and their station unlock codes</p>
+                        <p className="text-sm text-muted-foreground">
+                            Manage contestants and PINs. After a successful station unlock the PIN is cleared (one-time); use ↻ to issue a new code. Unused PINs expire after 15 minutes.
+                        </p>
                     </div>
                 </div>
 
@@ -180,8 +182,8 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
                         <TableRow>
                             <TableHead className="w-[250px]">Contestant</TableHead>
                             <TableHead>Handle</TableHead>
-                            <TableHead>Unlock Code</TableHead>
-                            <TableHead>Generated At</TableHead>
+                            <TableHead>Active PIN</TableHead>
+                            <TableHead>Code issued</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -215,7 +217,13 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
                                                 {user.unlock_code}
                                             </Badge>
                                         ) : (
-                                            <Badge variant="secondary" className="font-mono text-xs opacity-50">EXPIRED</Badge>
+                                            <Badge
+                                                variant="secondary"
+                                                className="text-xs font-normal opacity-80"
+                                                title="PIN was used at unlock or never issued — click refresh to generate a new code"
+                                            >
+                                                No active PIN
+                                            </Badge>
                                         )}
                                     </div>
                                 </TableCell>
@@ -223,7 +231,9 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
                                     <div className="flex flex-col text-xs text-muted-foreground">
                                         <div className="flex items-center gap-1">
                                             <Calendar className="h-3 w-3" />
-                                            {user.unlock_code_generated_at ? new Date(user.unlock_code_generated_at).toLocaleTimeString() : "N/A"}
+                                            {user.unlock_code_generated_at
+                                                ? new Date(user.unlock_code_generated_at).toLocaleString()
+                                                : "—"}
                                         </div>
                                     </div>
                                 </TableCell>

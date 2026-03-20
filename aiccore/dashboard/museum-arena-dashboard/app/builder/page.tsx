@@ -1,9 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut } from "lucide-react"
 import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
+
+/** When the mission has no scheduled start, each builder's countdown starts at unlock (this seat). */
+const SESSION_BUILD_START_MS_KEY = "aiccore_session_build_start_ms"
 
 export default function BuilderPage() {
     const [session, setSession] = useState<{ id: string; nickname: string } | null>(null)
@@ -14,7 +17,7 @@ export default function BuilderPage() {
     const [challengeAssets, setChallengeAssets] = useState<string | null>(null)
     const [isSystemLocked, setIsSystemLocked] = useState(false)
     const [timeLeft, setTimeLeft] = useState<number | null>(null)
-    const [challengeInfo, setChallengeInfo] = useState<{ start_time: string; duration: number } | null>(null)
+    const [challengeInfo, setChallengeInfo] = useState<{ start_time: string; duration: number; mode: "mission" | "per_seat" } | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [hasActiveChallenge, setHasActiveChallenge] = useState(false)
     const [isBeforeStart, setIsBeforeStart] = useState(false)
@@ -23,6 +26,8 @@ export default function BuilderPage() {
     const handleUnlock = (sessionId: string, nickname: string, userStats?: any) => {
         setSession({ id: sessionId, nickname })
         localStorage.setItem("aiccore_session_id", sessionId)
+        // Per-seat build window (used when mission has duration but no mission-level start_time)
+        localStorage.setItem(SESSION_BUILD_START_MS_KEY, String(skewedNow()))
         localStorage.setItem("aiccore_nickname", nickname)
         document.cookie = `aiccore_session_id=${sessionId}; path=/; max-age=86400; SameSite=Lax`
 
@@ -48,6 +53,7 @@ export default function BuilderPage() {
             }
         }
         localStorage.removeItem("aiccore_session_id")
+        localStorage.removeItem(SESSION_BUILD_START_MS_KEY)
         localStorage.removeItem("aiccore_nickname")
         localStorage.removeItem("aiccore_flows_count")
         localStorage.removeItem("aiccore_achievements_count")
@@ -163,50 +169,41 @@ export default function BuilderPage() {
                 }
                 // Track whether there is any active challenge at all
                 setHasActiveChallenge(!!status.active_challenge)
-                if (status.start_time && status.duration_minutes) {
-                    setChallengeInfo({
-                        start_time: status.start_time,
-                        duration: status.duration_minutes
-                    })
-                    // Pre-compute before-start so the UI is correct on first render
-                    setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
+                // Timer + auto-submit need duration. Start time is optional:
+                // - With start_time: everyone shares the same end = mission_start + duration (synchronized).
+                // - Without start_time: each laptop uses unlock time + duration (per seat).
+                if (status.active_challenge && status.duration_minutes != null) {
+                    if (status.start_time) {
+                        setChallengeInfo({
+                            start_time: status.start_time,
+                            duration: status.duration_minutes,
+                            mode: "mission",
+                        })
+                        setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
+                    } else {
+                        let stored = localStorage.getItem(SESSION_BUILD_START_MS_KEY)
+                        if (!stored) {
+                            const n = skewedNow()
+                            localStorage.setItem(SESSION_BUILD_START_MS_KEY, String(n))
+                            stored = String(n)
+                        }
+                        setChallengeInfo({
+                            start_time: new Date(Number(stored)).toISOString(),
+                            duration: status.duration_minutes,
+                            mode: "per_seat",
+                        })
+                        setIsBeforeStart(false)
+                    }
+                } else {
+                    setChallengeInfo(null)
+                    setTimeLeft(null)
                 }
             } catch (e) { }
         }
         fetchChallenge()
     }, [session])
 
-    // Timer Logic
-    useEffect(() => {
-        if (!challengeInfo) return
-
-        const timer = setInterval(() => {
-            const start = new Date(challengeInfo.start_time).getTime()
-            const end = start + (challengeInfo.duration * 60 * 1000)
-            const now = skewedNow()
-
-            // Event hasn't started yet — show "awaiting start" state, no countdown
-            if (now < start) {
-                setIsBeforeStart(true)
-                setTimeLeft(null)
-                return
-            }
-
-            setIsBeforeStart(false)
-            const remaining = Math.max(0, Math.floor((end - now) / 1000))
-            setTimeLeft(remaining)
-
-            if (remaining === 0 && !isSubmitted && !isSystemLocked) {
-                console.log("Timer expired. Auto-submitting...")
-                handleSubmit()
-                clearInterval(timer)
-            }
-        }, 1000)
-
-        return () => clearInterval(timer)
-    }, [challengeInfo, isSubmitted, isSystemLocked])
-
-    const handleSubmit = async () => {
+    const handleSubmit = useCallback(async () => {
         if (!session || isSubmitting || isSubmitted) return
         setIsSubmitting(true)
         try {
@@ -222,7 +219,35 @@ export default function BuilderPage() {
         } finally {
             setIsSubmitting(false)
         }
-    }
+    }, [session, isSubmitting, isSubmitted])
+
+    // Timer: at 0s calls submit once (each browser). Mission mode = shared deadline; per_seat = from unlock.
+    useEffect(() => {
+        if (!challengeInfo) return
+
+        const timer = setInterval(() => {
+            const start = new Date(challengeInfo.start_time).getTime()
+            const end = start + challengeInfo.duration * 60 * 1000
+            const now = skewedNow()
+
+            if (challengeInfo.mode === "mission" && now < start) {
+                setIsBeforeStart(true)
+                setTimeLeft(null)
+                return
+            }
+
+            setIsBeforeStart(false)
+            const remaining = Math.max(0, Math.floor((end - now) / 1000))
+            setTimeLeft(remaining)
+
+            if (remaining === 0 && !isSubmitted && !isSystemLocked) {
+                void handleSubmit()
+                clearInterval(timer)
+            }
+        }, 1000)
+
+        return () => clearInterval(timer)
+    }, [challengeInfo, isSubmitted, isSystemLocked, handleSubmit])
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60)
@@ -320,7 +345,13 @@ export default function BuilderPage() {
 
                     {/* Timer */}
                     {timeLeft !== null ? (
-                        <div className={cn(
+                        <div
+                            title={
+                                challengeInfo?.mode === "per_seat"
+                                    ? "Your build time started when you unlocked this station. At 0:00 your flow auto-submits."
+                                    : "Shared mission end (mission start + duration). At 0:00 your flow auto-submits."
+                            }
+                            className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border",
                             timeLeft < 300
                                 ? "bg-rose-500/10 text-rose-400 border-rose-500/20 animate-pulse"
@@ -328,6 +359,9 @@ export default function BuilderPage() {
                         )}>
                             <Clock className="h-3 w-3" />
                             <span>{formatTime(timeLeft)}</span>
+                            {challengeInfo?.mode === "per_seat" && (
+                                <span className="hidden sm:inline text-[9px] uppercase text-muted-foreground font-bold">your slot</span>
+                            )}
                         </div>
                     ) : isBeforeStart ? (
                         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-400 text-xs font-medium">
