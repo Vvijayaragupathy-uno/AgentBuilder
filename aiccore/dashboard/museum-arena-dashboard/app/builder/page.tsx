@@ -37,6 +37,7 @@ export default function BuilderPage() {
         gateOpen: boolean
     } | null>(null)
     const [demoJoining, setDemoJoining] = useState(false)
+    const [demoQueueError, setDemoQueueError] = useState<string | null>(null)
 
     const refreshMissionFromServer = useCallback(async () => {
         if (!session) return
@@ -307,27 +308,46 @@ export default function BuilderPage() {
     const handleJoinDemoQueue = useCallback(async () => {
         if (!session) return
         setDemoJoining(true)
+        setDemoQueueError(null)
         try {
             const res = await fetch(
                 `${getApiBase()}/api/v1/aiccore/session/${session.id}/demo-queue`,
-                { method: "POST", credentials: "include" }
-            )
-            if (res.ok) {
-                const st = await fetch(
-                    `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${session.id}`,
-                    { credentials: "include" }
-                )
-                if (st.ok) {
-                    const d = await st.json()
-                    setDemoInfo({
-                        myPosition: d.my_position,
-                        total: d.queue_length ?? 0,
-                        gateOpen: !!d.gate_open,
-                    })
+                {
+                    method: "POST",
+                    credentials: "include",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-AICCORE-Session-Id": session.id,
+                    },
                 }
+            )
+            if (!res.ok) {
+                let msg = `Could not join (${res.status})`
+                try {
+                    const err = await res.json()
+                    const d = err?.detail
+                    msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((x: { msg?: string }) => x?.msg).filter(Boolean).join(" ") : msg
+                } catch {
+                    /* ignore */
+                }
+                setDemoQueueError(msg)
+                return
+            }
+            const st = await fetch(
+                `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${session.id}`,
+                { credentials: "include" }
+            )
+            if (st.ok) {
+                const d = await st.json()
+                setDemoInfo({
+                    myPosition: d.my_position,
+                    total: d.queue_length ?? 0,
+                    gateOpen: !!d.gate_open,
+                })
             }
         } catch (e) {
             console.error("Demo queue join failed:", e)
+            setDemoQueueError("Network error — check connection and try again.")
         } finally {
             setDemoJoining(false)
         }
@@ -434,14 +454,21 @@ export default function BuilderPage() {
                                 </p>
                             )}
                             {demoInfo?.myPosition == null && (
-                                <button
-                                    type="button"
-                                    onClick={handleJoinDemoQueue}
-                                    disabled={demoJoining}
-                                    className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/15 font-semibold text-primary hover:bg-primary/25 transition-colors disabled:opacity-50"
-                                >
-                                    {demoJoining ? "Joining…" : "Join demo queue"}
-                                </button>
+                                <>
+                                    {demoQueueError && (
+                                        <p className="text-xs font-medium text-rose-400 bg-rose-500/10 ring-1 ring-rose-500/20 rounded-lg px-3 py-2">
+                                            {demoQueueError}
+                                        </p>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleJoinDemoQueue}
+                                        disabled={demoJoining}
+                                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/15 font-semibold text-primary hover:bg-primary/25 transition-colors disabled:opacity-50"
+                                    >
+                                        {demoJoining ? "Joining…" : "Join demo queue"}
+                                    </button>
+                                </>
                             )}
                         </div>
                     )}

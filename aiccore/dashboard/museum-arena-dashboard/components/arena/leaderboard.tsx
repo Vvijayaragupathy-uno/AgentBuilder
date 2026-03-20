@@ -12,7 +12,7 @@ import {
   LogIn,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, formatBuilderSeatLabel, getApiBase } from "@/lib/utils"
 
 type StudentStatus = "REGISTERED" | "CHECKED_IN" | "PARTICIPATING" | "SUBMITTED"
 
@@ -44,7 +44,7 @@ const statusConfig: Record<StudentStatus, {
     color: "text-cyan-400",
     bgColor: "bg-cyan-400/10",
     ringColor: "ring-cyan-400/20",
-    label: "At station",
+    label: "Checked in",
     icon: LogIn,
   },
   PARTICIPATING: {
@@ -200,9 +200,12 @@ export function Leaderboard({
       {/* Stats + Live bar — single compact row */}
       <div className="flex items-center gap-3 mb-1 flex-wrap">
         <div className="glass flex items-center gap-3 rounded-lg px-3 py-2">
-          <div className="flex items-center gap-1.5">
+          <div
+            className="flex items-center gap-1.5"
+            title="Builders who unlocked the station UI (PIN ok). Not the same as registered kiosk PCs on the Stations tab."
+          >
             <LogIn className="h-3 w-3 text-cyan-400 shrink-0" />
-            <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">At station</span>
+            <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">Checked in</span>
             <span className="text-xs font-mono font-bold tabular-nums">{checkedInCount}</span>
           </div>
           <div className="w-px h-3 bg-border" />
@@ -241,7 +244,7 @@ export function Leaderboard({
       <div className="grid grid-cols-[40px_1fr_80px_130px_80px] items-center gap-4 px-4 py-2">
         <span className="text-[9px] font-bold tracking-widest text-muted-foreground/50 uppercase">#</span>
         <span className="text-[9px] font-bold tracking-widest text-muted-foreground/50 uppercase">Contestant</span>
-        <span className="text-[9px] font-bold tracking-widest text-muted-foreground/50 uppercase text-center">Station</span>
+        <span className="text-[9px] font-bold tracking-widest text-muted-foreground/50 uppercase text-center">Seat</span>
         <span className="text-[9px] font-bold tracking-widest text-muted-foreground/50 uppercase text-center">Status</span>
         <span className="text-[9px] font-bold tracking-widest text-muted-foreground/50 uppercase text-right">Score</span>
       </div>
@@ -287,9 +290,14 @@ export function Leaderboard({
                 </div>
 
                 {/* Station */}
-                <div className="flex items-center justify-center gap-1 bg-secondary/20 py-1 px-1.5 rounded-lg border border-white/5">
+                <div
+                  className="flex items-center justify-center gap-1 bg-secondary/20 py-1 px-1.5 rounded-lg border border-white/5"
+                  title={student.station && student.station !== "0" ? student.station : "No seat id stored for this session"}
+                >
                   <Monitor className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                  <span className="font-mono text-[10px] font-bold text-muted-foreground">{student.station}</span>
+                  <span className="font-mono text-[10px] font-bold text-muted-foreground">
+                    {formatBuilderSeatLabel(student.station)}
+                  </span>
                 </div>
 
                 {/* Status */}

@@ -94,6 +94,22 @@ def force_open_demo_gate(db: Session) -> bool:
     return True
 
 
+def ensure_demo_playback_if_gate_open_idle(db: Session) -> bool:
+    """Gate already open but cursor unset (queue was empty) — start first segment when someone joins."""
+    row = get_or_create_arena_row(db)
+    if not row.demo_gate_open or row.demo_cursor >= 0:
+        return False
+    q = ordered_queue_rows(db)
+    if not q:
+        return False
+    row.demo_cursor = 0
+    row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
+        seconds=DEMO_SEGMENT_SECONDS
+    )
+    db.commit()
+    return True
+
+
 def try_open_demo_gate(db: Session) -> bool:
     """Open when arena finalized OR no remaining builders still working on the active challenge.
 

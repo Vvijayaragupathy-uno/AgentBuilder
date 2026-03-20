@@ -33,14 +33,22 @@ function formatLastActive(lastActive: string | null): string {
 export function StationStatus() {
     const [stations, setStations] = useState<Station[]>([])
     const [isLoading, setIsLoading] = useState(true)
+    const [activeBuilderCount, setActiveBuilderCount] = useState<number | null>(null)
 
     const fetchStations = async () => {
         try {
             const apiBase = getApiBase()
-            const res = await fetch(`${apiBase}/api/v1/aiccore/stations`)
-            if (res.ok) {
-                const data = await res.json()
-                setStations(data)
+            const [stationsRes, sessionsRes] = await Promise.all([
+                fetch(`${apiBase}/api/v1/aiccore/stations`),
+                fetch(`${apiBase}/api/v1/aiccore/sessions/active`),
+            ])
+            if (stationsRes.ok) {
+                const data = await stationsRes.json()
+                setStations(Array.isArray(data) ? data : [])
+            }
+            if (sessionsRes.ok) {
+                const sess = await sessionsRes.json()
+                setActiveBuilderCount(Array.isArray(sess) ? sess.length : 0)
             }
         } catch (err) {
             console.error("Failed to fetch stations", err)
@@ -68,7 +76,13 @@ export function StationStatus() {
             ws.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data)
-                    if (msg.type === "STATION_UPDATE") fetchStations()
+                    if (
+                        msg.type === "STATION_UPDATE" ||
+                        msg.type === "LEADERBOARD_UPDATE" ||
+                        msg.type === "SESSION_UPDATE"
+                    ) {
+                        fetchStations()
+                    }
                 } catch (_) {}
             }
             ws.onopen = () => { retryDelay = 1000 }
@@ -92,9 +106,31 @@ export function StationStatus() {
 
     const onlineCount = stations.filter(s => s.status !== "maintenance" && s.status !== "offline").length
     const totalCount = stations.length
-    const pulseLabel = totalCount === 0 ? "OFFLINE" : onlineCount === totalCount ? "OPTIMAL" : onlineCount > totalCount / 2 ? "DEGRADED" : "CRITICAL"
-    const pulseColorClass = pulseLabel === "OPTIMAL" ? "text-emerald-400" : pulseLabel === "DEGRADED" ? "text-amber-400" : "text-rose-400"
-    const pulseDotClass = pulseLabel === "OPTIMAL" ? "bg-emerald-400" : pulseLabel === "DEGRADED" ? "bg-amber-400" : "bg-rose-400"
+    /** Registered kiosk PCs only — browser builders do not appear here until something calls POST /stations/register. */
+    const pulseLabel =
+        totalCount === 0
+            ? "STANDBY"
+            : onlineCount === totalCount
+              ? "OPTIMAL"
+              : onlineCount > totalCount / 2
+                ? "DEGRADED"
+                : "CRITICAL"
+    const pulseColorClass =
+        pulseLabel === "STANDBY"
+            ? "text-amber-400"
+            : pulseLabel === "OPTIMAL"
+              ? "text-emerald-400"
+              : pulseLabel === "DEGRADED"
+                ? "text-amber-400"
+                : "text-rose-400"
+    const pulseDotClass =
+        pulseLabel === "STANDBY"
+            ? "bg-amber-400"
+            : pulseLabel === "OPTIMAL"
+              ? "bg-emerald-400"
+              : pulseLabel === "DEGRADED"
+                ? "bg-amber-400"
+                : "bg-rose-400"
 
     return (
         <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -105,11 +141,18 @@ export function StationStatus() {
                         <Activity className="h-6 w-6 text-primary animate-pulse" />
                         Station Status
                     </h2>
-                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Real-time health monitoring for local builder stations</p>
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest max-w-xl">
+                        Kiosk PCs that register with the API and send heartbeats. Browser-only builders use a virtual seat ID and still show on Live / Leaderboard.
+                    </p>
                 </div>
                 <div className="glass px-6 py-3 rounded-2xl border-primary/20 flex items-center gap-6">
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">System Pulse</span>
+                        <span
+                            className="text-[10px] font-black uppercase tracking-widest text-muted-foreground"
+                            title="STANDBY = no kiosk rows in the database yet. Builders in the browser are tracked separately."
+                        >
+                            System Pulse
+                        </span>
                         <div className="flex items-center gap-2">
                             <div className="relative flex h-2 w-2">
                                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${pulseDotClass} opacity-75`}></span>
@@ -120,11 +163,35 @@ export function StationStatus() {
                     </div>
                     <div className="h-8 w-px bg-white/10" />
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Active Units</span>
+                        <span
+                            className="text-[10px] font-black uppercase tracking-widest text-muted-foreground"
+                            title="Registered kiosk stations that are not offline or in maintenance"
+                        >
+                            Kiosk units
+                        </span>
                         <span className="text-xl font-black">{onlineCount} / {totalCount}</span>
+                        {activeBuilderCount != null && activeBuilderCount > 0 && (
+                            <span className="text-[10px] font-bold normal-case tracking-normal text-muted-foreground/80 leading-tight mt-1 max-w-[11rem]">
+                                {activeBuilderCount} browser builder{activeBuilderCount !== 1 ? "s" : ""} unlocked (Live board)
+                            </span>
+                        )}
                     </div>
                 </div>
             </div>
+
+            {!isLoading && stations.length === 0 && (
+                <div className="rounded-2xl border border-primary/15 bg-primary/5 px-5 py-4 text-sm text-muted-foreground">
+                    <p className="font-bold text-foreground/90 mb-1">Why 0 / 0 while someone is on the Live board?</p>
+                    <p>
+                        This tab only lists machines that call{" "}
+                        <code className="text-[11px] bg-secondary/80 px-1 py-0.5 rounded">POST /api/v1/aiccore/stations/register</code>{" "}
+                        and heartbeats. Museum laptops using the normal builder URL get a per-browser{" "}
+                        <code className="text-[11px] bg-secondary/80 px-1 py-0.5 rounded">ws-…</code> seat ID instead — they appear on{" "}
+                        <span className="text-foreground/80 font-semibold">Live</span> and{" "}
+                        <span className="text-foreground/80 font-semibold">Leaderboard</span>, not here, until you add a small station agent.
+                    </p>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {stations.map((s) => (

@@ -41,6 +41,7 @@ from aiccore.backend.demo_ceremony import (
     join_demo_queue,
     admin_advance_demo,
     remove_session_from_demo_queue,
+    ensure_demo_playback_if_gate_open_idle,
 )
 from aiccore.backend.middleware import AICCoreEventMiddleware
 from aiccore.backend.eraser import purge_langflow_workspace
@@ -584,12 +585,15 @@ def create_aiccore_app():
             }
             
             res = JSONResponse(content=response)
+            # Keep in sync with builder localStorage (lock screen uses 24h). Short TTL caused
+            # 403 on POST /demo-queue (cookie gone while session id still in UI).
             res.set_cookie(
-                key="aiccore_session_id", 
-                value=str(new_session.id), 
-                httponly=True, 
+                key="aiccore_session_id",
+                value=str(new_session.id),
+                httponly=True,
                 samesite="lax",
-                max_age=3600 # 1 hour session
+                max_age=86400,
+                path="/",
             )
             return res
 
@@ -620,9 +624,12 @@ def create_aiccore_app():
     @app.post("/api/v1/aiccore/session/{session_id}/demo-queue")
     async def api_join_demo_queue(session_id: UUID, request: Request):
         cookie_sid = request.cookies.get("aiccore_session_id")
-        if not cookie_sid or cookie_sid != str(session_id):
+        header_sid = (request.headers.get("x-aiccore-session-id") or "").strip()
+        target = str(session_id)
+        if (cookie_sid != target) and (header_sid != target):
             raise HTTPException(
-                status_code=403, detail="Matching aiccore_session_id cookie required"
+                status_code=403,
+                detail="Session cookie missing or stale — exit and unlock again with your PIN, or retry after a refresh.",
             )
         try:
             with Session(engine) as db_session:
@@ -635,10 +642,13 @@ def create_aiccore_app():
                 )
             raise HTTPException(status_code=404, detail="Session not found")
         demo_opened = False
+        playback_started = False
         with Session(engine) as db2:
             demo_opened = try_open_demo_gate(db2)
+        with Session(engine) as db3:
+            playback_started = ensure_demo_playback_if_gate_open_idle(db3)
         await broadcast_manager.broadcast({"type": "DEMO_QUEUE_UPDATE", "data": out})
-        if demo_opened:
+        if demo_opened or playback_started:
             await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
         return out
 
@@ -816,7 +826,16 @@ def create_aiccore_app():
                 demo_opened = try_open_demo_gate(db2)
             if demo_opened:
                 await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
-            return {"status": "success", "submission_id": sub_id}
+            res = JSONResponse(content={"status": "success", "submission_id": sub_id})
+            res.set_cookie(
+                key="aiccore_session_id",
+                value=str(session_id),
+                httponly=True,
+                samesite="lax",
+                max_age=86400,
+                path="/",
+            )
+            return res
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 

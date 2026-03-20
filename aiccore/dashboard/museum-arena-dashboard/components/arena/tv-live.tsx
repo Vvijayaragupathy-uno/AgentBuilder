@@ -1,10 +1,10 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { Crown, Monitor, Rocket, Zap, UserCheck, Clock, Trophy } from "lucide-react"
+import { Crown, Monitor, Rocket, Zap, UserCheck, LogIn, Clock, Trophy } from "lucide-react"
 import { MosaicDisplay, type MosaicEmptyState } from "./mosaic-display"
 import { FlowPreviewCard } from "./flow-preview-card"
-import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
+import { applyServerTimeFromIso, cn, formatBuilderSeatLabel, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
 import type { Challenge, TVStudent } from "./tv-display"
 
 interface DemoPresenting {
@@ -55,9 +55,10 @@ function useCountdown(challenge: Challenge): string {
 // ── TV-Scale Leaderboard ──────────────────────────────────────────────────────
 
 function statusMeta(status: TVStudent["status"]) {
-  if (status === "SUBMITTED")    return { icon: Rocket,    color: "text-emerald-400", label: "Submitted" }
-  if (status === "PARTICIPATING") return { icon: Zap,       color: "text-amber-400",  label: "Building"  }
-  return                                 { icon: UserCheck, color: "text-sky-400",    label: "Registered" }
+  if (status === "SUBMITTED")     return { icon: Rocket,    color: "text-emerald-400", label: "Submitted" }
+  if (status === "PARTICIPATING") return { icon: Zap,       color: "text-amber-400",  label: "Building" }
+  if (status === "CHECKED_IN")   return { icon: LogIn,     color: "text-cyan-400",  label: "Checked in" }
+  return                                  { icon: UserCheck, color: "text-sky-400",   label: "Registered" }
 }
 
 function TVLeaderboard() {
@@ -135,10 +136,13 @@ function TVLeaderboard() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-[17px] font-black text-foreground truncate">{s.nickname}</p>
-                    <div className="flex items-center gap-1">
+                    <div
+                      className="flex items-center gap-1"
+                      title={s.station && s.station !== "0" ? s.station : undefined}
+                    >
                       <Monitor className="h-3 w-3 text-muted-foreground/40" />
                       <span className="text-[11px] font-mono text-muted-foreground/40">
-                        Station {s.station}
+                        {formatBuilderSeatLabel(s.station)}
                       </span>
                     </div>
                   </div>
@@ -256,29 +260,33 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
   const presenting = demo?.gate_open && demo.presenting
 
-  /** When the mission clock shows 00:00, explain why the mosaic is empty (normal after submit / demo gate). */
-  const mosaicEmptyState = useMemo((): MosaicEmptyState | undefined => {
-    if (timer !== "00:00") return undefined
-    if (!challenge.start_time) return undefined
-
+  /** Why the mosaic has no tiles: after submit the TV list is empty on purpose; at 00:00 add demo-queue hints. */
+  const mosaicEmptyState = useMemo((): MosaicEmptyState => {
     const qlen = demo?.queue_length ?? 0
-    if (demo?.gate_open) {
-      if (qlen === 0) {
+    if (timer === "00:00" && challenge.start_time) {
+      if (demo?.gate_open) {
+        if (qlen === 0) {
+          return {
+            title: "Build time ended",
+            subtitle:
+              "Demo queue is open. On your station, tap Join demo queue — the TV switches to full canvas when someone is in the queue.",
+          }
+        }
         return {
-          title: "Build time ended",
-          subtitle:
-            "Demo queue is open. Presenters: join from your station. The TV will switch to full canvas when someone is in the queue.",
+          title: "Demo queue ready",
+          subtitle: `${qlen} presenter${qlen !== 1 ? "s" : ""} in queue — playback starts shortly.`,
         }
       }
       return {
-        title: "Demo queue ready",
-        subtitle: `${qlen} presenter${qlen !== 1 ? "s" : ""} in queue — playback starts shortly.`,
+        title: "Build time ended",
+        subtitle:
+          "All builders have finished or left the mosaic. Facilitator can open the demo queue from the dashboard, or builders can join the queue after submit.",
       }
     }
     return {
-      title: "Build time ended",
+      title: "No live canvases on the mosaic",
       subtitle:
-        "All builders have finished or left the mosaic. Facilitator can open the demo queue or end the mission from the dashboard.",
+        "This grid only shows builders who are still active and have not submitted. After submit, your preview disappears here — use Join demo queue on your station to appear on the big screen when demos start.",
     }
   }, [timer, challenge.start_time, demo?.gate_open, demo?.queue_length])
 
@@ -345,7 +353,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
               </span>
               <span className="text-[22px] font-black text-white truncate">{demo!.presenting!.nickname}</span>
               <span className="text-[12px] font-mono text-violet-400/80 shrink-0">
-                Station {demo!.presenting!.station_id ?? "—"}
+                {formatBuilderSeatLabel(demo!.presenting!.station_id ?? "")}
               </span>
             </div>
             {demo && demo.queue_length > 0 && (

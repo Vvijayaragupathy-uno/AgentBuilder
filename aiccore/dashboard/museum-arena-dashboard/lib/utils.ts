@@ -89,6 +89,24 @@ export function getOrCreateBuilderStationId(): string {
 }
 
 /**
+ * Human label for leaderboard / mosaic "station" column.
+ * Registered kiosk IDs stay as-is; browser seat IDs (`ws-…`) shorten; legacy "0" shows as unassigned.
+ */
+export function formatBuilderSeatLabel(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim()
+  if (!s || s === "0") return "—"
+  if (s === "OFFLINE") return "Offline"
+  if (s === "STATION_LOCAL") return "Shared seat"
+  if (s.startsWith("ws-")) {
+    const rest = s.slice(3).replace(/-/g, "")
+    if (rest.length >= 8) return `Seat ${rest.slice(0, 4)}…${rest.slice(-4)}`
+    return `Seat ${s.slice(3, 10)}…`
+  }
+  if (s.length > 16) return `${s.slice(0, 8)}…`
+  return s
+}
+
+/**
  * Langflow UI origin for the builder iframe. When using same-origin proxy, this matches getApiBase()
  * so the iframe and API share cookies and the AICCORE session header/cookie path.
  */

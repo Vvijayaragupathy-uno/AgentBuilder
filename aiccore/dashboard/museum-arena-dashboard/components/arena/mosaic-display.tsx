@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { FlowPreviewCard } from "./flow-preview-card"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, formatBuilderSeatLabel, getApiBase } from "@/lib/utils"
 import { Monitor } from "lucide-react"
 
 interface MosaicSession {
@@ -254,9 +254,14 @@ export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState })
                                 </div>
                                 <span className="text-xs font-bold tracking-tight text-foreground">{session.nickname}</span>
                             </div>
-                            <div className="flex items-center gap-1.5 opacity-50">
+                            <div
+                                className="flex items-center gap-1.5 opacity-50"
+                                title={session.station && session.station !== "0" ? session.station : undefined}
+                            >
                                 <Monitor className="h-3 w-3" />
-                                <span className="font-mono text-[10px] font-bold">Station {session.station}</span>
+                                <span className="font-mono text-[10px] font-bold">
+                                    {formatBuilderSeatLabel(session.station)}
+                                </span>
                             </div>
                         </div>
 
