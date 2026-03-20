@@ -28,15 +28,22 @@ interface DemoStatusPayload {
 
 function useCountdown(challenge: Challenge): string {
   const [display, setDisplay] = useState("--:--")
+  // Primitives only — parent re-fetches challenges every 5s and replaces the object; `[challenge]` reset the timer every poll.
+  const challengeId = challenge.id
+  const startTime = challenge.start_time
+  const durationMinutes = challenge.duration_minutes
 
   useEffect(() => {
-    // No scheduled start: neutral clock (was a static fake MM:00 that never reached "00:00").
-    if (!challenge.start_time) {
+    if (!startTime) {
       setDisplay("—:—")
       return
     }
 
-    const endTime = new Date(challenge.start_time).getTime() + challenge.duration_minutes * 60_000
+    const endTime = new Date(startTime).getTime() + durationMinutes * 60_000
+    if (!Number.isFinite(endTime)) {
+      setDisplay("—:—")
+      return
+    }
 
     const tick = () => {
       const remaining = Math.max(0, endTime - skewedNow())
@@ -48,7 +55,7 @@ function useCountdown(challenge: Challenge): string {
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
-  }, [challenge])
+  }, [challengeId, startTime, durationMinutes])
 
   return display
 }
@@ -238,7 +245,11 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
             const nick = msg.payload?.nickname || "A builder"
             setCongrats({ nickname: nick, until: skewedNow() + 5500 })
           }
-          if (msg.type === "DEMO_GATE_OPEN" || msg.type === "DEMO_QUEUE_UPDATE") {
+          if (
+            msg.type === "DEMO_GATE_OPEN" ||
+            msg.type === "DEMO_QUEUE_UPDATE" ||
+            msg.type === "SUBMISSION_UPDATE"
+          ) {
             void loadDemo()
           }
         } catch { /* ignore */ }
@@ -295,7 +306,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
       subtitle:
         "This grid only shows builders who are still active and have not submitted. After submit, your preview disappears here — use Join demo queue on your station to appear on the big screen when demos start.",
     }
-  }, [timer, challenge.start_time, demo?.gate_open, demo?.queue_length])
+  }, [timer, challenge.id, challenge.start_time, demo?.gate_open, demo?.queue_length])
 
   const complexityStyle =
     challenge.complexity_level === "Beginner"     ? "bg-emerald-500/20 text-emerald-400 ring-emerald-500/30" :
@@ -365,7 +376,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
             </div>
             {demo && demo.queue_length > 0 && (
               <span className="text-[11px] font-bold text-violet-200/80 uppercase tracking-widest shrink-0">
-                Queue {demo.cursor + 1} / {demo.queue_length}
+                Queue {Math.max(0, demo.cursor) + 1} / {demo.queue_length}
               </span>
             )}
           </div>
