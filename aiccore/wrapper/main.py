@@ -32,6 +32,7 @@ from aiccore.backend.models import (
     Achievement,
     ChallengeRegistration,
     ArenaState,
+    DemoQueueEntry,
 )
 from aiccore.backend.demo_ceremony import (
     reset_demo_state,
@@ -58,6 +59,14 @@ import threading
 FAILED_ATTEMPTS = {}
 LOCKOUT_DURATION_SECONDS = 300 # 5 minutes
 MAX_ATTEMPTS = 5
+
+
+def _aiccore_session_auth_ok(request: Request, session_id: UUID) -> bool:
+    """Cookie (unlock) or same header as demo-queue — stops forged body-only submits."""
+    cookie_sid = request.cookies.get("aiccore_session_id")
+    header_sid = (request.headers.get("x-aiccore-session-id") or "").strip()
+    target = str(session_id)
+    return (cookie_sid == target) or (header_sid == target)
 
 
 def _get_or_create_arena_row(db: Session) -> ArenaState:
@@ -487,19 +496,6 @@ def create_aiccore_app():
             sub_count_stmt = select(func.count(Submission.id)).join(AICSession).where(AICSession.user_id == user.id)
             flows_count = db_session.execute(sub_count_stmt).scalar() or 0
             ach_count = len(user.honors) if user.honors else 0
-            
-            db_session.commit()
-
-            # Broadcast session start to dash (simulate initial save)
-            await broadcast_manager.broadcast({
-                "session_id": str(new_session.id),
-                "event_type": "flow_saved",
-                "payload": {
-                    "nickname": user.nickname,
-                    "station_id": station_id,
-                    "snapshot": {"nodes": [], "edges": []}
-                }
-            })
 
             # 4. Update Station status if found
             if station:
@@ -510,10 +506,19 @@ def create_aiccore_app():
             user.unlock_code = None
             user.unlock_code_generated_at = None
 
+            # Single commit: session + event + station + consumed OTP stay consistent if the process crashes mid-request.
             db_session.commit()
             db_session.refresh(new_session)
-            
-            # 4.6 Broadcast Update: Tell dashboard to refresh leaderboard
+
+            await broadcast_manager.broadcast({
+                "session_id": str(new_session.id),
+                "event_type": "flow_saved",
+                "payload": {
+                    "nickname": user.nickname,
+                    "station_id": station_id,
+                    "snapshot": {"nodes": [], "edges": []}
+                }
+            })
             await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {"session_id": str(new_session.id)}})
 
             # 5. Purge Langflow Workspace (The Eraser)
@@ -666,7 +671,16 @@ def create_aiccore_app():
         with Session(engine) as db_session:
             session_obj = db_session.get(AICSession, session_id)
             if not session_obj:
-                return {"status": "not_found"}
+                res = JSONResponse(content={"status": "not_found"})
+                res.set_cookie(
+                    key="aiccore_session_id",
+                    value="",
+                    max_age=0,
+                    path="/",
+                    httponly=True,
+                    samesite="lax",
+                )
+                return res
             session_obj.is_active = False
             session_obj.end_time = datetime.now(timezone.utc)
             # Free the station so the next user can unlock it
@@ -684,11 +698,21 @@ def create_aiccore_app():
             demo_opened = try_open_demo_gate(gate_session)
         if demo_opened:
             await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
+        await broadcast_manager.broadcast({"type": "DEMO_QUEUE_UPDATE", "data": {"event": "deactivated", "session_id": str(session_id)}})
         await broadcast_manager.broadcast({
             "type": "LEADERBOARD_UPDATE",
             "data": {"session_id": str(session_id), "event": "deactivated"}
         })
-        return {"status": "deactivated"}
+        res = JSONResponse(content={"status": "deactivated"})
+        res.set_cookie(
+            key="aiccore_session_id",
+            value="",
+            max_age=0,
+            path="/",
+            httponly=True,
+            samesite="lax",
+        )
+        return res
 
     @app.get("/api/v1/aiccore/sessions/active")
     async def list_active_sessions():
@@ -741,7 +765,12 @@ def create_aiccore_app():
             ]
 
     @app.post("/api/v1/aiccore/submit")
-    async def submit_flow(req: SubmissionRequest):
+    async def submit_flow(req: SubmissionRequest, request: Request):
+        if not _aiccore_session_auth_ok(request, req.session_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Matching session cookie or X-AICCORE-Session-Id header required",
+            )
         with get_event_seq_lock(req.session_id):
             with Session(engine) as db_session:
                 session_obj = db_session.get(AICSession, req.session_id)
@@ -1734,6 +1763,8 @@ def create_aiccore_app():
             session_ids = [row[0] for row in db_session.execute(session_ids_stmt).all()]
 
             if session_ids:
+                # Demo queue FKs session rows — remove before sessions
+                db_session.execute(delete(DemoQueueEntry).where(DemoQueueEntry.session_id.in_(session_ids)))
                 # Delete child rows in dependency order: Events → Submissions → Sessions
                 db_session.execute(delete(Event).where(Event.session_id.in_(session_ids)))
                 db_session.execute(delete(Submission).where(Submission.session_id.in_(session_ids)))

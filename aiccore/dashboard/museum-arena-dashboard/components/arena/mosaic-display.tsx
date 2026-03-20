@@ -42,6 +42,8 @@ function parseActiveSessionsList(data: unknown): {
             to: e.target || e.to
         }))
 
+        const rawLu = s.last_update ? new Date(s.last_update).getTime() : Date.now()
+        const lastUpdate = Number.isFinite(rawLu) ? rawLu : Date.now()
         initialSessions[s.session_id] = {
             id: s.session_id,
             nickname: s.nickname,
@@ -50,7 +52,7 @@ function parseActiveSessionsList(data: unknown): {
             edges: mappedEdges,
             runningNodes: [],
             status: s.is_submitted ? "submitted" : "idle",
-            lastUpdate: new Date(s.last_update).getTime()
+            lastUpdate,
         }
         ids.push(s.session_id)
     })
@@ -60,6 +62,17 @@ function parseActiveSessionsList(data: unknown): {
 
 export type MosaicEmptyState = { title: string; subtitle?: string }
 
+/**
+ * Shown when `/sessions/active` returns no rows. That is normal if (a) no one has unlocked yet,
+ * or (b) everyone still in the arena has already submitted — tiles are intentionally hidden then.
+ * The old “Waiting for builders…” line confused people after submit; TV passes a custom emptyState too.
+ */
+const DEFAULT_MOSAIC_EMPTY: MosaicEmptyState = {
+    title: "No live canvases here",
+    subtitle:
+        "This grid only shows builders who are unlocked and have not submitted yet. Before unlock it stays empty; after everyone submits it stays empty on purpose — use the demo queue on the TV for full-screen walkthroughs.",
+}
+
 export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState }) {
     const [sessions, setSessions] = useState<Record<string, MosaicSession>>({})
     const [activeIds, setActiveIds] = useState<string[]>([])
@@ -68,6 +81,7 @@ export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState })
         try {
             const apiBase = getApiBase()
             const response = await fetch(`${apiBase}/api/v1/aiccore/sessions/active`)
+            if (!response.ok) return
             const data = await response.json()
             const { sessions: next, ids } = parseActiveSessionsList(data)
             setSessions(next)
@@ -95,6 +109,15 @@ export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState })
             if (data.type === "SESSIONS_CLEARED") {
                 setSessions({})
                 setActiveIds([])
+                return
+            }
+
+            if (
+                data.type === "DEMO_QUEUE_UPDATE" ||
+                data.type === "DEMO_GATE_OPEN" ||
+                data.type === "SUBMISSION_UPDATE"
+            ) {
+                void syncFromServer()
                 return
             }
 
@@ -152,7 +175,10 @@ export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState })
                 }
             }
 
-            if (data.event_type.endsWith("_started") || data.event_type.endsWith("_completed")) {
+            if (
+                typeof data.event_type === "string" &&
+                (data.event_type.endsWith("_started") || data.event_type.endsWith("_completed"))
+            ) {
                 const payload = data.payload
                 const isStarted = data.event_type.endsWith("_started")
                 const isVertex = data.event_type.includes("vertex")
@@ -220,17 +246,19 @@ export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState })
     const cols = count <= 1 ? "grid-cols-1" : count <= 4 ? "grid-cols-2" : "grid-cols-3"
 
     if (count === 0) {
+        const title = emptyState?.title ?? DEFAULT_MOSAIC_EMPTY.title
+        const subtitle = emptyState?.subtitle ?? DEFAULT_MOSAIC_EMPTY.subtitle
         return (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-muted-foreground">
                 <Monitor className="h-12 w-12 stroke-[1.5] opacity-50" />
                 <p className="text-sm font-medium uppercase tracking-[0.2em] opacity-80">
-                    {emptyState?.title ?? "Waiting for builders to connect"}
+                    {title}
                 </p>
-                {emptyState?.subtitle && (
+                {subtitle ? (
                     <p className="max-w-lg text-[13px] font-medium leading-snug text-muted-foreground/80 normal-case tracking-normal">
-                        {emptyState.subtitle}
+                        {subtitle}
                     </p>
-                )}
+                ) : null}
             </div>
         )
     }

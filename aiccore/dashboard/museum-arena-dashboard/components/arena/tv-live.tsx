@@ -30,8 +30,9 @@ function useCountdown(challenge: Challenge): string {
   const [display, setDisplay] = useState("--:--")
 
   useEffect(() => {
+    // No scheduled start: neutral clock (was a static fake MM:00 that never reached "00:00").
     if (!challenge.start_time) {
-      setDisplay(`${String(challenge.duration_minutes).padStart(2, "0")}:00`)
+      setDisplay("—:—")
       return
     }
 
@@ -58,7 +59,8 @@ function statusMeta(status: TVStudent["status"]) {
   if (status === "SUBMITTED")     return { icon: Rocket,    color: "text-emerald-400", label: "Submitted" }
   if (status === "PARTICIPATING") return { icon: Zap,       color: "text-amber-400",  label: "Building" }
   if (status === "CHECKED_IN")   return { icon: LogIn,     color: "text-cyan-400",  label: "Checked in" }
-  return                                  { icon: UserCheck, color: "text-sky-400",   label: "Registered" }
+  if (status === "REGISTERED")  return { icon: UserCheck, color: "text-sky-400",   label: "Registered" }
+  return { icon: UserCheck, color: "text-muted-foreground", label: "Unknown" }
 }
 
 function TVLeaderboard() {
@@ -260,14 +262,17 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
   const presenting = demo?.gate_open && demo.presenting
 
-  /** Why the mosaic has no tiles: after submit the TV list is empty on purpose; at 00:00 add demo-queue hints. */
+  /** Empty mosaic copy: scheduled end at 00:00, or open-ended mission + demo gate / queue. */
   const mosaicEmptyState = useMemo((): MosaicEmptyState => {
     const qlen = demo?.queue_length ?? 0
-    if (timer === "00:00" && challenge.start_time) {
+    const scheduledEnd = timer === "00:00" && Boolean(challenge.start_time)
+    const openEndedDemo = !challenge.start_time && (demo?.gate_open || qlen > 0)
+
+    if (scheduledEnd || openEndedDemo) {
       if (demo?.gate_open) {
         if (qlen === 0) {
           return {
-            title: "Build time ended",
+            title: scheduledEnd ? "Build time ended" : "Demo phase",
             subtitle:
               "Demo queue is open. On your station, tap Join demo queue — the TV switches to full canvas when someone is in the queue.",
           }
@@ -277,10 +282,12 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
           subtitle: `${qlen} presenter${qlen !== 1 ? "s" : ""} in queue — playback starts shortly.`,
         }
       }
-      return {
-        title: "Build time ended",
-        subtitle:
-          "All builders have finished or left the mosaic. Facilitator can open the demo queue from the dashboard, or builders can join the queue after submit.",
+      if (scheduledEnd) {
+        return {
+          title: "Build time ended",
+          subtitle:
+            "All builders have finished or left the mosaic. Facilitator can open the demo queue from the dashboard, or builders can join the queue after submit.",
+        }
       }
     }
     return {

@@ -122,7 +122,11 @@ def try_open_demo_gate(db: Session) -> bool:
         return False
     if is_arena_locked_db(db):
         return force_open_demo_gate(db)
-    ch = db.execute(select(Challenge).where(Challenge.is_active == True)).scalars().first()
+    ch = db.execute(
+        select(Challenge)
+        .where(Challenge.is_active == True)
+        .order_by(Challenge.created_at.asc())
+    ).scalars().first()
     if not ch:
         return False
     pending = (
@@ -157,7 +161,10 @@ def try_open_demo_gate(db: Session) -> bool:
     if pending != 0:
         return False
     # Everyone on this challenge submitted while still checked in → start demos.
+    # Require no other unsubmitted sessions anywhere (other challenges / NULL challenge_id).
     if active_cnt > 0:
+        if global_pending != 0:
+            return False
         return force_open_demo_gate(db)
     # Everyone left the mission (or only queue remains), but nobody is still building anywhere.
     if queue_n > 0 and global_pending == 0:
@@ -346,8 +353,27 @@ def remove_session_from_demo_queue(db: Session, session_id: UUID) -> None:
     db.commit()
 
 
+def _repair_demo_cursor_if_needed(db: Session) -> None:
+    """If queue shrank or was cleared, clamp cursor so status/API stay consistent."""
+    row = get_or_create_arena_row(db)
+    q = ordered_queue_rows(db)
+    if not q:
+        if row.demo_cursor >= 0 or row.demo_segment_ends_at is not None:
+            row.demo_cursor = -1
+            row.demo_segment_ends_at = None
+            db.commit()
+        return
+    if row.demo_cursor >= len(q):
+        row.demo_cursor = len(q) - 1
+        row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
+            seconds=DEMO_SEGMENT_SECONDS
+        )
+        db.commit()
+
+
 def get_demo_status(db: Session) -> Dict[str, Any]:
     advance_demo_if_expired(db)
+    _repair_demo_cursor_if_needed(db)
     row = get_or_create_arena_row(db)
     q = ordered_queue_rows(db)
     queue_out = []

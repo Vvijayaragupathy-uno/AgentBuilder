@@ -263,7 +263,7 @@ function TVDisplayInner() {
       // In forced mode, always update challenge data for slides but never switch mode
       if (forcedMode) {
         const nowActive = data.find(c => c.is_active) ?? null
-        if (nowActive) setActiveChallenge(nowActive)
+        setActiveChallenge(nowActive)
         return
       }
 
@@ -284,6 +284,7 @@ function TVDisplayInner() {
         setResultsCountdown(90)
         setMode("results")
       } else {
+        setActiveChallenge(null)
         setMode("attract")
         // 2-minute start warning (fires once per challenge)
         data.forEach(c => {
@@ -384,8 +385,8 @@ function TVDisplayInner() {
 
   const current = forcedMode ?? mode
 
-  // In forced-live mode with no real active challenge, fall back to first available
-  const liveChallenge = activeChallenge ?? (forcedMode === "live" ? (challenges[0] ?? null) : null)
+  // Never use challenges[0] for live — wrong title/timer; show spinner until something is active (or ?mode=live with no mission).
+  const liveChallenge = activeChallenge
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-background">
@@ -398,8 +399,14 @@ function TVDisplayInner() {
       )}
 
       {current === "live" && !liveChallenge && (
-        <div className="flex h-screen w-screen items-center justify-center">
+        <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 px-8 text-center">
           <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="max-w-md text-sm font-bold text-muted-foreground uppercase tracking-widest">
+            No active mission
+          </p>
+          <p className="max-w-lg text-[15px] text-muted-foreground/80">
+            Activate a challenge in the dashboard, or open the TV without <code className="text-xs">?mode=live</code> until a mission is live.
+          </p>
         </div>
       )}
 

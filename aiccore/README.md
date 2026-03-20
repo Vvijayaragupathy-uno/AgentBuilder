@@ -81,6 +81,19 @@ If an old `aiccore.db` still has `participant.unlock_code` **NOT NULL**, startup
 
 `GET /api/v1/aiccore/system/status` includes **`server_time`** (UTC ISO). The TV and builder apply a skew so countdowns match the server even if the device clock is wrong.
 
+### Session-bound `POST /api/v1/aiccore/submit`
+
+That route requires the **`aiccore_session_id` cookie** (set on unlock) **or** the **`X-AICCORE-Session-Id`** header matching the JSON **`session_id`**. The browser builder sends both. **Custom clients** (scripts, Postman, another service) must send the header with the same UUID they put in the body; otherwise they get **403**.
+
+### After you change code
+
+| What you changed | What to do |
+|------------------|------------|
+| **`aiccore/wrapper/main.py`**, **`aiccore/backend/*.py`**, etc. | **Restart the uvicorn process** (stop/start `python -m uvicorn …`, or redeploy the backend container). Hot reload only applies if you run uvicorn with `--reload`. |
+| **Dashboard** (`museum-arena-dashboard` TS/TSX) | **`npm run dev`**: saves usually hot-reload. **Production build**: run `npm run build` / redeploy; users may need a **hard refresh** if assets are cached. |
+
+Until the Python server restarts, it is still running the **old** in-memory code and routes.
+
 ### Unlock + challenge
 
 - Optional: **`/builder?challenge_id=<uuid>`** — sent on unlock so the session binds to that challenge (must already be registered).  

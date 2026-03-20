@@ -38,6 +38,8 @@ export default function BuilderPage() {
     } | null>(null)
     const [demoJoining, setDemoJoining] = useState(false)
     const [demoQueueError, setDemoQueueError] = useState<string | null>(null)
+    const [submitError, setSubmitError] = useState<string | null>(null)
+    const autoSubmitFiredRef = useRef(false)
 
     const refreshMissionFromServer = useCallback(async () => {
         if (!session) return
@@ -134,6 +136,11 @@ export default function BuilderPage() {
         setStats(null)
         setIframeLoaded(false)
         setIsSubmitted(false)
+        setDemoInfo(null)
+        setDemoQueueError(null)
+        setDemoJoining(false)
+        setSubmitError(null)
+        autoSubmitFiredRef.current = false
     }
 
     // Poll for submission status
@@ -175,6 +182,8 @@ export default function BuilderPage() {
                     handleReset()
                     return
                 }
+
+                if (!response.ok) return
 
                 const data = await response.json()
                 if (data.is_submitted) {
@@ -289,21 +298,44 @@ export default function BuilderPage() {
     const handleSubmit = useCallback(async () => {
         if (!session || isSubmitting || isSubmitted) return
         setIsSubmitting(true)
+        setSubmitError(null)
         try {
             const apiBase = getApiBase()
             const res = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/submit`, {
                 method: "POST",
                 credentials: "include",
+                headers: {
+                    "X-AICCORE-Session-Id": session.id,
+                },
             })
             if (res.ok) {
                 setIsSubmitted(true)
+                return
             }
+            let msg = `Submit failed (${res.status})`
+            try {
+                const err = await res.json()
+                const d = err?.detail
+                msg = typeof d === "string" ? d : msg
+            } catch {
+                /* ignore */
+            }
+            setSubmitError(msg)
         } catch (e) {
             console.error("Submission failed:", e)
+            setSubmitError("Network error — try again.")
         } finally {
             setIsSubmitting(false)
         }
     }, [session, isSubmitting, isSubmitted])
+
+    const challengeTickKey = challengeInfo
+        ? `${challengeInfo.mode}:${challengeInfo.start_time ?? ""}:${challengeInfo.duration}`
+        : ""
+
+    useEffect(() => {
+        autoSubmitFiredRef.current = false
+    }, [challengeTickKey])
 
     const handleJoinDemoQueue = useCallback(async () => {
         if (!session) return
@@ -373,6 +405,8 @@ export default function BuilderPage() {
             setTimeLeft(remaining)
 
             if (remaining === 0 && !isSubmitted && !isSystemLocked) {
+                if (autoSubmitFiredRef.current) return
+                autoSubmitFiredRef.current = true
                 void handleSubmit()
                 clearInterval(timer)
             }
@@ -594,6 +628,19 @@ export default function BuilderPage() {
                     </button>
                 </div>
             </header>
+
+            {submitError && (
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-rose-500/25 bg-rose-500/10 px-4 py-2 text-xs font-medium text-rose-300">
+                    <span className="min-w-0">{submitError}</span>
+                    <button
+                        type="button"
+                        onClick={() => setSubmitError(null)}
+                        className="shrink-0 rounded-md px-2 py-0.5 text-[10px] uppercase tracking-wide text-rose-200 hover:bg-rose-500/20"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
 
             {challengeAssets && (
                 <Sheet open={challengeInstructionsOpen} onOpenChange={setChallengeInstructionsOpen}>
