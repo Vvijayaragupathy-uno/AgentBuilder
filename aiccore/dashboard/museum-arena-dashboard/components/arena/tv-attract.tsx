@@ -3,22 +3,17 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Brain, Zap, Layers, Cpu, ArrowRight, Clock, Users, Rocket, CheckCircle2, Circle, Loader2, WifiOff, Wrench, PlayCircle } from "lucide-react"
 import { cn, getApiBase, skewedNow } from "@/lib/utils"
+import {
+  LANGFLOW_TEACH_SEGMENTS,
+  LANGFLOW_TEACH_VIDEO_ID,
+  langflowSegmentDurationMs,
+  langflowTeachPlaylistTotalMs,
+} from "@/lib/langflow-teach"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import type { Challenge } from "./tv-display"
 
 const SLIDE_DURATION = 10_000  // ms each slide stays (default)
 const TRANSITION_MS  = 600     // fade duration
-
-// Langflow intro — one ~2 min source split into short segments so each carousel visit is bite-sized.
-const LANGFLOW_TEACH_VIDEO_ID = "Fc9g96XJ4tI"
-const LANGFLOW_SEGMENT_PAD_MS = 2_500 // buffer for player start + end cut
-const LANGFLOW_TEACH_SEGMENTS = [
-  { startSec: 0,  endSec: 24,  blurb: "Welcome — what Langflow is for" },
-  { startSec: 24, endSec: 48,  blurb: "Canvas & components" },
-  { startSec: 48, endSec: 72,  blurb: "Connecting your flow" },
-  { startSec: 72, endSec: 96,  blurb: "Running & iterating" },
-  { startSec: 96, endSec: 120, blurb: "Wrapping up" },
-] as const
 
 // ── Slide 1 — Hook ────────────────────────────────────────────────────────────
 
@@ -256,20 +251,21 @@ function NextSlide({ challenges }: { challenges: Challenge[] }) {
   )
 }
 
-// ── Langflow teach — YouTube segments (~24s each, full loop ≈ 2 min) ─────────
+// ── Langflow teach — ONE carousel slide; five chapters play back-to-back inside it ─────────
 
-function langflowSegmentDurationMs(seg: { startSec: number; endSec: number }) {
-  return (seg.endSec - seg.startSec) * 1000 + LANGFLOW_SEGMENT_PAD_MS
-}
-
-function LangflowTeachSlide({
-  segment,
-  partIndex,
-}: {
-  segment: (typeof LANGFLOW_TEACH_SEGMENTS)[number]
-  partIndex: number
-}) {
+function LangflowTeachPlaylistSlide() {
+  const [partIndex, setPartIndex] = useState(0)
   const total = LANGFLOW_TEACH_SEGMENTS.length
+  const segment = LANGFLOW_TEACH_SEGMENTS[partIndex]
+
+  useEffect(() => {
+    const ms = langflowSegmentDurationMs(segment)
+    const id = window.setTimeout(() => {
+      setPartIndex(i => (i < total - 1 ? i + 1 : i))
+    }, ms)
+    return () => clearTimeout(id)
+  }, [partIndex, segment, total])
+
   const src =
     `https://www.youtube.com/embed/${LANGFLOW_TEACH_VIDEO_ID}` +
     `?start=${segment.startSec}` +
@@ -286,10 +282,10 @@ function LangflowTeachSlide({
       <div className="text-center space-y-2">
         <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary flex items-center justify-center gap-2">
           <PlayCircle className="h-4 w-4" />
-          Learn Langflow (bite-sized)
+          Learn Langflow — full walkthrough
         </span>
         <h2 className="text-[52px] font-black uppercase tracking-tighter leading-none text-foreground">
-          Quick lesson · Part {partIndex + 1} of {total}
+          Chapter {partIndex + 1} of {total}
         </h2>
         <p className="text-[20px] text-muted-foreground font-medium max-w-2xl mx-auto">
           {segment.blurb}
@@ -300,8 +296,8 @@ function LangflowTeachSlide({
         className="relative w-full max-w-5xl aspect-video rounded-2xl overflow-hidden ring-2 ring-primary/25 shadow-[0_0_60px_-12px_rgba(250,204,21,0.35)] bg-black"
       >
         <iframe
-          key={`${segment.startSec}-${segment.endSec}`}
-          title={`Langflow tutorial part ${partIndex + 1}`}
+          key={`${segment.startSec}-${segment.endSec}-${partIndex}`}
+          title={`Langflow tutorial chapter ${partIndex + 1}`}
           src={src}
           className="absolute inset-0 h-full w-full"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -310,7 +306,7 @@ function LangflowTeachSlide({
       </div>
 
       <p className="text-[14px] text-white/35 font-semibold uppercase tracking-wider">
-        Unmute at your station — sign displays short clips on rotation
+        One slide plays all chapters — unmute at your station if you want sound
       </p>
     </div>
   )
@@ -758,10 +754,9 @@ function LiveClock() {
 // ── Main Attract Component ────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 5 intro slides + 5 Langflow teach segments + one spotlight per challenge
+  // 5 intro slides + 1 Langflow teach slide (5 chapters inside) + one spotlight per challenge
   const spotlightChallenges = challenges.filter(c => !c.is_active)
-  const langflowCount = LANGFLOW_TEACH_SEGMENTS.length
-  const TOTAL = 5 + langflowCount + spotlightChallenges.length
+  const TOTAL = 5 + 1 + spotlightChallenges.length
   const slideDurationsMs = useMemo(() => {
     const base = [
       SLIDE_DURATION,
@@ -770,7 +765,7 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
       SLIDE_DURATION,
       SLIDE_DURATION,
     ]
-    const langflow = LANGFLOW_TEACH_SEGMENTS.map(seg => langflowSegmentDurationMs(seg))
+    const langflow = [langflowTeachPlaylistTotalMs()]
     const spots = spotlightChallenges.map(() => SLIDE_DURATION)
     return [...base, ...langflow, ...spots]
   }, [spotlightChallenges.length])
@@ -804,9 +799,7 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
     <HowSlide        key="how" />,
     <ChallengesSlide key="challenges" challenges={challenges} />,
     <NextSlide       key="next"       challenges={challenges} />,
-    ...LANGFLOW_TEACH_SEGMENTS.map((seg, i) => (
-      <LangflowTeachSlide key={`langflow-teach-${i}`} segment={seg} partIndex={i} />
-    )),
+    <LangflowTeachPlaylistSlide key="langflow-teach" />,
     // One dedicated spotlight per challenge
     ...spotlightChallenges.map((c, i) => (
       <ChallengeSpotlightSlide

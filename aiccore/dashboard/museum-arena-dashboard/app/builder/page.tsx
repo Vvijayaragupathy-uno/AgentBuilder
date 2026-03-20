@@ -3,8 +3,16 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
-import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut } from "lucide-react"
+import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut, PlayCircle, ExternalLink } from "lucide-react"
+import { LANGFLOW_TEACH_WATCH_URL } from "@/lib/langflow-teach"
 import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+} from "@/components/ui/sheet"
 
 /** When the mission has no scheduled start, each builder's countdown starts at unlock (this seat). */
 const SESSION_BUILD_START_MS_KEY = "aiccore_session_build_start_ms"
@@ -16,6 +24,7 @@ export default function BuilderPage() {
     const [isSubmitted, setIsSubmitted] = useState(false)
     const [broadcast, setBroadcast] = useState<string | null>(null)
     const [challengeAssets, setChallengeAssets] = useState<string | null>(null)
+    const [challengeInstructionsOpen, setChallengeInstructionsOpen] = useState(false)
     const [isSystemLocked, setIsSystemLocked] = useState(false)
     const [timeLeft, setTimeLeft] = useState<number | null>(null)
     const [challengeInfo, setChallengeInfo] = useState<{ start_time: string; duration: number; mode: "mission" | "per_seat" } | null>(null)
@@ -79,6 +88,10 @@ export default function BuilderPage() {
     useEffect(() => {
         sessionRef.current = session
     }, [session])
+
+    useEffect(() => {
+        if (!challengeAssets) setChallengeInstructionsOpen(false)
+    }, [challengeAssets])
 
     // Handle unlock from LockScreen
     const handleUnlock = (sessionId: string, nickname: string, userStats?: any) => {
@@ -471,20 +484,19 @@ export default function BuilderPage() {
                     <span className="text-sm text-muted-foreground truncate">{session.nickname}</span>
                 </div>
 
-                {/* Right: file link · timer · submit · exit */}
+                {/* Right: tutorial · timer · instructions (if any) · submit · exit */}
                 <div className="flex items-center gap-2">
-                    {challengeAssets && (
-                        <a
-                            href={challengeAssets}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hidden sm:flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-                        >
-                            <FileText className="h-3 w-3" />
-                            Challenge Guide
-                        </a>
-                    )}
-
+                    <a
+                        href={LANGFLOW_TEACH_WATCH_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Same 5-part Langflow walkthrough as the main screen — open on your phone while you build"
+                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                    >
+                        <PlayCircle className="h-3 w-3 shrink-0" />
+                        <span className="hidden sm:inline">Langflow tutorial</span>
+                        <span className="sm:hidden">Video</span>
+                    </a>
                     {/* Timer */}
                     {timeLeft !== null ? (
                         <div
@@ -511,6 +523,19 @@ export default function BuilderPage() {
                             <span>Not started yet</span>
                         </div>
                     ) : null}
+
+                    {challengeAssets && (
+                        <button
+                            type="button"
+                            onClick={() => setChallengeInstructionsOpen(true)}
+                            title="Open instructions in a side panel next to the builder (or use Open in new tab inside)"
+                            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0"
+                        >
+                            <FileText className="h-3 w-3 shrink-0" />
+                            <span className="hidden sm:inline">Challenge instructions</span>
+                            <span className="sm:hidden">Guide</span>
+                        </button>
+                    )}
 
                     {/* Submit — the primary action */}
                     <button
@@ -542,6 +567,38 @@ export default function BuilderPage() {
                     </button>
                 </div>
             </header>
+
+            {challengeAssets && (
+                <Sheet open={challengeInstructionsOpen} onOpenChange={setChallengeInstructionsOpen}>
+                    <SheetContent
+                        side="right"
+                        className="flex h-full w-[min(100vw-0.5rem,24rem)] flex-col gap-0 overflow-hidden border-l border-border p-0 shadow-2xl sm:max-w-xl md:max-w-2xl rounded-l-2xl"
+                    >
+                        <SheetHeader className="space-y-2 border-b border-border bg-card/95 px-4 py-4 pr-12 text-left">
+                            <SheetTitle className="text-base">Challenge instructions</SheetTitle>
+                            <SheetDescription className="text-xs leading-relaxed">
+                                Preview here while you keep building. If it stays blank, the file may block embedding — use the link below.
+                            </SheetDescription>
+                            <a
+                                href={challengeAssets}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-secondary/80 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                            >
+                                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                Open in new tab
+                            </a>
+                        </SheetHeader>
+                        <div className="min-h-0 flex-1 bg-muted/30">
+                            <iframe
+                                src={challengeAssets}
+                                title="Challenge instructions"
+                                className="h-full min-h-[45vh] w-full border-0"
+                            />
+                        </div>
+                    </SheetContent>
+                </Sheet>
+            )}
 
             {/* Builder iframe */}
             <main className="relative flex-1">
