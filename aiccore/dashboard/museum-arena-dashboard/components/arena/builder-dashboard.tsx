@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { BuilderHeader } from "./builder-header"
-import { BuilderSidebar } from "./builder-sidebar"
+import { BuilderSidebar, ADMIN_ONLY_TAB_IDS } from "./builder-sidebar"
 import { MobileTabs } from "./mobile-tabs"
 import { Leaderboard } from "./leaderboard"
 import { ReviewPanel } from "./review-panel"
@@ -28,7 +28,16 @@ const TAB_LABELS: Record<string, string> = {
   login:       "Admin Login",
 }
 
-const VALID_TABS = new Set(["live", "challenges", "mosaic", "contestants", "review", "stations", "settings"])
+const VALID_TABS = new Set([
+  "live",
+  "challenges",
+  "mosaic",
+  "contestants",
+  "review",
+  "stations",
+  "settings",
+])
+const ADMIN_ONLY_TABS = new Set<string>(ADMIN_ONLY_TAB_IDS)
 
 function BuilderDashboardInner() {
   const searchParams = useSearchParams()
@@ -51,6 +60,15 @@ function BuilderDashboardInner() {
     )
     setIsAuthenticated(cookies["aiccore_admin"] === "true")
   }, [])
+
+  /** Registry / Review / Stations / Settings require admin cookie (also blocks ?tab= deep links). */
+  useEffect(() => {
+    if (isAuthenticated === null) return
+    if (!isAuthenticated && ADMIN_ONLY_TABS.has(activeTab)) {
+      setActiveTab("live")
+      setShowAdminLogin(false)
+    }
+  }, [isAuthenticated, activeTab])
 
   // Real-time updates for admin with auto-reconnect
   useEffect(() => {
@@ -147,7 +165,7 @@ function BuilderDashboardInner() {
         onLogout={handleLogout}
         isAuthenticated={!!isAuthenticated}
       />
-      <MobileTabs activeTab={activeTab} onTabChange={setActiveTab} />
+      <MobileTabs activeTab={activeTab} onTabChange={setActiveTab} isAuthenticated={!!isAuthenticated} />
 
       <div className="flex flex-1 overflow-hidden">
         <BuilderSidebar
@@ -199,11 +217,19 @@ function BuilderDashboardInner() {
                     selectedChallengeId
                       ? <ChallengeDetail challengeId={selectedChallengeId} onBack={() => setSelectedChallengeId(null)} />
                       : <ChallengesCatalog onSelectChallenge={setSelectedChallengeId} />
-                  )
-                    : activeTab === "contestants" ? <UserRegistry refreshKey={refreshKey} />
-                      : activeTab === "settings" ? <SystemConfig />
-                        : activeTab === "stations" ? <StationStatus />
-                          : <ReviewPanel />}
+                  ) : !isAuthenticated ? (
+                    <div className="rounded-xl border border-border/60 bg-card/40 p-8 text-center text-sm text-muted-foreground">
+                      Use <strong className="text-foreground">Admin Access</strong> in the sidebar to open Registry, Review, Stations, and Settings.
+                    </div>
+                  ) : activeTab === "contestants" ? (
+                    <UserRegistry refreshKey={refreshKey} />
+                  ) : activeTab === "settings" ? (
+                    <SystemConfig />
+                  ) : activeTab === "stations" ? (
+                    <StationStatus />
+                  ) : (
+                    <ReviewPanel />
+                  )}
                 </div>
               )}
             </div>

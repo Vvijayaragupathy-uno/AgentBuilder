@@ -13,6 +13,9 @@ import {
   LogOut,
 } from "lucide-react"
 
+/** Tabs that require Admin Access (cookie). */
+export const ADMIN_ONLY_TAB_IDS = ["contestants", "review", "stations", "settings"] as const
+
 import { cn } from "@/lib/utils"
 
 interface BuilderSidebarProps {
@@ -25,14 +28,14 @@ interface BuilderSidebarProps {
 
 const publicItems = [
   { id: "live",        label: "Live Board",  icon: LayoutDashboard },
-  { id: "review",      label: "Review",      icon: ClipboardCheck },
-  { id: "contestants", label: "Registry",    icon: Users },
   { id: "challenges",  label: "Challenges",  icon: Search },
   { id: "mosaic",      label: "Display",     icon: Trophy },
 ]
 
 const adminItems = [
-  { id: "stations", label: "Stations", icon: Cpu },
+  { id: "contestants", label: "Registry",    icon: Users },
+  { id: "review",      label: "Review",      icon: ClipboardCheck },
+  { id: "stations",    label: "Stations",    icon: Cpu },
   { id: "settings", label: "Settings", icon: Settings },
 ]
 
@@ -106,7 +109,7 @@ export function BuilderSidebar({
           <>
             <div className="my-3 border-t border-border/60" />
             <p className="text-[9px] font-bold text-muted-foreground/40 uppercase tracking-[0.15em] px-2 pb-1.5">
-              Command
+              Admin
             </p>
             {adminItems.map(renderItem)}
           </>
