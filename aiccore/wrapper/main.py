@@ -12,6 +12,7 @@ print(f"🚀 AICCORE Wrapper starting — root: {project_root}")
 # Import Langflow's app creator
 from langflow.main import setup_app
 from fastapi import Request, Query, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -358,7 +359,7 @@ def create_aiccore_app():
     @app.post("/api/v1/aiccore/auth/unlock")
     async def unlock_station(req: UnlockRequest, request: Request):
         
-        client_ip = request.client.host
+        client_ip = request.client.host if request.client else "unknown"
         now = datetime.now(timezone.utc)
         
         # 0. Rate Limiting Check
@@ -582,7 +583,6 @@ def create_aiccore_app():
                 }
             }
             
-            from fastapi.responses import JSONResponse
             res = JSONResponse(content=response)
             res.set_cookie(
                 key="aiccore_session_id", 
@@ -1132,12 +1132,17 @@ def create_aiccore_app():
                 raise HTTPException(status_code=404, detail="Challenge not found")
             c.title = req.title
             c.description = req.description
-            c.complexity_level = req.complexity_level
-            c.max_participants = req.max_participants
-            c.duration_minutes = req.duration_minutes
+            if req.complexity_level is not None:
+                c.complexity_level = req.complexity_level
+            if req.max_participants is not None:
+                c.max_participants = req.max_participants
+            if req.duration_minutes is not None:
+                c.duration_minutes = req.duration_minutes
             c.start_time = req.start_time
-            c.location = req.location
-            c.is_registration_open = req.is_registration_open
+            if req.location is not None:
+                c.location = req.location
+            if req.is_registration_open is not None:
+                c.is_registration_open = req.is_registration_open
             c.starter_assets_url = req.starter_assets_url
             c.banner_image_url = req.banner_image_url
             db_session.commit()
@@ -1224,11 +1229,16 @@ def create_aiccore_app():
                 )
             db_session.commit()
 
+        # Demo queue rows still FK to session rows — keep TV/demo state aligned with "new challenge" wipe
+        with Session(engine) as dq_session:
+            reset_demo_state(dq_session)
+
         # Broadcast so MosaicDisplay clears itself instantly on all clients
         await broadcast_manager.broadcast({
             "type": "SESSIONS_CLEARED",
             "cleared_count": cleared,
         })
+        await broadcast_manager.broadcast({"type": "DEMO_QUEUE_UPDATE", "data": {"reason": "sessions_cleared"}})
         return {"status": "cleared", "sessions_cleared": cleared}
 
     @app.post("/api/v1/aiccore/system/finalize")
@@ -1503,7 +1513,6 @@ def create_aiccore_app():
             raise HTTPException(status_code=503, detail="Admin authentication not configured. Set AICCORE_ADMIN_PASS.")
 
         if req.password == admin_pass:
-            from fastapi.responses import JSONResponse
             res = JSONResponse(content={"status": "authenticated", "role": "admin"})
             res.set_cookie(
                 key="aiccore_admin",
@@ -1688,10 +1697,11 @@ def create_aiccore_app():
             if not new_code:
                 raise HTTPException(status_code=500, detail="Could not generate a unique unlock code")
 
+            generated_at = datetime.now(timezone.utc)
             user.unlock_code = new_code
-            user.unlock_code_generated_at = datetime.now(timezone.utc)
+            user.unlock_code_generated_at = generated_at
             db_session.commit()
-            return {"unlock_code": user.unlock_code, "generated_at": user.unlock_code_generated_at.isoformat()}
+            return {"unlock_code": user.unlock_code, "generated_at": generated_at.isoformat()}
 
     @app.delete("/api/v1/aiccore/users/{user_id}")
     async def delete_user(user_id: UUID):

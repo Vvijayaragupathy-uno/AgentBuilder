@@ -1,0 +1,7 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/vscode-pyright/schemas/pyrightconfig.schema.json",
+  "extraPaths": [
+    "langflow/src/backend/base",
+    "langflow/src/lfx/src"
+  ]
+}
