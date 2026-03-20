@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut } from "lucide-react"
-import { cn, getApiBase, getLangflowUrl } from "@/lib/utils"
+import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
 
 export default function BuilderPage() {
     const [session, setSession] = useState<{ id: string; nickname: string } | null>(null)
@@ -157,6 +157,7 @@ export default function BuilderPage() {
                 const apiBase = getApiBase()
                 const res = await fetch(`${apiBase}/api/v1/aiccore/system/status`)
                 const status = await res.json()
+                applyServerTimeFromIso(status.server_time)
                 if (status.starter_assets_url) {
                     setChallengeAssets(status.starter_assets_url)
                 }
@@ -168,7 +169,7 @@ export default function BuilderPage() {
                         duration: status.duration_minutes
                     })
                     // Pre-compute before-start so the UI is correct on first render
-                    setIsBeforeStart(Date.now() < new Date(status.start_time).getTime())
+                    setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
                 }
             } catch (e) { }
         }
@@ -182,7 +183,7 @@ export default function BuilderPage() {
         const timer = setInterval(() => {
             const start = new Date(challengeInfo.start_time).getTime()
             const end = start + (challengeInfo.duration * 60 * 1000)
-            const now = Date.now()
+            const now = skewedNow()
 
             // Event hasn't started yet — show "awaiting start" state, no countdown
             if (now < start) {

@@ -106,7 +106,61 @@ def _ensure_schema_migrations():
                     conn.commit()
             except Exception:
                 pass
-        # SQLite cannot easily relax NOT NULL on unlock_code; new DBs get correct DDL from create_all.
+        # Optional: rebuild participant so unlock_code can be NULL (one-time OTP consume).
+        _sqlite_migrate_participant_unlock_nullable()
+
+
+def _sqlite_migrate_participant_unlock_nullable():
+    """
+    Older SQLite DBs had participant.unlock_code NOT NULL. Consuming OTP sets NULL → insert fails.
+    Rebuilds `participant` with nullable unlock_code when PRAGMA says unlock_code is NOT NULL.
+    Safe to run repeatedly: no-op once unlock_code is already nullable.
+    """
+    url = str(engine.url)
+    if not url.startswith("sqlite"):
+        return
+    with engine.connect() as conn:
+        try:
+            rows = conn.execute(text("PRAGMA table_info(participant)")).fetchall()
+        except Exception:
+            return
+        if not rows:
+            return
+        unlock = next((r for r in rows if r[1] == "unlock_code"), None)
+        if not unlock or unlock[3] == 0:
+            return  # 0 = nullable
+        print("🔧 AICCORE SQLite: migrating participant.unlock_code to nullable (one-time OTP)...")
+        conn.execute(text("BEGIN"))
+        try:
+            conn.execute(
+                text("""
+                CREATE TABLE participant__aiccore_new (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    nickname TEXT NOT NULL,
+                    password TEXT,
+                    unlock_code TEXT UNIQUE,
+                    unlock_code_generated_at TEXT,
+                    honors TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """)
+            )
+            conn.execute(
+                text("""
+                INSERT INTO participant__aiccore_new
+                    (id, username, nickname, password, unlock_code, unlock_code_generated_at, honors, created_at)
+                SELECT id, username, nickname, password, unlock_code, unlock_code_generated_at, honors, created_at
+                FROM participant
+                """)
+            )
+            conn.execute(text("DROP TABLE participant"))
+            conn.execute(text("ALTER TABLE participant__aiccore_new RENAME TO participant"))
+            conn.commit()
+            print("✅ AICCORE SQLite: participant.unlock_code is now nullable.")
+        except Exception as e:
+            conn.rollback()
+            print(f"⚠️ AICCORE SQLite participant migration skipped: {e}")
 
 
 def _seed_arena_state():

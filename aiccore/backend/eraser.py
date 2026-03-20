@@ -61,20 +61,23 @@ async def capture_full_workspace_snapshot(session_id: UUID):
             from .models import Event
             from sqlalchemy.orm import Session as AICSession
             
-            with AICSession(aic_engine) as db:
-                from .models import Event
-                stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
-                last_event = db.execute(stmt).scalars().first()
-                seq = (last_event.sequence_number + 1) if last_event else 0
-                
-                snapshot_event = Event(
-                    session_id=session_id,
-                    sequence_number=seq,
-                    event_type="workspace_snapshot",
-                    payload=manifest
-                )
-                db.add(snapshot_event)
-                db.commit()
+            from .event_lock import get_event_seq_lock
+
+            with get_event_seq_lock(session_id):
+                with AICSession(aic_engine) as db:
+                    from .models import Event
+                    stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
+                    last_event = db.execute(stmt).scalars().first()
+                    seq = (last_event.sequence_number + 1) if last_event else 0
+
+                    snapshot_event = Event(
+                        session_id=session_id,
+                        sequence_number=seq,
+                        event_type="workspace_snapshot",
+                        payload=manifest,
+                    )
+                    db.add(snapshot_event)
+                    db.commit()
                 logger.info(f"✅ AICCORE: Workspace snapshot saved to profile ({len(flows)} flows, {len(folders)} folders, {len(variables)} vars).")
 
     except Exception as e:
@@ -85,10 +88,9 @@ async def purge_langflow_workspace():
     Clears Langflow DB content (flows/folders/vars) for this **entire** Langflow instance,
     keeping only protected starter folders — **not** scoped per AICCORE participant.
 
-    Important for multi-laptop / big-TV setups: if several builders share **one** Langflow
-    backend + one Langflow DB (typical AUTO_LOGIN single user), calling purge while another
-    builder is active will **wipe their flows**. True parallel builders need isolated Langflow
-    runtimes (or per-builder Langflow users), not only distinct `station_id` in AICCORE.
+    Callers should skip this when multiple AICCORE sessions are active and share one Langflow
+    DB (see wrapper unlock). When skipped, use restore-only merge so concurrent laptops are not
+    wiped; flows may coexist in one workspace until you use dedicated Langflow instances per seat.
     """
     logger.info("🧹 AICCORE: Purging Langflow workspace for new session...")
     try:
@@ -211,38 +213,39 @@ async def submit_workspace_as_flow(session_id: UUID):
             from .models import Submission, Session as AICSession, Event
             from sqlalchemy.orm import Session as AICSessionORM
             
-            with AICSessionORM(aic_engine) as db:
-                aic_session_obj = db.get(AICSession, session_id)
-                if not aic_session_obj:
-                    raise Exception("AICCORE Session not found.")
+            from .event_lock import get_event_seq_lock
 
-                # Guard against flows with no data (just created, never edited)
-                flow_snapshot = main_flow.data or {}
+            with get_event_seq_lock(session_id):
+                with AICSessionORM(aic_engine) as db:
+                    aic_session_obj = db.get(AICSession, session_id)
+                    if not aic_session_obj:
+                        raise Exception("AICCORE Session not found.")
 
-                new_submission = Submission(
-                    session_id=session_id,
-                    flow_snapshot=flow_snapshot
-                )
-                db.add(new_submission)
-                aic_session_obj.is_submitted = True
+                    flow_snapshot = main_flow.data or {}
 
-                # Log event — include snapshot so history reel shows final state
-                stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
-                last_event = db.execute(stmt).scalars().first()
-                seq = (last_event.sequence_number + 1) if last_event else 0
+                    new_submission = Submission(
+                        session_id=session_id,
+                        flow_snapshot=flow_snapshot
+                    )
+                    db.add(new_submission)
+                    aic_session_obj.is_submitted = True
 
-                sub_event = Event(
-                    session_id=session_id,
-                    sequence_number=seq,
-                    event_type="submitted",
-                    payload={
-                        "submission_id": str(new_submission.id),
-                        "nickname": aic_session_obj.nickname,
-                        "snapshot": flow_snapshot,
-                    }
-                )
-                db.add(sub_event)
-                db.commit()
+                    stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
+                    last_event = db.execute(stmt).scalars().first()
+                    seq = (last_event.sequence_number + 1) if last_event else 0
+
+                    sub_event = Event(
+                        session_id=session_id,
+                        sequence_number=seq,
+                        event_type="submitted",
+                        payload={
+                            "submission_id": str(new_submission.id),
+                            "nickname": aic_session_obj.nickname,
+                            "snapshot": flow_snapshot,
+                        }
+                    )
+                    db.add(sub_event)
+                    db.commit()
 
                 # Broadcast so TV display shows "X just submitted!" toast
                 import asyncio

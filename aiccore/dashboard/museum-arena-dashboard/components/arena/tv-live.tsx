@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Crown, Monitor, Rocket, Zap, UserCheck, Clock } from "lucide-react"
 import { MosaicDisplay } from "./mosaic-display"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, getApiBase, skewedNow } from "@/lib/utils"
 import type { Challenge, TVStudent } from "./tv-display"
 
 // ── Countdown Timer Hook ──────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ function useCountdown(challenge: Challenge): string {
     const endTime = new Date(challenge.start_time).getTime() + challenge.duration_minutes * 60_000
 
     const tick = () => {
-      const remaining = Math.max(0, endTime - Date.now())
+      const remaining = Math.max(0, endTime - skewedNow())
       const mins = Math.floor(remaining / 60_000)
       const secs = Math.floor((remaining % 60_000) / 1000)
       setDisplay(`${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`)

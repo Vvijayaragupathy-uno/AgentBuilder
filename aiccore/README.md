@@ -60,6 +60,38 @@ The dashboard calls AICCORE REST + WebSocket via **`getApiBase()`** in `museum-a
 
 **Summary:** Railway is “fixed” when you define **`NEXT_PUBLIC_AICCORE_API_URL`** (and usually **`NEXT_PUBLIC_LANGFLOW_URL`**) to your deployed backend. The `:7860` example is **local dev only**, not Railway’s public URL.
 
+### Same-origin proxy (fixes cross-origin cookies for embedded Langflow)
+
+When the **Next.js dashboard** and **Langflow+AICCORE** are on **different** public URLs, the browser may not send `aiccore_session_id` to the API. Use a **rewrite** so the browser only talks to the dashboard host:
+
+1. **Server env** (not exposed to browser): `AICCORE_UPSTREAM_URL=https://your-backend.up.railway.app`  
+   (Or rely on `NEXT_PUBLIC_AICCORE_API_URL` for the same value — `next.config.mjs` uses either for rewrites.)
+
+2. **Client env** (build-time): `NEXT_PUBLIC_AICCORE_PROXY_PREFIX=/aiccore-api`
+
+Then `getApiBase()` and `getLangflowUrl()` become `https://your-dashboard.up.railway.app/aiccore-api`, and Next rewrites that to the real backend. **No mixed-origin** → cookies and session work reliably.
+
+**WebSockets** use the same prefix, e.g. `wss://your-dashboard/aiccore-api/api/v1/aiccore/ws`. If your host does not proxy WS upgrades, use the backend URL directly (no `NEXT_PUBLIC_AICCORE_PROXY_PREFIX`) for that deployment.
+
+### SQLite dev DB
+
+If an old `aiccore.db` still has `participant.unlock_code` **NOT NULL**, startup runs a **one-time table rebuild** so NULL is allowed after OTP consume. New databases get the correct schema from `create_all`.
+
+### Server clock
+
+`GET /api/v1/aiccore/system/status` includes **`server_time`** (UTC ISO). The TV and builder apply a skew so countdowns match the server even if the device clock is wrong.
+
+### Unlock + challenge
+
+- Optional: **`/builder?challenge_id=<uuid>`** — sent on unlock so the session binds to that challenge (must already be registered).  
+- **`?mode=auto`** on the TV (or remove `mode`) restores automatic attract/live/results. Forced demo modes still use `?mode=live` etc.; use **“Auto TV mode”** on screen to clear.
+
+### Concurrent Langflow
+
+If **more than one** active AICCORE session exists, **global Langflow purge is skipped**; only **restore/merge** runs so other laptops are not wiped. For a totally clean workspace per seat, run **separate Langflow instances** (or accept shared flow list until submit).
+
+**This is not “automatic separate DB per station” in one deployment** — that’s an ops choice (multiple services/DBs). See **`docs/STATION_ISOLATION.md`**.
+
 ---
 
 ## Configuration & Competition Flow

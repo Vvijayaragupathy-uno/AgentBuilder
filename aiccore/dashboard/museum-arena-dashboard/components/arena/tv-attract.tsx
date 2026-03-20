@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { Brain, Zap, Layers, Cpu, ArrowRight, Clock, Users, Rocket, CheckCircle2, Circle, Loader2, WifiOff, Wrench } from "lucide-react"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, getApiBase, skewedNow } from "@/lib/utils"
 import type { Challenge } from "./tv-display"
 
 const SLIDE_DURATION = 10_000  // ms each slide stays
@@ -180,11 +180,11 @@ function ChallengesSlide({ challenges }: { challenges: Challenge[] }) {
 // ── Slide 5 — Coming Up Next / Tips ──────────────────────────────────────────
 
 function NextSlide({ challenges }: { challenges: Challenge[] }) {
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(skewedNow)
   const upcoming = challenges.find(c => c.is_registration_open && !c.is_active && c.start_time)
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
+    const id = setInterval(() => setNow(skewedNow()), 1000)
     return () => clearInterval(id)
   }, [])
 

@@ -92,6 +92,8 @@ class SubmissionRequest(BaseModel):
 class UnlockRequest(BaseModel):
     unlock_code: str
     station_id: Optional[str] = None
+    # Optional: bind session to this challenge if user is registered (avoids "latest registration wins")
+    challenge_id: Optional[str] = None
 
 class ChallengeRequest(BaseModel):
     title: str
@@ -348,11 +350,36 @@ def create_aiccore_app():
                 .values(is_active=False, end_time=datetime.now(timezone.utc))
             )
 
-            # Find active registration for this user
+            # Challenge for this session: explicit challenge_id (must be registered) OR latest registration
             from aiccore.backend.models import ChallengeRegistration, Challenge
-            reg_stmt = select(ChallengeRegistration).where(ChallengeRegistration.user_id == user.id).order_by(ChallengeRegistration.registered_at.desc()).limit(1)
-            reg = db_session.execute(reg_stmt).scalars().first()
-            active_challenge_id = reg.challenge_id if reg else None
+
+            active_challenge_id = None
+            if req.challenge_id:
+                try:
+                    cid = UUID(req.challenge_id.strip())
+                except (ValueError, TypeError):
+                    raise HTTPException(status_code=400, detail="Invalid challenge_id")
+                reg_chk = db_session.execute(
+                    select(ChallengeRegistration).where(
+                        ChallengeRegistration.user_id == user.id,
+                        ChallengeRegistration.challenge_id == cid,
+                    )
+                ).scalars().first()
+                if not reg_chk:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="You are not registered for this challenge. Open the correct challenge link or register first.",
+                    )
+                active_challenge_id = cid
+            else:
+                reg_stmt = (
+                    select(ChallengeRegistration)
+                    .where(ChallengeRegistration.user_id == user.id)
+                    .order_by(ChallengeRegistration.registered_at.desc())
+                    .limit(1)
+                )
+                reg = db_session.execute(reg_stmt).scalars().first()
+                active_challenge_id = reg.challenge_id if reg else None
 
             new_session = AICSession(
                 user_id=user.id,
@@ -416,15 +443,13 @@ def create_aiccore_app():
                         or 0
                     )
                 if active_n > 1:
+                    # Concurrent builders share one Langflow DB — do NOT global purge (would wipe others).
                     print(
-                        "⚠️ AICCORE: Multiple active AICCORE sessions — shared Langflow workspace. "
-                        "purge_langflow_workspace() removes flows for the WHOLE Langflow DB, "
-                        "not per laptop. Other builders may lose unsaved work. "
-                        "For 2–4 concurrent stations use separate Langflow instances/DBs or "
-                        "a multi-user Langflow setup; station_id only isolates AICCORE sessions, "
-                        "not Langflow storage."
+                        "ℹ️ AICCORE: Multiple active sessions — skipping global Langflow purge; "
+                        "restoring this user's workspace on top of shared state (merge by flow id)."
                     )
-                await purge_langflow_workspace()
+                else:
+                    await purge_langflow_workspace()
                 
                 # 5.5 Sync Persistence: Restore the FULL workspace from latest manifest
                 if user.username and user.username != "testuser":
@@ -807,6 +832,26 @@ def create_aiccore_app():
                         c = db_session.get(Challenge, reg.challenge_id)
                         if c: active_mission = c.title
 
+                # No active session: still show last submission (score, winner, SUBMITTED) for TV/leaderboard
+                if not active_session:
+                    last_row = db_session.execute(
+                        select(Submission, AICSession)
+                        .join(AICSession, Submission.session_id == AICSession.id)
+                        .where(AICSession.user_id == u.id)
+                        .order_by(Submission.submitted_at.desc())
+                        .limit(1)
+                    ).first()
+                    if last_row:
+                        sub, past_sess = last_row[0], last_row[1]
+                        status = "SUBMITTED"
+                        station_id = past_sess.station_id or "OFFLINE"
+                        score = sub.score or 0
+                        is_winner = bool(sub.is_winner)
+                        if past_sess.challenge_id:
+                            c = db_session.get(Challenge, past_sess.challenge_id)
+                            if c:
+                                active_mission = c.title
+
                 leaderboard.append({
                     "id": str(u.id),
                     "nickname": u.nickname,
@@ -1053,7 +1098,8 @@ def create_aiccore_app():
                 "active_challenge": active_challenge.title if active_challenge else None,
                 "starter_assets_url": active_challenge.starter_assets_url if active_challenge else None,
                 "duration_minutes": active_challenge.duration_minutes if active_challenge else None,
-                "start_time": active_challenge.start_time.isoformat() if active_challenge and active_challenge.start_time else None
+                "start_time": active_challenge.start_time.isoformat() if active_challenge and active_challenge.start_time else None,
+                "server_time": datetime.now(timezone.utc).isoformat(),
             }
 
     @app.get("/api/v1/aiccore/stations")

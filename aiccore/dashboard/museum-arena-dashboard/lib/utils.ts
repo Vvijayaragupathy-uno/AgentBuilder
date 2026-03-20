@@ -5,7 +5,29 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Same-origin proxy path (set with AICCORE_UPSTREAM_URL in next.config rewrites). Fixes cookies / session for embedded Langflow. */
+const PROXY_PREFIX = process.env.NEXT_PUBLIC_AICCORE_PROXY_PREFIX || ''
+
+/** Milliseconds to add to Date.now() so UI matches server clock (set from API `server_time`). */
+let serverClockSkewMs = 0
+
+export function applyServerTimeFromIso(iso: string | null | undefined) {
+  if (!iso) return
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return
+  serverClockSkewMs = t - Date.now()
+}
+
+/** Use for countdowns / comparisons instead of Date.now() after at least one `applyServerTimeFromIso`. */
+export function skewedNow(): number {
+  return Date.now() + serverClockSkewMs
+}
+
 export function getApiBase() {
+  if (typeof window !== 'undefined' && PROXY_PREFIX) {
+    return `${window.location.origin}${PROXY_PREFIX.startsWith('/') ? PROXY_PREFIX : `/${PROXY_PREFIX}`}`
+  }
+
   const envUrl = process.env.NEXT_PUBLIC_AICCORE_API_URL
   if (envUrl) {
     // If the dashboard is HTTPS, ensure the API URL is also HTTPS
@@ -53,10 +75,24 @@ export function getOrCreateBuilderStationId(): string {
   }
 }
 
+/**
+ * Langflow UI origin for the builder iframe. When using same-origin proxy, this matches getApiBase()
+ * so the iframe and API share cookies and the AICCORE session header/cookie path.
+ */
 export function getLangflowUrl() {
+  if (typeof window !== 'undefined' && PROXY_PREFIX) {
+    return getApiBase()
+  }
+
   const envUrl = process.env.NEXT_PUBLIC_LANGFLOW_URL
   if (envUrl) {
     return envUrl
+  }
+
+  // If API URL is set and no separate Langflow URL, wrapper serves UI + API on same host
+  const api = process.env.NEXT_PUBLIC_AICCORE_API_URL
+  if (api && !api.startsWith('/')) {
+    return api.replace(/\/$/, '')
   }
 
   // Fallback for local development
@@ -64,10 +100,9 @@ export function getLangflowUrl() {
     const protocol = window.location.protocol
     const hostname = window.location.hostname
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return `${protocol}//${hostname}:5173`
+      return `${protocol}//${hostname}:7860`
     }
   }
 
-  // Last resort fallback
-  return 'http://localhost:5173'
+  return 'http://localhost:7860'
 }

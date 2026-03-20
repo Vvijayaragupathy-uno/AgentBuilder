@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react"
-import { useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { TVAttract } from "./tv-attract"
 import { TVLive } from "./tv-live"
-import { cn, getApiBase } from "@/lib/utils"
-import { Crown, Rocket, Clock, Users } from "lucide-react"
+import { applyServerTimeFromIso, cn, getApiBase, skewedNow } from "@/lib/utils"
+import { Crown, Rocket, Clock, Users, RotateCcw } from "lucide-react"
 
 // ── Shared Types ─────────────────────────────────────────────────────────────
 
@@ -210,7 +210,12 @@ function TVResults({
 
 function TVDisplayInner() {
   const searchParams = useSearchParams()
-  const forcedMode = searchParams.get("mode") as TVMode | null
+  const pathname = usePathname()
+  const router = useRouter()
+  const rawMode = searchParams.get("mode")
+  // ?mode=auto or omit mode → automatic attract/live/results. Forced only for live|attract|results.
+  const forcedMode =
+    rawMode && rawMode !== "auto" ? (rawMode as TVMode) : null
 
   const [mode, setMode]                         = useState<TVMode>("attract")
   const [challenges, setChallenges]             = useState<Challenge[]>([])
@@ -242,7 +247,15 @@ function TVDisplayInner() {
 
   const pollChallenges = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/v1/aiccore/challenges`)
+      const base = getApiBase()
+      const [statusRes, res] = await Promise.all([
+        fetch(`${base}/api/v1/aiccore/system/status`),
+        fetch(`${base}/api/v1/aiccore/challenges`),
+      ])
+      if (statusRes.ok) {
+        const st = await statusRes.json()
+        applyServerTimeFromIso(st.server_time)
+      }
       if (!res.ok) return
       const data: Challenge[] = await res.json()
       setChallenges(data)
@@ -275,7 +288,7 @@ function TVDisplayInner() {
         // 2-minute start warning (fires once per challenge)
         data.forEach(c => {
           if (!c.start_time || c.is_active || warnedChallengesRef.current.has(c.id)) return
-          const diff = new Date(c.start_time).getTime() - Date.now()
+          const diff = new Date(c.start_time).getTime() - skewedNow()
           if (diff > 0 && diff <= 2 * 60 * 1000) {
             warnedChallengesRef.current.add(c.id)
             addToast(`"${c.title}" starts in 2 minutes!`, "warning")
@@ -405,6 +418,22 @@ function TVDisplayInner() {
       )}
 
       <ToastLayer toasts={toasts} />
+
+      {forcedMode && (
+        <button
+          type="button"
+          onClick={() => {
+            const p = new URLSearchParams(searchParams.toString())
+            p.delete("mode")
+            const q = p.toString()
+            router.replace(q ? `${pathname}?${q}` : pathname)
+          }}
+          className="fixed bottom-6 left-6 z-[100] pointer-events-auto flex items-center gap-2 rounded-xl border border-primary/40 bg-background/90 px-4 py-2 text-sm font-bold uppercase tracking-widest text-foreground shadow-lg backdrop-blur-md hover:bg-primary/10"
+        >
+          <RotateCcw className="h-4 w-4 text-primary" />
+          Auto TV mode
+        </button>
+      )}
     </div>
   )
 }

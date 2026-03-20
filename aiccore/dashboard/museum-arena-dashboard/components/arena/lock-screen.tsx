@@ -45,6 +45,8 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
         setLoading(true)
         setError(null)
         try {
+            const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null
+            const challengeId = params?.get("challenge_id")?.trim() || undefined
             const res = await fetch(`${getApiBase()}/api/v1/aiccore/auth/unlock`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -52,6 +54,7 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
                 body: JSON.stringify({
                     unlock_code: code,
                     station_id: getOrCreateBuilderStationId(),
+                    ...(challengeId ? { challenge_id: challengeId } : {}),
                 }),
                 credentials: "include"
             })
@@ -167,7 +170,7 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
                                 )}
                                 disabled={loading}
                                 autoComplete="one-time-code"
-                                ref={(el) => el && el.focus()}
+                                ref={(el) => { if (el) el.focus() }}
                                 suppressHydrationWarning
                             />
 

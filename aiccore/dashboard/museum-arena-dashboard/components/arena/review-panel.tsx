@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { FlowPreviewCard } from "./flow-preview-card"
 import { Slider } from "@/components/ui/slider"
 import {
@@ -43,6 +44,7 @@ interface Submission {
   description: string
   approved: boolean
   winner: boolean
+  score: number
   nodes: any[]
   edges: any[]
 }
@@ -52,18 +54,26 @@ function SubmissionCard({
   achievements,
   onApprove,
   onMarkWinner,
-  onAwardHonor
+  onAwardHonor,
+  onScoreSaved,
 }: {
   sub: Submission,
   achievements: Achievement[],
   onApprove: (id: string) => void,
   onMarkWinner: (id: string) => void,
-  onAwardHonor: (userId: string, achId: string) => void
+  onAwardHonor: (userId: string, achId: string) => void,
+  onScoreSaved: () => void,
 }) {
   const [history, setHistory] = useState<any[]>([])
+  const [scoreInput, setScoreInput] = useState(String(sub.score ?? 0))
+  const [scoreSaving, setScoreSaving] = useState(false)
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [isHistoryMode, setIsHistoryMode] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
+
+  useEffect(() => {
+    setScoreInput(String(sub.score ?? 0))
+  }, [sub.id, sub.score])
 
   const currentNodes = useMemo(() => {
     if (historyIndex === -1 || !history[historyIndex]) return sub.nodes
@@ -229,6 +239,49 @@ function SubmissionCard({
         </span>
       </div>
 
+      {/* Score (curator) — PATCH /submissions/{id}/score */}
+      <div className="flex flex-wrap items-end gap-2 rounded-lg border border-border/60 bg-secondary/30 px-3 py-2">
+        <div className="flex flex-col gap-1">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Score</span>
+          <Input
+            type="number"
+            min={0}
+            max={99999}
+            step={0.5}
+            value={scoreInput}
+            onChange={(e) => setScoreInput(e.target.value)}
+            className="h-8 w-24 font-mono text-xs"
+          />
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={scoreSaving}
+          className="h-8 text-[10px] font-bold uppercase"
+          onClick={async () => {
+            const v = parseFloat(scoreInput)
+            if (Number.isNaN(v) || v < 0) return
+            setScoreSaving(true)
+            try {
+              const apiBase = getApiBase()
+              const res = await fetch(`${apiBase}/api/v1/aiccore/submissions/${sub.id}/score`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ score: v }),
+              })
+              if (res.ok) onScoreSaved()
+            } catch (e) {
+              console.error(e)
+            } finally {
+              setScoreSaving(false)
+            }
+          }}
+        >
+          {scoreSaving ? "…" : "Save score"}
+        </Button>
+      </div>
+
       {/* Flow Name & Description */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
@@ -356,6 +409,7 @@ export function ReviewPanel() {
           description: d.flow_snapshot?.description || "",
           approved: Boolean(d.is_approved),
           winner: Boolean(d.is_winner),
+          score: typeof d.score === "number" ? d.score : Number(d.score) || 0,
           nodes: (d.flow_snapshot?.nodes || []).map((n: any) => ({
             id: n.id,
             label: n.data?.node?.display_name || n.label || "Component",
@@ -466,6 +520,7 @@ export function ReviewPanel() {
             onApprove={handleApprove}
             onMarkWinner={handlePublishWinner}
             onAwardHonor={handleAwardHonor}
+            onScoreSaved={fetchData}
           />
         ))}
       </div>

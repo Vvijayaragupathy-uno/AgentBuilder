@@ -3,26 +3,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 import json
 import asyncio
-import threading
 from datetime import datetime, timezone
-from typing import Dict
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from .database import engine
 from .models import Event
 from .broadcast import broadcast_manager
-
-_event_seq_locks: Dict[str, threading.Lock] = {}
-_event_seq_locks_guard = threading.Lock()
-
-
-def _get_event_seq_lock(session_id: UUID) -> threading.Lock:
-    key = str(session_id)
-    with _event_seq_locks_guard:
-        if key not in _event_seq_locks:
-            _event_seq_locks[key] = threading.Lock()
-        return _event_seq_locks[key]
+from .event_lock import get_event_seq_lock
 
 
 class AICCoreEventMiddleware(BaseHTTPMiddleware):
@@ -281,7 +269,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             print(f"⚠️ Heartbeat Update Error: {e}")
 
     def _log_event(self, session_id: UUID, event_type: str, payload: dict):
-        with _get_event_seq_lock(session_id):
+        with get_event_seq_lock(session_id):
             with Session(engine) as db_session:
                 stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
                 last_event = db_session.execute(stmt).scalars().first()

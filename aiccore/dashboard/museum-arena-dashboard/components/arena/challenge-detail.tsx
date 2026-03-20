@@ -173,6 +173,13 @@ export function ChallengeDetail({ challengeId, onBack }: ChallengeDetailProps) {
                             >
                                 {challenge.is_registration_open ? "Join Challenge" : "Registration Closed"}
                             </Button>
+                            <button
+                                type="button"
+                                onClick={() => router.push(`/builder?challenge_id=${challenge.id}`)}
+                                className="mt-3 w-full text-center text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
+                            >
+                                Already registered? Open builder for this challenge
+                            </button>
                             <p className="text-[9px] text-center mt-3 text-muted-foreground/60">
                                 Limited to {challenge.max_participants} builders per session
                             </p>
