@@ -226,3 +226,168 @@
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
 }
+
+/* TV attract — “How a flow connects” pipeline (hi-fi motion, transform-only where possible) */
+@keyframes tv-flow-card-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.88) rotateX(8deg);
+    filter: blur(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotateX(0deg);
+    filter: blur(0);
+  }
+}
+
+@keyframes tv-flow-card-drift {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes tv-flow-llm-hero {
+  0%, 100% {
+    transform: translateY(0) scale(1.02);
+    box-shadow:
+      0 0 0 0 hsl(var(--primary) / 0),
+      0 14px 44px -18px hsl(var(--primary) / 0.35);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.07);
+    box-shadow:
+      0 0 0 1px hsl(var(--primary) / 0.3),
+      0 22px 56px -12px hsl(var(--primary) / 0.55);
+  }
+}
+
+@keyframes tv-flow-connector-in {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes tv-flow-beam-slide {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes tv-flow-arrow-pulse {
+  0%, 100% {
+    transform: translateX(0);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateX(5px);
+    opacity: 1;
+  }
+}
+
+@keyframes tv-flow-icon-shine {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.09);
+    opacity: 1;
+  }
+}
+
+@keyframes tv-flow-ambient-pulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
+@layer components {
+  .tv-flow-card-shell {
+    opacity: 0;
+    transform-style: preserve-3d;
+    perspective: 800px;
+    animation: tv-flow-card-enter 0.88s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .tv-flow-card-loop {
+    animation: tv-flow-card-drift 6.8s ease-in-out infinite;
+  }
+
+  .tv-flow-card-loop--llm {
+    animation: tv-flow-llm-hero 3.4s ease-in-out infinite;
+  }
+
+  .tv-flow-connector {
+    transform-origin: center center;
+    animation: tv-flow-connector-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    opacity: 0;
+  }
+
+  .tv-flow-beam {
+    animation: tv-flow-beam-slide 2.1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    will-change: transform;
+  }
+
+  .tv-flow-arrow {
+    animation: tv-flow-arrow-pulse 1.4s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+
+  .tv-flow-icon-loop {
+    animation: tv-flow-icon-shine 2.6s ease-in-out infinite;
+    transform-origin: center center;
+  }
+
+  .tv-flow-ambient {
+    left: 50%;
+    top: 50%;
+    animation: tv-flow-ambient-pulse 5s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-flow-card-shell,
+  .tv-flow-card-loop,
+  .tv-flow-card-loop--llm,
+  .tv-flow-connector,
+  .tv-flow-beam,
+  .tv-flow-arrow,
+  .tv-flow-icon-loop,
+  .tv-flow-ambient {
+    animation: none !important;
+  }
+
+  .tv-flow-card-shell {
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+  }
+
+  .tv-flow-connector {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .tv-flow-ambient {
+    opacity: 0.55 !important;
+    transform: translate(-50%, -50%) scale(1) !important;
+  }
+
+  .tv-flow-llm-halo {
+    animation: none !important;
+  }
+}

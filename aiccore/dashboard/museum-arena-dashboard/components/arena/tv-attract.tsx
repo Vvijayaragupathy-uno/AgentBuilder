@@ -1,7 +1,26 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
-import { Brain, Zap, Layers, Cpu, ArrowRight, Clock, Users, Rocket, CheckCircle2, Circle, Loader2, WifiOff, Wrench, PlayCircle } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
+import {
+  Brain,
+  Zap,
+  Layers,
+  Cpu,
+  ArrowRight,
+  Clock,
+  Users,
+  Rocket,
+  CheckCircle2,
+  Circle,
+  Loader2,
+  WifiOff,
+  Wrench,
+  PlayCircle,
+  MessageSquare,
+  FileText,
+  Database,
+  Send,
+} from "lucide-react"
 import { cn, getApiBase, skewedNow } from "@/lib/utils"
 import {
   LANGFLOW_TEACH_SEGMENTS,
@@ -479,77 +498,155 @@ function MeshBackground() {
   )
 }
 
-// ── Animated Langflow diagram (CSS-only, no video dependency) ────────────────
+// ── Flow diagram (readable on TV sidebar: icons + left-to-right pipeline) ──
+
+type FlowStage = {
+  id: string
+  title: string
+  desc: string
+  icon: typeof MessageSquare
+  iconClass: string
+  iconWrap: string
+  ring: string
+  emphasize?: boolean
+}
+
+const FLOW_STAGES: FlowStage[] = [
+  {
+    id: "input",
+    title: "Chat input",
+    desc: "What the visitor types",
+    icon: MessageSquare,
+    iconClass: "text-sky-300",
+    iconWrap: "bg-sky-500/15 ring-sky-400/25",
+    ring: "ring-sky-400/20",
+  },
+  {
+    id: "prompt",
+    title: "Prompt",
+    desc: "Rules & context for the model",
+    icon: FileText,
+    iconClass: "text-violet-300",
+    iconWrap: "bg-violet-500/15 ring-violet-400/25",
+    ring: "ring-violet-400/20",
+  },
+  {
+    id: "llm",
+    title: "Language model",
+    desc: "Any model you choose",
+    icon: Cpu,
+    iconClass: "text-primary",
+    iconWrap: "bg-primary/20 ring-primary/35",
+    ring: "ring-primary/30",
+    emphasize: true,
+  },
+  {
+    id: "memory",
+    title: "Memory",
+    desc: "Optional chat history",
+    icon: Database,
+    iconClass: "text-cyan-300",
+    iconWrap: "bg-cyan-500/15 ring-cyan-400/25",
+    ring: "ring-cyan-400/20",
+  },
+  {
+    id: "output",
+    title: "Output",
+    desc: "Answer to the user",
+    icon: Send,
+    iconClass: "text-emerald-300",
+    iconWrap: "bg-emerald-500/15 ring-emerald-400/25",
+    ring: "ring-emerald-400/20",
+  },
+]
+
+function FlowConnector({ index }: { index: number }) {
+  const stagger = 0.88 + index * 0.1
+  return (
+    <div
+      className="tv-flow-connector flex shrink-0 flex-col items-center justify-center gap-1 px-0.5"
+      style={{ animationDelay: `${stagger}s` }}
+      aria-hidden
+    >
+      <div className="relative h-[3px] w-7 overflow-hidden rounded-full bg-white/[0.07] ring-1 ring-white/[0.06]">
+        <div
+          className="tv-flow-beam absolute inset-y-0 w-[55%] rounded-full bg-gradient-to-r from-transparent via-primary to-transparent opacity-95 shadow-[0_0_12px_hsl(var(--primary)/0.5)]"
+          style={{ animationDelay: `${index * 0.32}s` }}
+        />
+      </div>
+      <ArrowRight
+        className="tv-flow-arrow h-3.5 w-3.5 text-primary"
+        strokeWidth={2.5}
+        style={{ animationDelay: `${0.35 + index * 0.2}s` }}
+      />
+    </div>
+  )
+}
 
 function AnimatedFlow() {
-  const nodes = [
-    { id: "input",    label: "Chat Input",   sub: "User question",      x: "10%",  y: "18%", color: "text-blue-400",    ring: "ring-blue-400/30",    bg: "bg-blue-400/10"    },
-    { id: "prompt",   label: "Prompt",       sub: "System context",     x: "10%",  y: "52%", color: "text-violet-400", ring: "ring-violet-400/30", bg: "bg-violet-400/10" },
-    { id: "llm",      label: "LLM",          sub: "GPT-4 / Claude",     x: "45%",  y: "35%", color: "text-primary",    ring: "ring-primary/40",    bg: "bg-primary/15"    },
-    { id: "memory",   label: "Memory",       sub: "Conversation store",  x: "45%",  y: "68%", color: "text-cyan-400",   ring: "ring-cyan-400/30",   bg: "bg-cyan-400/10"   },
-    { id: "output",   label: "Chat Output",  sub: "AI response",        x: "78%",  y: "45%", color: "text-emerald-400",ring: "ring-emerald-400/30",bg: "bg-emerald-400/10"},
-  ]
-
-  const edges = [
-    { x1: "26%", y1: "27%", x2: "44%", y2: "40%", delay: "0s"   },
-    { x1: "26%", y1: "58%", x2: "44%", y2: "44%", delay: "0.4s" },
-    { x1: "64%", y1: "40%", x2: "78%", y2: "49%", delay: "0.8s" },
-    { x1: "26%", y1: "58%", x2: "44%", y2: "72%", delay: "0.2s" },
-    { x1: "64%", y1: "73%", x2: "78%", y2: "53%", delay: "1s"   },
-  ]
-
   return (
-    <div className="relative w-full h-full overflow-hidden">
-      {/* SVG edges */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
-        {edges.map((e, i) => (
-          <line
-            key={i}
-            x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
-            stroke="rgba(255,255,255,0.12)"
-            strokeWidth="1.5"
-            strokeDasharray="5 4"
-          >
-            <animate attributeName="stroke-dashoffset" from="0" to="-18" dur="1.8s" begin={e.delay} repeatCount="indefinite" />
-          </line>
-        ))}
-        {/* Animated dot travelling each edge */}
-        {edges.map((e, i) => (
-          <circle key={`dot-${i}`} r="3" fill="hsl(38 92% 52% / 0.8)">
-            <animateMotion dur="2.4s" begin={e.delay} repeatCount="indefinite" path={`M ${e.x1} ${e.y1} L ${e.x2} ${e.y2}`} />
-          </circle>
-        ))}
-      </svg>
-
-      {/* Nodes */}
-      {nodes.map((n, i) => (
-        <div
-          key={n.id}
-          className={cn(
-            "absolute flex flex-col gap-0.5 px-3 py-2 rounded-xl glass ring-1 shadow-lg",
-            n.ring,
-          )}
-          style={{
-            left: n.x,
-            top: n.y,
-            transform: "translate(-50%, -50%)",
-            zIndex: 1,
-            animation: `tv-float ${4 + i * 0.7}s ease-in-out infinite ${i * 0.5}s`,
-          }}
-        >
-          <div className={cn("flex items-center gap-1.5")}>
-            <div className={cn("h-2 w-2 rounded-full", n.bg, n.ring, "ring-1")} />
-            <span className={cn("text-[11px] font-black uppercase tracking-wide", n.color)}>
-              {n.label}
-            </span>
-          </div>
-          <span className="text-[10px] text-white/35 pl-3.5">{n.sub}</span>
-        </div>
-      ))}
-
-      {/* Centre glow */}
-      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-        <div className="w-24 h-24 rounded-full bg-primary/8 blur-3xl" />
+    <div className="relative flex h-full w-full min-h-0 flex-col justify-center overflow-hidden px-2 pb-1 pt-7">
+      <div
+        className="tv-flow-ambient pointer-events-none absolute left-1/2 top-1/2 z-0 h-32 w-[min(124%,520px)] rounded-[100%] bg-primary/[0.09] blur-[40px]"
+        aria-hidden
+      />
+      <div className="relative z-[1] flex min-h-0 w-full items-center justify-center">
+        {FLOW_STAGES.map((stage, i) => {
+          const Icon = stage.icon
+          const loopDelay = `${0.88 + i * 0.07}s`
+          const iconAnimDelay = `${0.15 + i * 0.06}s`
+          const iconDuration = `${2.4 + i * 0.22}s`
+          return (
+            <Fragment key={stage.id}>
+              <div
+                className="tv-flow-card-shell flex min-w-0 flex-1 flex-col items-stretch justify-center"
+                style={{ animationDelay: `${i * 0.08}s` }}
+              >
+                <div
+                  className={cn(
+                    "relative flex w-full flex-col items-center rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.09] to-white/[0.02] px-1.5 py-2.5 text-center shadow-lg shadow-black/25 ring-1 backdrop-blur-sm",
+                    stage.ring,
+                    stage.emphasize && "border-primary/30 from-primary/[0.12] to-primary/[0.02]",
+                    stage.emphasize ? "tv-flow-card-loop--llm" : "tv-flow-card-loop",
+                  )}
+                  style={{ animationDelay: loopDelay }}
+                >
+                  <div
+                    className={cn(
+                      "relative mb-1.5 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1",
+                      stage.iconWrap,
+                    )}
+                  >
+                    {stage.emphasize && (
+                      <div
+                        className="tv-flow-llm-halo pointer-events-none absolute inset-[-40%] animate-[spin_7s_linear_infinite] bg-[conic-gradient(from_0deg,transparent,hsl(var(--primary)/0.45),transparent)] opacity-40"
+                        aria-hidden
+                      />
+                    )}
+                    <Icon
+                      className={cn(
+                        "relative z-[1] h-4 w-4 tv-flow-icon-loop",
+                        stage.iconClass,
+                      )}
+                      strokeWidth={2.2}
+                      style={{
+                        animationDelay: iconAnimDelay,
+                        animationDuration: iconDuration,
+                      }}
+                    />
+                  </div>
+                  <p className="text-[11px] font-bold leading-tight text-white/90 sm:text-[12px]">
+                    {stage.title}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-[9px] leading-snug text-white/45 sm:text-[10px]">
+                    {stage.desc}
+                  </p>
+                </div>
+              </div>
+              {i < FLOW_STAGES.length - 1 && <FlowConnector index={i} />}
+            </Fragment>
+          )
+        })}
       </div>
     </div>
   )
@@ -627,9 +724,12 @@ function LivePanel({ challenges }: { challenges: Challenge[] }) {
 
       {/* ── Animated flow diagram (top ~40%) ── */}
       <div className="relative shrink-0" style={{ height: "40%" }}>
-        <div className="absolute top-3 left-0 right-0 flex justify-center z-10">
-          <span className="text-[10px] font-black uppercase tracking-[0.35em] text-white/25">
-            Langflow in Action
+        <div className="absolute top-2 left-0 right-0 z-10 flex flex-col items-center gap-0.5 px-2">
+          <span className="text-[11px] font-black uppercase tracking-[0.28em] text-white/40">
+            How a flow connects
+          </span>
+          <span className="text-[9px] font-medium tracking-wide text-white/22">
+            Inputs → model → answer
           </span>
         </div>
         <AnimatedFlow />
