@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut } from "lucide-react"
 import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
@@ -21,6 +21,53 @@ export default function BuilderPage() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [hasActiveChallenge, setHasActiveChallenge] = useState(false)
     const [isBeforeStart, setIsBeforeStart] = useState(false)
+
+    const refreshMissionFromServer = useCallback(async () => {
+        if (!session) return
+        try {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/system/status`)
+            const status = await res.json()
+            applyServerTimeFromIso(status.server_time)
+            if (status.starter_assets_url) {
+                setChallengeAssets(status.starter_assets_url)
+            }
+            setHasActiveChallenge(!!status.active_challenge)
+            if (status.active_challenge && status.duration_minutes != null) {
+                if (status.start_time) {
+                    setChallengeInfo({
+                        start_time: status.start_time,
+                        duration: status.duration_minutes,
+                        mode: "mission",
+                    })
+                    setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
+                } else {
+                    let stored = localStorage.getItem(SESSION_BUILD_START_MS_KEY)
+                    if (!stored) {
+                        const n = skewedNow()
+                        localStorage.setItem(SESSION_BUILD_START_MS_KEY, String(n))
+                        stored = String(n)
+                    }
+                    setChallengeInfo({
+                        start_time: new Date(Number(stored)).toISOString(),
+                        duration: status.duration_minutes,
+                        mode: "per_seat",
+                    })
+                    setIsBeforeStart(false)
+                }
+            } else {
+                setChallengeInfo(null)
+                setTimeLeft(null)
+            }
+        } catch {
+            /* ignore */
+        }
+    }, [session])
+
+    const refreshMissionRef = useRef(refreshMissionFromServer)
+    useEffect(() => {
+        refreshMissionRef.current = refreshMissionFromServer
+    }, [refreshMissionFromServer])
 
     // Handle unlock from LockScreen
     const handleUnlock = (sessionId: string, nickname: string, userStats?: any) => {
@@ -131,6 +178,12 @@ export default function BuilderPage() {
                     if (data.type === "SYSTEM_FINALIZE") {
                         setIsSystemLocked(true)
                     }
+                    if (data.type === "MISSION_LIVE" && data.data?.title) {
+                        const t = data.data.title as string
+                        setBroadcast(`Mission live: ${t} — your build timer starts now (if scheduled).`)
+                        setTimeout(() => setBroadcast(null), 12000)
+                        refreshMissionRef.current()
+                    }
                 } catch (err) {
                     console.error("WS parse error:", err)
                 }
@@ -158,50 +211,12 @@ export default function BuilderPage() {
 
     useEffect(() => {
         if (!session) return
-        const fetchChallenge = async () => {
-            try {
-                const apiBase = getApiBase()
-                const res = await fetch(`${apiBase}/api/v1/aiccore/system/status`)
-                const status = await res.json()
-                applyServerTimeFromIso(status.server_time)
-                if (status.starter_assets_url) {
-                    setChallengeAssets(status.starter_assets_url)
-                }
-                // Track whether there is any active challenge at all
-                setHasActiveChallenge(!!status.active_challenge)
-                // Timer + auto-submit need duration. Start time is optional:
-                // - With start_time: everyone shares the same end = mission_start + duration (synchronized).
-                // - Without start_time: each laptop uses unlock time + duration (per seat).
-                if (status.active_challenge && status.duration_minutes != null) {
-                    if (status.start_time) {
-                        setChallengeInfo({
-                            start_time: status.start_time,
-                            duration: status.duration_minutes,
-                            mode: "mission",
-                        })
-                        setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
-                    } else {
-                        let stored = localStorage.getItem(SESSION_BUILD_START_MS_KEY)
-                        if (!stored) {
-                            const n = skewedNow()
-                            localStorage.setItem(SESSION_BUILD_START_MS_KEY, String(n))
-                            stored = String(n)
-                        }
-                        setChallengeInfo({
-                            start_time: new Date(Number(stored)).toISOString(),
-                            duration: status.duration_minutes,
-                            mode: "per_seat",
-                        })
-                        setIsBeforeStart(false)
-                    }
-                } else {
-                    setChallengeInfo(null)
-                    setTimeLeft(null)
-                }
-            } catch (e) { }
-        }
-        fetchChallenge()
-    }, [session])
+        void refreshMissionFromServer()
+        const interval = setInterval(() => {
+            void refreshMissionFromServer()
+        }, 10000)
+        return () => clearInterval(interval)
+    }, [session, refreshMissionFromServer])
 
     const handleSubmit = useCallback(async () => {
         if (!session || isSubmitting || isSubmitted) return

@@ -23,6 +23,19 @@ export function skewedNow(): number {
   return Date.now() + serverClockSkewMs
 }
 
+/**
+ * `<input type="datetime-local" />` values are **wall clock in the browser's timezone** with no offset
+ * (e.g. `2026-03-20T19:54`). If we send that string to the API as-is, Postgres/Pydantic often treat it as
+ * **UTC**, so 7:54 PM local shows up as the wrong time everywhere else.
+ * Convert to UTC ISO (`...Z`) so the stored instant matches what the admin picked.
+ */
+export function localDatetimeLocalToUtcIso(value: string | null | undefined): string | null {
+  if (value == null || String(value).trim() === '') return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
+}
+
 export function getApiBase() {
   if (typeof window !== 'undefined' && PROXY_PREFIX) {
     return `${window.location.origin}${PROXY_PREFIX.startsWith('/') ? PROXY_PREFIX : `/${PROXY_PREFIX}`}`

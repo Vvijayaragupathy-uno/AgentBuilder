@@ -35,10 +35,12 @@ from aiccore.backend.models import (
 from aiccore.backend.middleware import AICCoreEventMiddleware
 from aiccore.backend.eraser import purge_langflow_workspace
 from aiccore.backend.broadcast import broadcast_manager
+from aiccore.backend.event_lock import get_event_seq_lock
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, update, delete
 import random
 import re
+import threading
 
 # In-memory storage for unlock rate limiting (Google standard protection)
 # { ip: {"attempts": int, "locked_until": datetime} }
@@ -59,6 +61,77 @@ def _get_or_create_arena_row(db: Session) -> ArenaState:
 
 def is_arena_locked_db(db: Session) -> bool:
     return bool(_get_or_create_arena_row(db).arena_locked)
+
+
+def challenge_start_time_utc(c: Challenge) -> Optional[datetime]:
+    """Challenge.start_time normalized to UTC for comparisons, or None."""
+    if c.start_time is None:
+        return None
+    st = c.start_time
+    if st.tzinfo is None:
+        return st.replace(tzinfo=timezone.utc)
+    return st.astimezone(timezone.utc)
+
+
+def challenge_is_live_build_window(c: Challenge, now: datetime) -> bool:
+    """
+    True when this mission counts as "live build" for leaderboard status:
+    challenge must be active AND (no start_time OR now >= start_time in UTC).
+    Matches builder page: before start_time → waiting, not "building" in the arena sense.
+    """
+    if not c.is_active:
+        return False
+    st_utc = challenge_start_time_utc(c)
+    if st_utc is None:
+        return True
+    return now >= st_utc
+
+
+_AUTO_ACTIVATE_LOCK = threading.Lock()
+
+
+def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
+    """
+    Scheduled go-live (no admin toggle required):
+    If **no** challenge is currently active, activate the earliest due mission
+    (not finalized, start_time set, start_time <= now UTC). Returns MISSION_LIVE
+    payload dict or None.
+
+    If something is already active, does nothing — handoff stays manual.
+    Reduces double-activation under multi-worker with a short process lock (best-effort).
+    """
+    now_utc = datetime.now(timezone.utc)
+    with _AUTO_ACTIVATE_LOCK:
+        active_n = (
+            db_session.execute(
+                select(func.count(Challenge.id)).where(Challenge.is_active == True)
+            ).scalar()
+            or 0
+        )
+        if active_n > 0:
+            return None
+
+        stmt = (
+            select(Challenge)
+            .where(
+                Challenge.is_active == False,
+                Challenge.is_finalized == False,
+                Challenge.start_time.isnot(None),
+            )
+            .order_by(Challenge.start_time.asc())
+        )
+        candidates = db_session.execute(stmt).scalars().all()
+        for c in candidates:
+            st_utc = challenge_start_time_utc(c)
+            if st_utc is not None and st_utc <= now_utc:
+                c.is_active = True
+                db_session.commit()
+                return {
+                    "challenge_id": str(c.id),
+                    "title": c.title,
+                    "start_time": c.start_time.isoformat() if c.start_time else None,
+                }
+    return None
 
 
 def sanitize_string(s: str, length: int = 50) -> str:
@@ -390,7 +463,7 @@ def create_aiccore_app():
             db_session.add(new_session)
             db_session.flush() # Get session ID
             
-            # Log Session Start Event (Triggers PARTICIPATING status)
+            # Log session start (leaderboard uses challenge live window, not raw event count)
             start_event = Event(
                 session_id=new_session.id,
                 sequence_number=0,
@@ -591,70 +664,62 @@ def create_aiccore_app():
 
     @app.post("/api/v1/aiccore/submit")
     async def submit_flow(req: SubmissionRequest):
-        with Session(engine) as db_session:
-            # Check if session exists
-            session_obj = db_session.get(AICSession, req.session_id)
-            if not session_obj:
-                raise HTTPException(status_code=404, detail="Session not found")
+        with get_event_seq_lock(req.session_id):
+            with Session(engine) as db_session:
+                session_obj = db_session.get(AICSession, req.session_id)
+                if not session_obj:
+                    raise HTTPException(status_code=404, detail="Session not found")
 
-            if session_obj.is_submitted:
-                existing = db_session.execute(
-                    select(Submission).where(Submission.session_id == req.session_id)
-                    .order_by(Submission.submitted_at.desc())
-                ).scalars().first()
-                return {
-                    "status": "already_submitted",
-                    "submission_id": str(existing.id) if existing else None,
-                }
+                if session_obj.is_submitted:
+                    existing = db_session.execute(
+                        select(Submission).where(Submission.session_id == req.session_id)
+                        .order_by(Submission.submitted_at.desc())
+                    ).scalars().first()
+                    return {
+                        "status": "already_submitted",
+                        "submission_id": str(existing.id) if existing else None,
+                    }
 
-            # Create submission
-            new_submission = Submission(
-                session_id=req.session_id,
-                flow_snapshot=req.flow_snapshot
-            )
-            # We can also store flow_name and description in the snapshot or add fields to Submission model
-            # For now, we follow the model we defined.
-            
-            db_session.add(new_submission)
-            
-            # Mark session as submitted
-            session_obj.is_submitted = True
-            
-            # Log submission event
-            stmt = select(Event).where(Event.session_id == req.session_id).order_by(Event.sequence_number.desc())
-            last_event = db_session.execute(stmt).scalars().first()
-            seq = (last_event.sequence_number + 1) if last_event else 0
-            
-            sub_event = Event(
-                session_id=req.session_id,
-                sequence_number=seq,
-                event_type="submitted",
-                payload={
-                    "submission_id": str(new_submission.id),
-                    "snapshot": req.flow_snapshot,
-                }
-            )
-            db_session.add(sub_event)
-            
-            db_session.commit()
-            db_session.refresh(new_submission)
+                new_submission = Submission(
+                    session_id=req.session_id,
+                    flow_snapshot=req.flow_snapshot
+                )
+                db_session.add(new_submission)
+                session_obj.is_submitted = True
 
-            # Broadcast so TV display shows "X just submitted!" toast
-            session_nickname = session_obj.nickname if session_obj else "A builder"
-            await broadcast_manager.broadcast({
-                "session_id": str(req.session_id),
-                "event_type": "submitted",
-                "payload": {
-                    "submission_id": str(new_submission.id),
-                    "nickname": session_nickname,
-                    "station_id": session_obj.station_id if session_obj else None,
-                }
-            })
-            await broadcast_manager.broadcast({
-                "type": "SUBMISSION_UPDATE",
-                "data": {"session_id": str(req.session_id)}
-            })
-            return {"submission_id": str(new_submission.id), "status": "submitted"}
+                stmt = select(Event).where(Event.session_id == req.session_id).order_by(Event.sequence_number.desc())
+                last_event = db_session.execute(stmt).scalars().first()
+                seq = (last_event.sequence_number + 1) if last_event else 0
+
+                sub_event = Event(
+                    session_id=req.session_id,
+                    sequence_number=seq,
+                    event_type="submitted",
+                    payload={
+                        "submission_id": str(new_submission.id),
+                        "snapshot": req.flow_snapshot,
+                    }
+                )
+                db_session.add(sub_event)
+
+                db_session.commit()
+                db_session.refresh(new_submission)
+
+                session_nickname = session_obj.nickname if session_obj else "A builder"
+                await broadcast_manager.broadcast({
+                    "session_id": str(req.session_id),
+                    "event_type": "submitted",
+                    "payload": {
+                        "submission_id": str(new_submission.id),
+                        "nickname": session_nickname,
+                        "station_id": session_obj.station_id if session_obj else None,
+                    }
+                })
+                await broadcast_manager.broadcast({
+                    "type": "SUBMISSION_UPDATE",
+                    "data": {"session_id": str(req.session_id)}
+                })
+                return {"submission_id": str(new_submission.id), "status": "submitted"}
 
     @app.post("/api/v1/aiccore/session/{session_id}/submit")
     async def trigger_workspace_submission(session_id: UUID):
@@ -789,11 +854,14 @@ def create_aiccore_app():
     @app.get("/api/v1/aiccore/leaderboard")
     async def get_leaderboard():
         from aiccore.backend.models import ChallengeRegistration
+        mission_live_payload = None
+        leaderboard = []
         with Session(engine) as db_session:
+            mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             user_stmt = select(User).order_by(User.created_at.desc())
             all_users = db_session.execute(user_stmt).scalars().all()
             
-            leaderboard = []
+            now_utc = datetime.now(timezone.utc)
             for u in all_users:
                 session_stmt = select(AICSession).where(AICSession.user_id == u.id, AICSession.is_active == True).limit(1)
                 active_session = db_session.execute(session_stmt).scalars().first()
@@ -808,14 +876,21 @@ def create_aiccore_app():
                 if active_session:
                     station_id = active_session.station_id or "0"
                     
-                    event_stmt = select(func.count(Event.id)).where(Event.session_id == active_session.id)
-                    event_count = db_session.execute(event_stmt).scalar() or 0
-                    
-                    if event_count > 0:
-                        status = "PARTICIPATING"
-                    
                     if active_session.is_submitted:
                         status = "SUBMITTED"
+                    else:
+                        # Unlocked / in Langflow but mission not "live" yet → CHECKED_IN (not "Building")
+                        sess_challenge = None
+                        if active_session.challenge_id:
+                            sess_challenge = db_session.get(Challenge, active_session.challenge_id)
+                        if sess_challenge is not None:
+                            if challenge_is_live_build_window(sess_challenge, now_utc):
+                                status = "PARTICIPATING"
+                            else:
+                                status = "CHECKED_IN"
+                        else:
+                            # No challenge on session — not in a mission window; avoid false "Building"
+                            status = "CHECKED_IN"
                     
                     sub_stmt = select(Submission).where(Submission.session_id == active_session.id).order_by(Submission.submitted_at.desc())
                     submission = db_session.execute(sub_stmt).scalars().first()
@@ -825,7 +900,8 @@ def create_aiccore_app():
                     
                     if active_session.challenge_id:
                         c = db_session.get(Challenge, active_session.challenge_id)
-                        if c: active_mission = c.title
+                        if c:
+                            active_mission = c.title
                 
                 # If no mission found in session, check registrations
                 if active_mission == "UNASSIGNED":
@@ -865,10 +941,18 @@ def create_aiccore_app():
                     "mission": active_mission
                 })
             
-            # Sort by winner (desc), then score (desc), then status (Submitted > Participating > Registered)
-            status_rank = {"SUBMITTED": 3, "PARTICIPATING": 2, "REGISTERED": 1}
+            # Sort by winner (desc), then score (desc), then status tier
+            status_rank = {"SUBMITTED": 4, "PARTICIPATING": 3, "CHECKED_IN": 2, "REGISTERED": 1}
             leaderboard.sort(key=lambda x: (x["is_winner"], x["score"], status_rank.get(x["status"], 0)), reverse=True)
-            return leaderboard
+
+        if mission_live_payload:
+            await broadcast_manager.broadcast({
+                "type": "MISSION_LIVE",
+                "data": mission_live_payload,
+            })
+            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
+
+        return leaderboard
 
     @app.get("/api/v1/aiccore/challenges")
     async def list_challenges():
@@ -907,8 +991,18 @@ def create_aiccore_app():
             c = db_session.get(Challenge, challenge_id)
             if not c:
                 raise HTTPException(status_code=404, detail="Challenge not found")
+            was_active = c.is_active
             c.is_active = not c.is_active
             db_session.commit()
+            if c.is_active and not was_active:
+                await broadcast_manager.broadcast({
+                    "type": "MISSION_LIVE",
+                    "data": {
+                        "challenge_id": str(c.id),
+                        "title": c.title,
+                        "start_time": c.start_time.isoformat() if c.start_time else None,
+                    },
+                })
             return {"status": "updated", "is_active": c.is_active}
 
     @app.post("/api/v1/aiccore/challenges")
@@ -1090,13 +1184,15 @@ def create_aiccore_app():
 
     @app.get("/api/v1/aiccore/system/status")
     async def get_system_status():
+        mission_live_payload = None
         with Session(engine) as db_session:
+            mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             locked = is_arena_locked_db(db_session)
             # Get the single active challenge to show on landing pages if needed
             stmt = select(Challenge).where(Challenge.is_active == True).limit(1)
             active_challenge = db_session.execute(stmt).scalars().first()
-            
-            return {
+
+            result = {
                 "locked": locked,
                 "active_challenge": active_challenge.title if active_challenge else None,
                 "starter_assets_url": active_challenge.starter_assets_url if active_challenge else None,
@@ -1104,6 +1200,15 @@ def create_aiccore_app():
                 "start_time": active_challenge.start_time.isoformat() if active_challenge and active_challenge.start_time else None,
                 "server_time": datetime.now(timezone.utc).isoformat(),
             }
+
+        if mission_live_payload:
+            await broadcast_manager.broadcast({
+                "type": "MISSION_LIVE",
+                "data": mission_live_payload,
+            })
+            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
+
+        return result
 
     @app.get("/api/v1/aiccore/stations")
     async def list_all_stations():

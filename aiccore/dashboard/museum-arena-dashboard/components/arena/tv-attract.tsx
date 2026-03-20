@@ -1,12 +1,23 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { Brain, Zap, Layers, Cpu, ArrowRight, Clock, Users, Rocket, CheckCircle2, Circle, Loader2, WifiOff, Wrench } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { Brain, Zap, Layers, Cpu, ArrowRight, Clock, Users, Rocket, CheckCircle2, Circle, Loader2, WifiOff, Wrench, PlayCircle } from "lucide-react"
 import { cn, getApiBase, skewedNow } from "@/lib/utils"
 import type { Challenge } from "./tv-display"
 
-const SLIDE_DURATION = 10_000  // ms each slide stays
+const SLIDE_DURATION = 10_000  // ms each slide stays (default)
 const TRANSITION_MS  = 600     // fade duration
+
+// Langflow intro — one ~2 min source split into short segments so each carousel visit is bite-sized.
+const LANGFLOW_TEACH_VIDEO_ID = "Fc9g96XJ4tI"
+const LANGFLOW_SEGMENT_PAD_MS = 2_500 // buffer for player start + end cut
+const LANGFLOW_TEACH_SEGMENTS = [
+  { startSec: 0,  endSec: 24,  blurb: "Welcome — what Langflow is for" },
+  { startSec: 24, endSec: 48,  blurb: "Canvas & components" },
+  { startSec: 48, endSec: 72,  blurb: "Connecting your flow" },
+  { startSec: 72, endSec: 96,  blurb: "Running & iterating" },
+  { startSec: 96, endSec: 120, blurb: "Wrapping up" },
+] as const
 
 // ── Slide 1 — Hook ────────────────────────────────────────────────────────────
 
@@ -244,7 +255,67 @@ function NextSlide({ challenges }: { challenges: Challenge[] }) {
   )
 }
 
-// ── Slide N+5 — Per-challenge Spotlight ──────────────────────────────────────
+// ── Langflow teach — YouTube segments (~24s each, full loop ≈ 2 min) ─────────
+
+function langflowSegmentDurationMs(seg: { startSec: number; endSec: number }) {
+  return (seg.endSec - seg.startSec) * 1000 + LANGFLOW_SEGMENT_PAD_MS
+}
+
+function LangflowTeachSlide({
+  segment,
+  partIndex,
+}: {
+  segment: (typeof LANGFLOW_TEACH_SEGMENTS)[number]
+  partIndex: number
+}) {
+  const total = LANGFLOW_TEACH_SEGMENTS.length
+  const src =
+    `https://www.youtube.com/embed/${LANGFLOW_TEACH_VIDEO_ID}` +
+    `?start=${segment.startSec}` +
+    `&end=${segment.endSec}` +
+    "&autoplay=1" +
+    "&mute=1" +
+    "&playsinline=1" +
+    "&rel=0" +
+    "&modestbranding=1" +
+    "&iv_load_policy=3"
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-6 px-14 pt-10 pb-6">
+      <div className="text-center space-y-2">
+        <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary flex items-center justify-center gap-2">
+          <PlayCircle className="h-4 w-4" />
+          Learn Langflow (bite-sized)
+        </span>
+        <h2 className="text-[52px] font-black uppercase tracking-tighter leading-none text-foreground">
+          Quick lesson · Part {partIndex + 1} of {total}
+        </h2>
+        <p className="text-[20px] text-muted-foreground font-medium max-w-2xl mx-auto">
+          {segment.blurb}
+        </p>
+      </div>
+
+      <div
+        className="relative w-full max-w-5xl aspect-video rounded-2xl overflow-hidden ring-2 ring-primary/25 shadow-[0_0_60px_-12px_rgba(250,204,21,0.35)] bg-black"
+      >
+        <iframe
+          key={`${segment.startSec}-${segment.endSec}`}
+          title={`Langflow tutorial part ${partIndex + 1}`}
+          src={src}
+          className="absolute inset-0 h-full w-full"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+
+      <p className="text-[14px] text-white/35 font-semibold uppercase tracking-wider">
+        Unmute at your station — sign displays short clips on rotation
+      </p>
+    </div>
+  )
+}
+
+// ── Slide N+10 — Per-challenge Spotlight ──────────────────────────────────────
 
 function ChallengeSpotlightSlide({ challenge, index, total }: {
   challenge: Challenge
@@ -686,12 +757,26 @@ function LiveClock() {
 // ── Main Attract Component ────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 5 fixed slides + one spotlight per challenge
+  // 5 intro slides + 5 Langflow teach segments + one spotlight per challenge
   const spotlightChallenges = challenges.filter(c => !c.is_active)
-  const TOTAL = 5 + spotlightChallenges.length
+  const langflowCount = LANGFLOW_TEACH_SEGMENTS.length
+  const TOTAL = 5 + langflowCount + spotlightChallenges.length
+  const slideDurationsMs = useMemo(() => {
+    const base = [
+      SLIDE_DURATION,
+      SLIDE_DURATION,
+      SLIDE_DURATION,
+      SLIDE_DURATION,
+      SLIDE_DURATION,
+    ]
+    const langflow = LANGFLOW_TEACH_SEGMENTS.map(seg => langflowSegmentDurationMs(seg))
+    const spots = spotlightChallenges.map(() => SLIDE_DURATION)
+    return [...base, ...langflow, ...spots]
+  }, [spotlightChallenges.length])
 
   const [current, setCurrent] = useState(0)
   const [opacity, setOpacity] = useState(1)
+  const dwellMs = slideDurationsMs[current] ?? SLIDE_DURATION
 
   const advance = useCallback(() => {
     setOpacity(0)
@@ -701,11 +786,11 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
     }, TRANSITION_MS)
   }, [TOTAL])
 
-  // Auto-advance timer — resets whenever current slide changes
+  // Auto-advance timer — per-slide dwell (video segments longer than static slides)
   useEffect(() => {
-    const id = setTimeout(advance, SLIDE_DURATION)
+    const id = setTimeout(advance, dwellMs)
     return () => clearTimeout(id)
-  }, [current, advance])
+  }, [current, advance, dwellMs])
 
   const goTo = useCallback((i: number) => {
     setOpacity(0)
@@ -718,6 +803,9 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
     <HowSlide        key="how" />,
     <ChallengesSlide key="challenges" challenges={challenges} />,
     <NextSlide       key="next"       challenges={challenges} />,
+    ...LANGFLOW_TEACH_SEGMENTS.map((seg, i) => (
+      <LangflowTeachSlide key={`langflow-teach-${i}`} segment={seg} partIndex={i} />
+    )),
     // One dedicated spotlight per challenge
     ...spotlightChallenges.map((c, i) => (
       <ChallengeSpotlightSlide
@@ -787,7 +875,7 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
             <div
               key={current}
               className="h-full bg-primary/60 rounded-full origin-left"
-              style={{ animation: `tv-progress-fill ${SLIDE_DURATION}ms linear forwards` }}
+              style={{ animation: `tv-progress-fill ${dwellMs}ms linear forwards` }}
             />
           </div>
         </div>

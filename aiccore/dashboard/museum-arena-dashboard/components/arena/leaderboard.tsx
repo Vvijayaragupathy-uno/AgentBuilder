@@ -9,11 +9,12 @@ import {
   Clock,
   UserCheck,
   Users,
+  LogIn,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn, getApiBase } from "@/lib/utils"
 
-type StudentStatus = "REGISTERED" | "PARTICIPATING" | "SUBMITTED"
+type StudentStatus = "REGISTERED" | "CHECKED_IN" | "PARTICIPATING" | "SUBMITTED"
 
 interface Student {
   id: string
@@ -38,6 +39,13 @@ const statusConfig: Record<StudentStatus, {
     ringColor: "ring-sky-400/20",
     label: "Registered",
     icon: UserCheck,
+  },
+  CHECKED_IN: {
+    color: "text-cyan-400",
+    bgColor: "bg-cyan-400/10",
+    ringColor: "ring-cyan-400/20",
+    label: "At station",
+    icon: LogIn,
   },
   PARTICIPATING: {
     color: "text-amber-400",
@@ -179,6 +187,7 @@ export function Leaderboard({
     }
   }, [refreshKey, fetchLeaderboard])
 
+  const checkedInCount = students.filter(s => s.status === "CHECKED_IN").length
   const participatingCount = students.filter(s => s.status === "PARTICIPATING").length
   const submittedCount = students.filter(s => s.status === "SUBMITTED").length
 
@@ -191,6 +200,12 @@ export function Leaderboard({
       {/* Stats + Live bar — single compact row */}
       <div className="flex items-center gap-3 mb-1 flex-wrap">
         <div className="glass flex items-center gap-3 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-1.5">
+            <LogIn className="h-3 w-3 text-cyan-400 shrink-0" />
+            <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">At station</span>
+            <span className="text-xs font-mono font-bold tabular-nums">{checkedInCount}</span>
+          </div>
+          <div className="w-px h-3 bg-border" />
           <div className="flex items-center gap-1.5">
             <Zap className="h-3 w-3 text-amber-400 shrink-0" />
             <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">Building</span>
@@ -239,7 +254,7 @@ export function Leaderboard({
           <EmptyState />
         ) : (
           students.map((student, i) => {
-            const config = statusConfig[student.status] || statusConfig["REGISTERED"]
+            const config = statusConfig[student.status as StudentStatus] || statusConfig["REGISTERED"]
             const StatusIcon = config.icon
             const rank = i + 1
 

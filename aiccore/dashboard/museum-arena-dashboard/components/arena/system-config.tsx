@@ -52,7 +52,7 @@ import {
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, getApiBase, localDatetimeLocalToUtcIso } from "@/lib/utils"
 import { ChallengeDetail } from "./challenge-detail"
 
 interface Challenge {
@@ -318,7 +318,7 @@ export function SystemConfig() {
                     complexity_level: challengeForm.complexity,
                     max_participants: challengeForm.maxParticipants,
                     duration_minutes: challengeForm.duration,
-                    start_time: challengeForm.startTime || null,
+                    start_time: localDatetimeLocalToUtcIso(challengeForm.startTime),
                     location: challengeForm.location,
                     is_registration_open: challengeForm.isRegistrationOpen,
                     starter_assets_url: challengeForm.starterAssetsUrl,
@@ -576,13 +576,16 @@ export function SystemConfig() {
                                 </p>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                     <div className="space-y-1.5 flex flex-col">
-                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Mission start</Label>
+                                        <Label className="text-[10px] uppercase font-bold text-muted-foreground">Mission start (your timezone)</Label>
                                         <Input
                                             type="datetime-local"
                                             value={challengeForm.startTime}
                                             onChange={(e) => onMissionStartChange(e.target.value)}
                                             className="bg-background/50 border-white/10 h-9 text-xs"
                                         />
+                                        <span className="text-[8px] text-muted-foreground/90 leading-tight">
+                                            Saved as UTC so all devices show the same moment. If times looked wrong before, re-save the mission after this update.
+                                        </span>
                                     </div>
                                     <div className="space-y-1.5 flex flex-col">
                                         <Label className="text-[10px] uppercase font-bold text-muted-foreground">Mission end</Label>

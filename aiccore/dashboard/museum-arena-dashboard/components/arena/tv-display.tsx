@@ -27,7 +27,7 @@ export interface TVStudent {
   id: string
   nickname: string
   station: string
-  status: "REGISTERED" | "PARTICIPATING" | "SUBMITTED"
+  status: "REGISTERED" | "CHECKED_IN" | "PARTICIPATING" | "SUBMITTED"
   score: number
   is_winner: boolean
 }
