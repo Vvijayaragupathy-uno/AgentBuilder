@@ -242,7 +242,9 @@ export default function BuilderPage() {
                         refreshMissionRef.current()
                     }
                     if (
-                        (data.type === "DEMO_GATE_OPEN" || data.type === "DEMO_QUEUE_UPDATE") &&
+                        (data.type === "DEMO_GATE_OPEN" ||
+                            data.type === "DEMO_QUEUE_UPDATE" ||
+                            data.type === "SUBMISSION_UPDATE") &&
                         sessionRef.current
                     ) {
                         const sid = sessionRef.current.id
@@ -471,23 +473,23 @@ export default function BuilderPage() {
                                     </p>
                                 </div>
                             </div>
-                            {demoInfo?.gateOpen && demoInfo.myPosition != null && (
+                            {demoInfo?.gateOpen && typeof demoInfo.myPosition === "number" && (
                                 <p className="text-xs font-medium text-amber-400">
                                     Demos are running — watch the main display. You are #{demoInfo.myPosition} of {demoInfo.total}.
                                 </p>
                             )}
-                            {demoInfo?.gateOpen && demoInfo.myPosition == null && (
+                            {demoInfo?.gateOpen && typeof demoInfo.myPosition !== "number" && (
                                 <p className="text-xs font-medium text-muted-foreground">
-                                    Demos are running on the main display — you did not join the demo queue.
+                                    Build phase ended — the TV may be in demo or queue mode. Tap Join demo queue if you have not yet (you need a queue spot to be shown full screen).
                                 </p>
                             )}
-                            {demoInfo && demoInfo.myPosition != null && !demoInfo.gateOpen && (
+                            {demoInfo && typeof demoInfo.myPosition === "number" && !demoInfo.gateOpen && (
                                 <p className="text-xs text-muted-foreground">
                                     You are <strong className="text-foreground">#{demoInfo.myPosition}</strong> of{" "}
                                     <strong className="text-foreground">{demoInfo.total}</strong> in the demo queue.
                                 </p>
                             )}
-                            {demoInfo?.myPosition == null && (
+                            {typeof demoInfo?.myPosition !== "number" && (
                                 <>
                                     {demoQueueError && (
                                         <p className="text-xs font-medium text-rose-400 bg-rose-500/10 ring-1 ring-rose-500/20 rounded-lg px-3 py-2">

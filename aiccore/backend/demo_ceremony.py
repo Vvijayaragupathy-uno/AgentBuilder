@@ -149,25 +149,14 @@ def try_open_demo_gate(db: Session) -> bool:
         or 0
     )
     queue_n = len(ordered_queue_rows(db))
-    global_pending = (
-        db.execute(
-            select(func.count(AICSession.id)).where(
-                AICSession.is_active == True,
-                AICSession.is_submitted == False,
-            )
-        ).scalar()
-        or 0
-    )
     if pending != 0:
         return False
-    # Everyone on this challenge submitted while still checked in → start demos.
-    # Require no other unsubmitted sessions anywhere (other challenges / NULL challenge_id).
+    # Everyone on the *active* challenge has submitted (pending==0). Do not require zero
+    # unsubmitted sessions globally — a stray test seat or old session without challenge_id
+    # was blocking the whole museum demo phase.
     if active_cnt > 0:
-        if global_pending != 0:
-            return False
         return force_open_demo_gate(db)
-    # Everyone left the mission (or only queue remains), but nobody is still building anywhere.
-    if queue_n > 0 and global_pending == 0:
+    if queue_n > 0:
         return force_open_demo_gate(db)
     return False
 
@@ -219,6 +208,52 @@ def admin_advance_demo(db: Session) -> dict:
         )
     db.commit()
     return {"status": "advanced", "cursor": row.demo_cursor}
+
+
+def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, Any]:
+    """Snapshot for TV mosaic HTTP poll: prefer flow_saved; else richest Langflow flow in workspace_snapshot."""
+    flow_stmt = (
+        select(Event)
+        .where(Event.session_id == session_id, Event.event_type == "flow_saved")
+        .order_by(Event.sequence_number.desc())
+        .limit(1)
+    )
+    latest_flow = db.execute(flow_stmt).scalars().first()
+    if latest_flow and latest_flow.payload:
+        snap = latest_flow.payload.get("snapshot") or {}
+        nodes = snap.get("nodes") or []
+        edges = snap.get("edges") or []
+        if len(nodes) or len(edges):
+            return snap
+
+    ws_stmt = (
+        select(Event)
+        .where(Event.session_id == session_id, Event.event_type == "workspace_snapshot")
+        .order_by(Event.sequence_number.desc())
+        .limit(1)
+    )
+    ws_ev = db.execute(ws_stmt).scalars().first()
+    if ws_ev and ws_ev.payload:
+        flows = ws_ev.payload.get("flows") or []
+        best_data: Optional[Dict[str, Any]] = None
+        best_n = 0
+        for f in flows:
+            data = f.get("data")
+            if not isinstance(data, dict):
+                continue
+            n = len(data.get("nodes") or [])
+            if n > best_n:
+                best_n = n
+                best_data = data
+        if best_data:
+            return {
+                "nodes": best_data.get("nodes") or [],
+                "edges": best_data.get("edges") or [],
+            }
+
+    if latest_flow and latest_flow.payload:
+        return latest_flow.payload.get("snapshot") or {}
+    return {}
 
 
 def _latest_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, Any]:

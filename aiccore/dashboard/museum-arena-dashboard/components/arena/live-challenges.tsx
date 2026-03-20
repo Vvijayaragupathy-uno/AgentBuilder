@@ -118,9 +118,19 @@ export function LiveChallenges({
                                 </div>
                                 <div className="flex flex-col gap-1 p-2 rounded-lg bg-black/40 border border-white/5">
                                     <div className="flex items-center gap-1 text-[8px] font-bold text-muted-foreground uppercase">
-                                        <Users className="h-2 w-2" /> Spots
+                                        <Users className="h-2 w-2" />{" "}
+                                        {c.is_active ? "Registered" : "Spots"}
                                     </div>
-                                    <span className="text-[10px] font-mono font-bold text-foreground">{c.registration_count}/{c.max_participants}</span>
+                                    <span
+                                        className="text-[10px] font-mono font-bold text-foreground"
+                                        title={
+                                            c.is_active
+                                                ? "Sign-ups for this mission (registration closes when the mission goes live)"
+                                                : "Registered so far vs capacity"
+                                        }
+                                    >
+                                        {c.registration_count}/{c.max_participants}
+                                    </span>
                                 </div>
                             </div>
 

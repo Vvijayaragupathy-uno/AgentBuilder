@@ -39,6 +39,7 @@ from aiccore.backend.demo_ceremony import (
     try_open_demo_gate,
     force_open_demo_gate,
     get_demo_status,
+    get_mosaic_snapshot_for_session,
     join_demo_queue,
     admin_advance_demo,
     remove_session_from_demo_queue,
@@ -145,6 +146,7 @@ def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
             st_utc = challenge_start_time_utc(c)
             if st_utc is not None and st_utc <= now_utc:
                 c.is_active = True
+                c.is_registration_open = False
                 db_session.commit()
                 return {
                     "challenge_id": str(c.id),
@@ -726,24 +728,23 @@ def create_aiccore_app():
             
             results = []
             for s in active_sessions:
-                # Find the latest 'flow_saved' event for this session to get the snapshot
+                snapshot = get_mosaic_snapshot_for_session(db_session, s.id)
                 event_stmt = (
                     select(Event)
-                    .where(Event.session_id == s.id, Event.event_type == "flow_saved")
+                    .where(Event.session_id == s.id)
                     .order_by(Event.sequence_number.desc())
                     .limit(1)
                 )
-                latest_event = db_session.execute(event_stmt).scalars().first()
-                
-                snapshot = latest_event.payload.get("snapshot", {}) if latest_event else {}
-                
+                latest_any = db_session.execute(event_stmt).scalars().first()
                 results.append({
                     "session_id": str(s.id),
                     "nickname": s.nickname,
                     "station_id": s.station_id,
                     "snapshot": snapshot,
                     "is_submitted": s.is_submitted,
-                    "last_update": latest_event.timestamp.isoformat() if latest_event else s.start_time.isoformat()
+                    "last_update": latest_any.timestamp.isoformat()
+                    if latest_any
+                    else s.start_time.isoformat(),
                 })
             return results
 
@@ -1103,7 +1104,8 @@ def create_aiccore_app():
                     "duration_minutes": c.duration_minutes,
                     "start_time": c.start_time.isoformat() if c.start_time else None,
                     "location": c.location,
-                    "is_registration_open": c.is_registration_open,
+                    # Never treat registration as open while the mission is live (avoids "Open" + 1/10 after start).
+                    "is_registration_open": bool(c.is_registration_open) and not bool(c.is_active),
                     "registration_count": reg_count,
                     "starter_assets_url": c.starter_assets_url,
                     "banner_image_url": c.banner_image_url
@@ -1125,6 +1127,8 @@ def create_aiccore_app():
             was_active = c.is_active
             c.is_active = not c.is_active
             now_active = c.is_active
+            if now_active and not was_active:
+                c.is_registration_open = False
             mission_title = c.title
             mission_cid = str(c.id)
             mission_start_iso = c.start_time.isoformat() if c.start_time else None
@@ -1224,7 +1228,7 @@ def create_aiccore_app():
             
             # Check if challenge exists and registration is open
             c = db_session.get(Challenge, challenge_id)
-            if not c or not c.is_registration_open:
+            if not c or not c.is_registration_open or c.is_active:
                 raise HTTPException(status_code=403, detail="Registration is closed for this challenge")
 
             # Enforce max_participants capacity
@@ -1635,7 +1639,11 @@ def create_aiccore_app():
                     try:
                         challenge_uuid = UUID(req.challenge_id)
                         challenge = db_session.get(Challenge, challenge_uuid)
-                        if challenge and challenge.is_registration_open:
+                        if (
+                            challenge
+                            and challenge.is_registration_open
+                            and not challenge.is_active
+                        ):
                             cap_stmt = select(func.count(ChallengeRegistration.id)).where(
                                 ChallengeRegistration.challenge_id == challenge_uuid
                             )
@@ -1699,7 +1707,11 @@ def create_aiccore_app():
                 try:
                     challenge_uuid = UUID(req.challenge_id)
                     challenge = db_session.get(Challenge, challenge_uuid)
-                    if challenge and challenge.is_registration_open:
+                    if (
+                        challenge
+                        and challenge.is_registration_open
+                        and not challenge.is_active
+                    ):
                         # Check capacity
                         cap_stmt = select(func.count(ChallengeRegistration.id)).where(
                             ChallengeRegistration.challenge_id == challenge_uuid
