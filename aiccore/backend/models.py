@@ -128,6 +128,26 @@ class ArenaState(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # always 1
     arena_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Demo ceremony: queue + timed full-screen playback on TV after build phase
+    demo_gate_open: Mapped[bool] = mapped_column(Boolean, default=False)
+    demo_cursor: Mapped[int] = mapped_column(Integer, default=-1)  # index into queue, -1 = mosaic only
+    demo_segment_ends_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class DemoQueueEntry(Base):
+    """Builders join after submit; TV plays back in order when demo gate opens."""
+    __tablename__ = "demo_queue_entry"
+    __table_args__ = {"schema": AICCORE_SCHEMA}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{AICCORE_SCHEMA}.session.id"), unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class Achievement(Base):

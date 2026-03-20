@@ -21,6 +21,12 @@ export default function BuilderPage() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [hasActiveChallenge, setHasActiveChallenge] = useState(false)
     const [isBeforeStart, setIsBeforeStart] = useState(false)
+    const [demoInfo, setDemoInfo] = useState<{
+        myPosition?: number
+        total: number
+        gateOpen: boolean
+    } | null>(null)
+    const [demoJoining, setDemoJoining] = useState(false)
 
     const refreshMissionFromServer = useCallback(async () => {
         if (!session) return
@@ -65,9 +71,13 @@ export default function BuilderPage() {
     }, [session])
 
     const refreshMissionRef = useRef(refreshMissionFromServer)
+    const sessionRef = useRef<{ id: string; nickname: string } | null>(null)
     useEffect(() => {
         refreshMissionRef.current = refreshMissionFromServer
     }, [refreshMissionFromServer])
+    useEffect(() => {
+        sessionRef.current = session
+    }, [session])
 
     // Handle unlock from LockScreen
     const handleUnlock = (sessionId: string, nickname: string, userStats?: any) => {
@@ -112,6 +122,29 @@ export default function BuilderPage() {
     }
 
     // Poll for submission status
+    useEffect(() => {
+        if (!session || !isSubmitted) return
+        const loadDemo = async () => {
+            try {
+                const res = await fetch(
+                    `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${session.id}`,
+                    { credentials: "include" }
+                )
+                if (res.ok) {
+                    const d = await res.json()
+                    setDemoInfo({
+                        myPosition: d.my_position,
+                        total: d.queue_length ?? 0,
+                        gateOpen: !!d.gate_open,
+                    })
+                }
+            } catch { /* ignore */ }
+        }
+        loadDemo()
+        const id = setInterval(loadDemo, 5000)
+        return () => clearInterval(id)
+    }, [session, isSubmitted])
+
     useEffect(() => {
         if (!session || isSubmitted) return
 
@@ -184,6 +217,26 @@ export default function BuilderPage() {
                         setTimeout(() => setBroadcast(null), 12000)
                         refreshMissionRef.current()
                     }
+                    if (
+                        (data.type === "DEMO_GATE_OPEN" || data.type === "DEMO_QUEUE_UPDATE") &&
+                        sessionRef.current
+                    ) {
+                        const sid = sessionRef.current.id
+                        void fetch(
+                            `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${sid}`,
+                            { credentials: "include" }
+                        )
+                            .then(r => (r.ok ? r.json() : null))
+                            .then(d => {
+                                if (!d) return
+                                setDemoInfo({
+                                    myPosition: d.my_position,
+                                    total: d.queue_length ?? 0,
+                                    gateOpen: !!d.gate_open,
+                                })
+                            })
+                            .catch(() => { /* ignore */ })
+                    }
                 } catch (err) {
                     console.error("WS parse error:", err)
                 }
@@ -224,7 +277,8 @@ export default function BuilderPage() {
         try {
             const apiBase = getApiBase()
             const res = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/submit`, {
-                method: "POST"
+                method: "POST",
+                credentials: "include",
             })
             if (res.ok) {
                 setIsSubmitted(true)
@@ -235,6 +289,35 @@ export default function BuilderPage() {
             setIsSubmitting(false)
         }
     }, [session, isSubmitting, isSubmitted])
+
+    const handleJoinDemoQueue = useCallback(async () => {
+        if (!session) return
+        setDemoJoining(true)
+        try {
+            const res = await fetch(
+                `${getApiBase()}/api/v1/aiccore/session/${session.id}/demo-queue`,
+                { method: "POST", credentials: "include" }
+            )
+            if (res.ok) {
+                const st = await fetch(
+                    `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${session.id}`,
+                    { credentials: "include" }
+                )
+                if (st.ok) {
+                    const d = await st.json()
+                    setDemoInfo({
+                        myPosition: d.my_position,
+                        total: d.queue_length ?? 0,
+                        gateOpen: !!d.gate_open,
+                    })
+                }
+            }
+        } catch (e) {
+            console.error("Demo queue join failed:", e)
+        } finally {
+            setDemoJoining(false)
+        }
+    }, [session])
 
     // Timer: at 0s calls submit once (each browser). Mission mode = shared deadline; per_seat = from unlock.
     useEffect(() => {
@@ -308,6 +391,46 @@ export default function BuilderPage() {
                             </div>
                         </div>
                     </div>
+
+                    {isSubmitted && (
+                        <div className="w-full flex flex-col gap-3 rounded-2xl bg-primary/5 p-5 ring-1 ring-primary/20 text-left">
+                            <div className="flex items-center gap-2">
+                                <Megaphone className="h-5 w-5 text-primary shrink-0" />
+                                <div>
+                                    <p className="text-sm font-semibold text-foreground">Present your flow?</p>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                        Join the demo queue so the host can show your Langflow canvas on the main screen after the build phase ends (or when everyone building has submitted).
+                                    </p>
+                                </div>
+                            </div>
+                            {demoInfo?.gateOpen && demoInfo.myPosition != null && (
+                                <p className="text-xs font-medium text-amber-400">
+                                    Demos are running — watch the main display. You are #{demoInfo.myPosition} of {demoInfo.total}.
+                                </p>
+                            )}
+                            {demoInfo?.gateOpen && demoInfo.myPosition == null && (
+                                <p className="text-xs font-medium text-muted-foreground">
+                                    Demos are running on the main display — you did not join the demo queue.
+                                </p>
+                            )}
+                            {demoInfo && demoInfo.myPosition != null && !demoInfo.gateOpen && (
+                                <p className="text-xs text-muted-foreground">
+                                    You are <strong className="text-foreground">#{demoInfo.myPosition}</strong> of{" "}
+                                    <strong className="text-foreground">{demoInfo.total}</strong> in the demo queue.
+                                </p>
+                            )}
+                            {demoInfo?.myPosition == null && (
+                                <button
+                                    type="button"
+                                    onClick={handleJoinDemoQueue}
+                                    disabled={demoJoining}
+                                    className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/15 font-semibold text-primary hover:bg-primary/25 transition-colors disabled:opacity-50"
+                                >
+                                    {demoJoining ? "Joining…" : "Join demo queue"}
+                                </button>
+                            )}
+                        </div>
+                    )}
 
                     <button
                         onClick={handleReset}

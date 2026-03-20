@@ -133,7 +133,11 @@ export function MosaicDisplay() {
                     }
                 })
 
-                setActiveIds(prev => prev.includes(data.session_id) ? prev : [...prev, data.session_id])
+                if (isSubmission) {
+                    setActiveIds(prev => prev.filter(id => id !== data.session_id))
+                } else {
+                    setActiveIds(prev => prev.includes(data.session_id) ? prev : [...prev, data.session_id])
+                }
             }
 
             if (data.event_type.endsWith("_started") || data.event_type.endsWith("_completed")) {

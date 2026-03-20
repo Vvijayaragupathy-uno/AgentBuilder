@@ -1,10 +1,28 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { Crown, Monitor, Rocket, Zap, UserCheck, Clock } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { Crown, Monitor, Rocket, Zap, UserCheck, Clock, Trophy } from "lucide-react"
 import { MosaicDisplay } from "./mosaic-display"
-import { cn, getApiBase, skewedNow } from "@/lib/utils"
+import { FlowPreviewCard } from "./flow-preview-card"
+import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
 import type { Challenge, TVStudent } from "./tv-display"
+
+interface DemoPresenting {
+  session_id: string
+  nickname: string
+  station_id: string | null
+  flow_preview: { nodes: any[]; edges: any[] }
+  segment_ends_at: string | null
+}
+
+interface DemoStatusPayload {
+  gate_open: boolean
+  queue: { session_id: string; nickname: string; station_id: string | null }[]
+  cursor: number
+  queue_length: number
+  presenting: DemoPresenting | null
+  segment_seconds: number
+}
 
 // ── Countdown Timer Hook ──────────────────────────────────────────────────────
 
@@ -169,6 +187,74 @@ function TVLeaderboard() {
 
 export function TVLive({ challenge }: { challenge: Challenge }) {
   const timer = useCountdown(challenge)
+  const [congrats, setCongrats] = useState<{ nickname: string; until: number } | null>(null)
+  const [demo, setDemo] = useState<DemoStatusPayload | null>(null)
+  const wsRetryRef = useRef(1000)
+
+  const loadDemo = useCallback(async () => {
+    try {
+      const st = await fetch(`${getApiBase()}/api/v1/aiccore/system/status`)
+      if (st.ok) {
+        const j = await st.json()
+        applyServerTimeFromIso(j.server_time)
+      }
+      const res = await fetch(`${getApiBase()}/api/v1/aiccore/demo/status`)
+      if (res.ok) setDemo(await res.json())
+    } catch { /* ignore */ }
+  }, [])
+
+  useEffect(() => {
+    loadDemo()
+    const id = setInterval(loadDemo, 2000)
+    return () => clearInterval(id)
+  }, [loadDemo])
+
+  useEffect(() => {
+    if (!congrats) return
+    const ms = Math.max(0, congrats.until - skewedNow())
+    const id = window.setTimeout(() => setCongrats(null), ms)
+    return () => clearTimeout(id)
+  }, [congrats])
+
+  useEffect(() => {
+    let ws: WebSocket | null = null
+    let t: ReturnType<typeof setTimeout> | null = null
+    let destroyed = false
+
+    const connect = () => {
+      if (destroyed) return
+      ws = new WebSocket(getApiBase().replace(/^http/, "ws") + "/api/v1/aiccore/ws")
+      ws.onopen = () => { wsRetryRef.current = 1000 }
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.event_type === "submitted") {
+            const nick = msg.payload?.nickname || "A builder"
+            setCongrats({ nickname: nick, until: skewedNow() + 5500 })
+          }
+          if (msg.type === "DEMO_GATE_OPEN" || msg.type === "DEMO_QUEUE_UPDATE") {
+            void loadDemo()
+          }
+        } catch { /* ignore */ }
+      }
+      ws.onclose = () => {
+        if (destroyed) return
+        t = setTimeout(() => {
+          wsRetryRef.current = Math.min(wsRetryRef.current * 2, 30_000)
+          connect()
+        }, wsRetryRef.current)
+      }
+    }
+    connect()
+    return () => {
+      destroyed = true
+      if (t) clearTimeout(t)
+      ws?.close()
+    }
+  }, [loadDemo])
+
+  const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
+  const presenting = demo?.gate_open && demo.presenting
 
   const complexityStyle =
     challenge.complexity_level === "Beginner"     ? "bg-emerald-500/20 text-emerald-400 ring-emerald-500/30" :
@@ -176,11 +262,23 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
                                                     "bg-rose-500/20   text-rose-400   ring-rose-500/30"
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
+    <div className="relative h-screen w-screen flex flex-col overflow-hidden bg-background">
+
+      {/* Submit congrats — full-screen moment */}
+      {showCongrats && congrats && (
+        <div className="absolute inset-0 z-[90] flex flex-col items-center justify-center bg-black/92 backdrop-blur-md">
+          <Trophy className="h-28 w-28 text-amber-400 mb-8 drop-shadow-[0_0_40px_rgba(251,191,36,0.35)]" />
+          <p className="text-[clamp(2rem,6vw,4rem)] font-black text-white text-center px-8 tracking-tight">
+            {congrats.nickname}
+          </p>
+          <p className="text-[clamp(1.1rem,3vw,1.75rem)] font-bold text-emerald-400 mt-6 uppercase tracking-[0.25em]">
+            Submitted — great work!
+          </p>
+        </div>
+      )}
 
       {/* ── Top bar ── */}
       <div className="flex items-center gap-6 px-8 py-4 border-b border-white/5 bg-black/40 backdrop-blur-sm shrink-0">
-        {/* LIVE pill */}
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="relative flex h-3 w-3">
             <span className="animate-ping absolute h-full w-full rounded-full bg-rose-400 opacity-60" />
@@ -191,7 +289,6 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
 
         <div className="h-6 w-px bg-white/10" />
 
-        {/* Complexity + title */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <span className={cn(
             "shrink-0 text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full ring-1",
@@ -204,7 +301,6 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
           </h1>
         </div>
 
-        {/* Countdown */}
         <div className="flex items-center gap-3 glass rounded-xl px-5 py-2.5 ring-1 ring-primary/20 shrink-0">
           <Clock className="h-5 w-5 text-primary shrink-0" />
           <span className="text-[36px] font-black font-mono tabular-nums text-primary leading-none">
@@ -214,30 +310,75 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
       </div>
 
       {/* ── Main content ── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Mosaic (left ~70%) */}
-        <div className="flex-1 overflow-hidden border-r border-white/5">
-          <MosaicDisplay />
+      {presenting ? (
+        <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+          <div className="shrink-0 flex items-center justify-between gap-4 px-6 py-3 bg-violet-950/70 border-b border-violet-500/25">
+            <div className="flex items-center gap-4 min-w-0">
+              <span className="text-[11px] font-black uppercase tracking-[0.35em] text-violet-300 shrink-0">
+                Live demo
+              </span>
+              <span className="text-[22px] font-black text-white truncate">{demo!.presenting!.nickname}</span>
+              <span className="text-[12px] font-mono text-violet-400/80 shrink-0">
+                Station {demo!.presenting!.station_id ?? "—"}
+              </span>
+            </div>
+            {demo && demo.queue_length > 0 && (
+              <span className="text-[11px] font-bold text-violet-200/80 uppercase tracking-widest shrink-0">
+                Queue {demo.cursor + 1} / {demo.queue_length}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-1 min-h-0">
+            <iframe
+              title="Langflow demo canvas"
+              src={`${getLangflowUrl()}/?session_id=${demo!.presenting!.session_id}`}
+              className="flex-1 min-w-0 border-0 bg-[#0f111c]"
+            />
+            <div className="hidden xl:flex w-[300px] shrink-0 flex-col border-l border-white/10 bg-black/30 p-2 min-h-0">
+              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest px-1 pb-2">
+                Flow map
+              </p>
+              <div className="flex-1 min-h-[120px] rounded-lg overflow-hidden ring-1 ring-white/10">
+                <FlowPreviewCard
+                  nodes={demo!.presenting!.flow_preview?.nodes ?? []}
+                  edges={demo!.presenting!.flow_preview?.edges ?? []}
+                  className="h-full min-h-[200px] rounded-none"
+                />
+              </div>
+            </div>
+          </div>
         </div>
-
-        {/* Leaderboard (right ~30%) */}
-        <div className="w-[360px] shrink-0 overflow-hidden bg-black/20">
-          <TVLeaderboard />
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden border-r border-white/5">
+            <MosaicDisplay />
+          </div>
+          <div className="w-[360px] shrink-0 overflow-hidden bg-black/20">
+            <TVLeaderboard />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── Bottom context strip ── */}
       <div className="shrink-0 flex items-center gap-4 border-t border-white/5 bg-black/40 px-8 py-3">
         <div className="flex items-center gap-2 shrink-0">
-          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+          <div className={cn(
+            "h-1.5 w-1.5 rounded-full animate-pulse",
+            presenting ? "bg-violet-400" : "bg-primary",
+          )} />
           <span className="text-[12px] font-black uppercase tracking-[0.3em] text-primary">
-            Now Building
+            {presenting ? "Demo playback — full Langflow canvas" : "Now building — mosaic hides after submit"}
           </span>
         </div>
         <span className="text-white/15">·</span>
         <p className="text-[15px] font-semibold text-muted-foreground flex-1 truncate">
           {challenge.description}
         </p>
+        {demo && demo.queue_length > 0 && !presenting && demo.gate_open && (
+          <span className="text-[10px] font-bold text-amber-400/90 uppercase tracking-widest shrink-0">
+            {demo.queue_length} in demo queue
+          </span>
+        )}
       </div>
     </div>
   )

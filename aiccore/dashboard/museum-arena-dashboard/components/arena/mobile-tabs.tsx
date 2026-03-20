@@ -1,6 +1,16 @@
 "use client"
 
-import { LayoutDashboard, ClipboardCheck, Users, Search, Trophy, Cpu, Settings } from "lucide-react"
+import Link from "next/link"
+import {
+  LayoutDashboard,
+  ClipboardCheck,
+  Users,
+  Search,
+  Trophy,
+  Cpu,
+  Settings,
+  Monitor,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface MobileTabsProps {
@@ -12,10 +22,10 @@ interface MobileTabsProps {
 const publicTabs = [
   { id: "live", label: "Live", icon: LayoutDashboard },
   { id: "challenges", label: "Challenges", icon: Search },
-  { id: "mosaic", label: "Display", icon: Trophy },
 ]
 
 const adminTabs = [
+  { id: "mosaic", label: "Display", icon: Trophy },
   { id: "contestants", label: "Registry", icon: Users },
   { id: "review", label: "Review", icon: ClipboardCheck },
   { id: "stations", label: "Stations", icon: Cpu },
@@ -50,7 +60,18 @@ export function MobileTabs({ activeTab, onTabChange, isAuthenticated = false }: 
         })}
       </div>
       {isAuthenticated && (
-        <p className="text-[8px] font-bold text-primary/80 uppercase tracking-widest px-1">Admin tabs</p>
+        <div className="flex items-center justify-between gap-2 px-1">
+          <p className="text-[8px] font-bold text-primary/80 uppercase tracking-widest">Admin tabs</p>
+          <Link
+            href="/tv"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-primary hover:bg-primary/10"
+          >
+            <Monitor className="h-3 w-3" />
+            TV ↗
+          </Link>
+        </div>
       )}
     </div>
   )

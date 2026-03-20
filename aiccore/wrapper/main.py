@@ -11,7 +11,7 @@ print(f"🚀 AICCORE Wrapper starting — root: {project_root}")
 
 # Import Langflow's app creator
 from langflow.main import setup_app
-from fastapi import Request, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
+from fastapi import Request, Query, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -31,6 +31,15 @@ from aiccore.backend.models import (
     Achievement,
     ChallengeRegistration,
     ArenaState,
+)
+from aiccore.backend.demo_ceremony import (
+    reset_demo_state,
+    try_open_demo_gate,
+    force_open_demo_gate,
+    get_demo_status,
+    join_demo_queue,
+    admin_advance_demo,
+    remove_session_from_demo_queue,
 )
 from aiccore.backend.middleware import AICCoreEventMiddleware
 from aiccore.backend.eraser import purge_langflow_workspace
@@ -592,6 +601,55 @@ def create_aiccore_app():
                 raise HTTPException(status_code=404, detail="Session not found")
             return {"is_submitted": session.is_submitted}
 
+    @app.get("/api/v1/aiccore/demo/status")
+    async def demo_status_endpoint(
+        session_id: Optional[str] = Query(
+            None, description="Session UUID — returns my_position (1-based) when in queue"
+        ),
+    ):
+        """TV + builder poll. Optional session_id adds my_position in queue (1-based)."""
+        with Session(engine) as db_session:
+            st = get_demo_status(db_session)
+        if session_id:
+            for i, q in enumerate(st.get("queue") or []):
+                if q.get("session_id") == session_id:
+                    st["my_position"] = i + 1
+                    break
+        return st
+
+    @app.post("/api/v1/aiccore/session/{session_id}/demo-queue")
+    async def api_join_demo_queue(session_id: UUID, request: Request):
+        cookie_sid = request.cookies.get("aiccore_session_id")
+        if not cookie_sid or cookie_sid != str(session_id):
+            raise HTTPException(
+                status_code=403, detail="Matching aiccore_session_id cookie required"
+            )
+        try:
+            with Session(engine) as db_session:
+                out = join_demo_queue(db_session, session_id)
+        except ValueError as e:
+            err = str(e)
+            if err == "must_submit_first":
+                raise HTTPException(
+                    status_code=400, detail="Submit your build before joining the demo queue"
+                )
+            raise HTTPException(status_code=404, detail="Session not found")
+        demo_opened = False
+        with Session(engine) as db2:
+            demo_opened = try_open_demo_gate(db2)
+        await broadcast_manager.broadcast({"type": "DEMO_QUEUE_UPDATE", "data": out})
+        if demo_opened:
+            await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
+        return out
+
+    @app.post("/api/v1/aiccore/demo/next")
+    async def demo_next_endpoint(request: Request):
+        if request.cookies.get("aiccore_admin") != "true":
+            raise HTTPException(status_code=403, detail="Admin only")
+        with Session(engine) as db_session:
+            result = admin_advance_demo(db_session)
+        return result
+
     @app.post("/api/v1/aiccore/session/{session_id}/deactivate")
     async def deactivate_session(session_id: UUID):
         """Called by the builder page when the user exits (logs out / starts over)."""
@@ -609,6 +667,13 @@ def create_aiccore_app():
                 if station and station.current_session_id == session_id:
                     station.current_session_id = None
             db_session.commit()
+        with Session(engine) as dq_session:
+            remove_session_from_demo_queue(dq_session, session_id)
+        demo_opened = False
+        with Session(engine) as gate_session:
+            demo_opened = try_open_demo_gate(gate_session)
+        if demo_opened:
+            await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
         await broadcast_manager.broadcast({
             "type": "LEADERBOARD_UPDATE",
             "data": {"session_id": str(session_id), "event": "deactivated"}
@@ -619,7 +684,10 @@ def create_aiccore_app():
     async def list_active_sessions():
         with Session(engine) as db_session:
             # Get all active sessions
-            stmt = select(AICSession).where(AICSession.is_active == True)
+            stmt = select(AICSession).where(
+                AICSession.is_active == True,
+                AICSession.is_submitted == False,
+            )
             active_sessions = db_session.execute(stmt).scalars().all()
             
             results = []
@@ -719,6 +787,11 @@ def create_aiccore_app():
                     "type": "SUBMISSION_UPDATE",
                     "data": {"session_id": str(req.session_id)}
                 })
+                demo_opened = False
+                with Session(engine) as db2:
+                    demo_opened = try_open_demo_gate(db2)
+                if demo_opened:
+                    await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
                 return {"submission_id": str(new_submission.id), "status": "submitted"}
 
     @app.post("/api/v1/aiccore/session/{session_id}/submit")
@@ -738,6 +811,11 @@ def create_aiccore_app():
         from aiccore.backend.eraser import submit_workspace_as_flow
         try:
             sub_id = await submit_workspace_as_flow(session_id)
+            demo_opened = False
+            with Session(engine) as db2:
+                demo_opened = try_open_demo_gate(db2)
+            if demo_opened:
+                await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
             return {"status": "success", "submission_id": sub_id}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -987,23 +1065,43 @@ def create_aiccore_app():
 
     @app.post("/api/v1/aiccore/challenges/{challenge_id}/toggle")
     async def toggle_challenge(challenge_id: UUID):
+        was_active = False
+        now_active = False
+        mission_title = ""
+        mission_start_iso = None
+        mission_cid = ""
         with Session(engine) as db_session:
             c = db_session.get(Challenge, challenge_id)
             if not c:
                 raise HTTPException(status_code=404, detail="Challenge not found")
             was_active = c.is_active
             c.is_active = not c.is_active
-            db_session.commit()
-            if c.is_active and not was_active:
-                await broadcast_manager.broadcast({
-                    "type": "MISSION_LIVE",
-                    "data": {
-                        "challenge_id": str(c.id),
-                        "title": c.title,
-                        "start_time": c.start_time.isoformat() if c.start_time else None,
-                    },
-                })
-            return {"status": "updated", "is_active": c.is_active}
+            now_active = c.is_active
+            mission_title = c.title
+            mission_cid = str(c.id)
+            mission_start_iso = c.start_time.isoformat() if c.start_time else None
+            if now_active and not was_active:
+                reset_demo_state(db_session)
+            else:
+                db_session.commit()
+
+        demo_opened = False
+        if was_active and not now_active:
+            with Session(engine) as db2:
+                demo_opened = force_open_demo_gate(db2)
+
+        if now_active and not was_active:
+            await broadcast_manager.broadcast({
+                "type": "MISSION_LIVE",
+                "data": {
+                    "challenge_id": mission_cid,
+                    "title": mission_title,
+                    "start_time": mission_start_iso,
+                },
+            })
+        if demo_opened:
+            await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
+        return {"status": "updated", "is_active": now_active}
 
     @app.post("/api/v1/aiccore/challenges")
     async def create_challenge(req: ChallengeRequest):
@@ -1145,10 +1243,15 @@ def create_aiccore_app():
                 c.is_active = False
                 c.is_finalized = True
             db_session.commit()
+        demo_opened = False
+        with Session(engine) as db2:
+            demo_opened = force_open_demo_gate(db2)
         await broadcast_manager.broadcast({
             "type": "SYSTEM_FINALIZE",
             "locked": True,
         })
+        if demo_opened:
+            await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
         return {"status": "deployment_finalized"}
 
     @app.get("/api/v1/aiccore/system/export")

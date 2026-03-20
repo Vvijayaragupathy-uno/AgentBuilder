@@ -90,6 +90,9 @@ def _ensure_schema_migrations():
         for stmt in (
             "ALTER TABLE aiccore.participant ALTER COLUMN unlock_code DROP NOT NULL",
             "ALTER TABLE aiccore.submission ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false NOT NULL",
+            "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_gate_open BOOLEAN DEFAULT false NOT NULL",
+            "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_cursor INTEGER DEFAULT -1 NOT NULL",
+            "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_segment_ends_at TIMESTAMPTZ",
         ):
             try:
                 with engine.begin() as conn:
@@ -106,6 +109,20 @@ def _ensure_schema_migrations():
                     conn.commit()
             except Exception:
                 pass
+        arena_cols = _col_names("arena_state")
+        if arena_cols:
+            for col, ddl in (
+                ("demo_gate_open", "ALTER TABLE arena_state ADD COLUMN demo_gate_open BOOLEAN DEFAULT 0 NOT NULL"),
+                ("demo_cursor", "ALTER TABLE arena_state ADD COLUMN demo_cursor INTEGER DEFAULT -1 NOT NULL"),
+                ("demo_segment_ends_at", "ALTER TABLE arena_state ADD COLUMN demo_segment_ends_at TEXT"),
+            ):
+                if col not in arena_cols:
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(text(ddl))
+                            conn.commit()
+                    except Exception:
+                        pass
         # Optional: rebuild participant so unlock_code can be NULL (one-time OTP consume).
         _sqlite_migrate_participant_unlock_nullable()
 

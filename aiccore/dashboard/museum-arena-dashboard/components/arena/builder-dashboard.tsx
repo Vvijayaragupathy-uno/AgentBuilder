@@ -61,7 +61,7 @@ function BuilderDashboardInner() {
     setIsAuthenticated(cookies["aiccore_admin"] === "true")
   }, [])
 
-  /** Registry / Review / Stations / Settings require admin cookie (also blocks ?tab= deep links). */
+  /** Display, Registry, Review, Stations, Settings require admin cookie (also blocks ?tab= deep links). */
   useEffect(() => {
     if (isAuthenticated === null) return
     if (!isAuthenticated && ADMIN_ONLY_TABS.has(activeTab)) {
@@ -199,6 +199,13 @@ function BuilderDashboardInner() {
             >
               {showAdminLogin ? (
                 <LoginPage onLogin={handleLogin} />
+              ) : !isAuthenticated && ADMIN_ONLY_TABS.has(activeTab) ? (
+                <div className="rounded-xl border border-border/60 bg-card/40 p-8 text-center text-sm text-muted-foreground">
+                  Use <strong className="text-foreground">Admin Access</strong> in the sidebar to open{" "}
+                  <strong className="text-foreground">Display</strong> (live wall),{" "}
+                  <strong className="text-foreground">TV</strong> (full-screen URL in Admin section), Registry, Review,
+                  Stations, and Settings.
+                </div>
               ) : activeTab === "mosaic" ? (
                 <div className="h-[calc(100vh-180px)]">
                   <MosaicDisplay />
@@ -217,10 +224,6 @@ function BuilderDashboardInner() {
                     selectedChallengeId
                       ? <ChallengeDetail challengeId={selectedChallengeId} onBack={() => setSelectedChallengeId(null)} />
                       : <ChallengesCatalog onSelectChallenge={setSelectedChallengeId} />
-                  ) : !isAuthenticated ? (
-                    <div className="rounded-xl border border-border/60 bg-card/40 p-8 text-center text-sm text-muted-foreground">
-                      Use <strong className="text-foreground">Admin Access</strong> in the sidebar to open Registry, Review, Stations, and Settings.
-                    </div>
                   ) : activeTab === "contestants" ? (
                     <UserRegistry refreshKey={refreshKey} />
                   ) : activeTab === "settings" ? (

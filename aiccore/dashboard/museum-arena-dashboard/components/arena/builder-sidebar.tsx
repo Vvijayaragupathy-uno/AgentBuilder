@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import {
   LayoutDashboard,
   Trophy,
@@ -11,10 +12,17 @@ import {
   Search,
   KeyRound,
   LogOut,
+  Monitor,
 } from "lucide-react"
 
 /** Tabs that require Admin Access (cookie). */
-export const ADMIN_ONLY_TAB_IDS = ["contestants", "review", "stations", "settings"] as const
+export const ADMIN_ONLY_TAB_IDS = [
+  "mosaic",
+  "contestants",
+  "review",
+  "stations",
+  "settings",
+] as const
 
 import { cn } from "@/lib/utils"
 
@@ -29,14 +37,14 @@ interface BuilderSidebarProps {
 const publicItems = [
   { id: "live",        label: "Live Board",  icon: LayoutDashboard },
   { id: "challenges",  label: "Challenges",  icon: Search },
-  { id: "mosaic",      label: "Display",     icon: Trophy },
 ]
 
 const adminItems = [
+  { id: "mosaic",      label: "Display",     icon: Trophy },
   { id: "contestants", label: "Registry",    icon: Users },
   { id: "review",      label: "Review",      icon: ClipboardCheck },
   { id: "stations",    label: "Stations",    icon: Cpu },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "settings",    label: "Settings",    icon: Settings },
 ]
 
 export function BuilderSidebar({
@@ -112,6 +120,18 @@ export function BuilderSidebar({
               Admin
             </p>
             {adminItems.map(renderItem)}
+            <Link
+              href="/tv"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="relative flex items-center gap-3 w-full rounded-lg px-3 py-2 text-sm transition-all duration-200 text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+            >
+              <Monitor className="h-4 w-4 shrink-0" />
+              <span>TV (full screen)</span>
+              <span className="ml-auto text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50">
+                ↗
+              </span>
+            </Link>
           </>
         )}
       </nav>
