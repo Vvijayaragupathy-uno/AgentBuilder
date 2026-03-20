@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Calendar, MapPin, Clock, ArrowLeft, Rocket, Sparkles, FileText, Users } from "lucide-react"
+import { Calendar, MapPin, Clock, ArrowLeft, Rocket, FileText, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -156,25 +156,6 @@ export function ChallengeDetail({ challengeId, onBack }: ChallengeDetailProps) {
                         </p>
                     </div>
 
-                    <div className="space-y-3">
-                        <h2 className="text-sm font-black uppercase tracking-widest flex items-center gap-2 text-muted-foreground">
-                            <Sparkles className="h-4 w-4 text-primary" />
-                            Why Join?
-                        </h2>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {[
-                                { t: "Expert Mentorship", d: "Work alongside our AI engineering team and learn advanced prompt engineering." },
-                                { t: "Live Display", d: "See your agent compete in real-time on the arena mosaic display." },
-                                { t: "Platform Honors", d: "Earn digital badges and trophies for exceptional agent design." },
-                                { t: "Future Ready", d: "Build a portfolio of AI agents that solve real-world problems." },
-                            ].map((item, i) => (
-                                <div key={i} className="p-4 rounded-xl glass border border-white/5 hover:border-primary/20 transition-all">
-                                    <h4 className="text-xs font-bold text-foreground mb-1">{item.t}</h4>
-                                    <p className="text-[11px] text-muted-foreground leading-relaxed">{item.d}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
                 </div>
 
                 {/* Right: registration card + location */}
@@ -204,9 +185,6 @@ export function ChallengeDetail({ challengeId, onBack }: ChallengeDetailProps) {
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             <span className="text-sm font-bold">{challenge.location}</span>
                         </div>
-                        <p className="text-[10px] text-muted-foreground leading-relaxed">
-                            Builder Lab — 3rd floor, next to the Robotics Innovation Hub.
-                        </p>
                     </div>
                 </div>
             </div>

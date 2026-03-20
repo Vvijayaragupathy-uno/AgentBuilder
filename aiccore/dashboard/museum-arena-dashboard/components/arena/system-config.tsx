@@ -93,6 +93,8 @@ export function SystemConfig() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [arenaLocked, setArenaLocked] = useState(false)
     const [editingId, setEditingId] = useState<string | null>(null)
+    const [isClearing, setIsClearing] = useState(false)
+    const [clearResult, setClearResult] = useState<string | null>(null)
 
     // Broadcast State
     const [isBroadcastOpen, setIsBroadcastOpen] = useState(false)
@@ -116,8 +118,6 @@ export function SystemConfig() {
         name: "",
         description: ""
     })
-
-    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
 
     const fetchData = async () => {
         try {
@@ -164,6 +164,23 @@ export function SystemConfig() {
         if (res.ok) {
             setIsBroadcastOpen(false)
             setBroadcastMessage("")
+        }
+    }
+
+    const handleClearSessions = async () => {
+        if (!confirm("This will clear ALL active sessions from the mosaic display. Old Langflow workflows will be removed. Proceed?")) return
+        setIsClearing(true)
+        setClearResult(null)
+        try {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/sessions/clear`, { method: "POST" })
+            if (res.ok) {
+                const data = await res.json()
+                setClearResult(`Cleared ${data.sessions_cleared} session${data.sessions_cleared !== 1 ? "s" : ""}`)
+                setTimeout(() => setClearResult(null), 4000)
+            }
+        } finally {
+            setIsClearing(false)
         }
     }
 
@@ -269,7 +286,7 @@ export function SystemConfig() {
             maxParticipants: 10,
             duration: 60,
             startTime: "",
-            location: "Main Building Station",
+            location: "Main Arena",
             isRegistrationOpen: true,
             starterAssetsUrl: "",
             bannerImageUrl: ""
@@ -307,15 +324,23 @@ export function SystemConfig() {
     }
 
     const handleToggleChallenge = async (id: string) => {
-        const apiBase = getApiBase()
-        await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle`, { method: "POST" })
-        fetchData()
+        try {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle`, { method: "POST" })
+            if (res.ok) fetchData()
+        } catch (err) {
+            console.error("Failed to toggle challenge", err)
+        }
     }
 
     const handleToggleRegistration = async (id: string) => {
-        const apiBase = getApiBase()
-        await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle-registration`, { method: "POST" })
-        fetchData()
+        try {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle-registration`, { method: "POST" })
+            if (res.ok) fetchData()
+        } catch (err) {
+            console.error("Failed to toggle registration", err)
+        }
     }
 
     return (
@@ -365,6 +390,28 @@ export function SystemConfig() {
                             <Button variant="outline" size="sm" className="gap-2 border-white/10 hover:bg-white/5" onClick={handleExport}>
                                 <Download className="h-3.5 w-3.5" /> Export CSV
                             </Button>
+                        </div>
+
+                        {/* Clear Sessions */}
+                        <div className="flex flex-col gap-1.5">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isClearing}
+                                onClick={handleClearSessions}
+                                className="w-full gap-2 bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500/20"
+                            >
+                                <RefreshCw className={cn("h-3.5 w-3.5", isClearing && "animate-spin")} />
+                                {isClearing ? "Clearing…" : "Clear All Sessions"}
+                            </Button>
+                            {clearResult && (
+                                <p className="text-[10px] text-center text-emerald-400 font-bold">
+                                    ✓ {clearResult}
+                                </p>
+                            )}
+                            <p className="text-[9px] text-muted-foreground/50 text-center leading-tight">
+                                Removes stale Langflow workflows from the mosaic display
+                            </p>
                         </div>
                     </CardContent>
                 </Card>
@@ -416,7 +463,6 @@ export function SystemConfig() {
                                         type="datetime-local"
                                         value={challengeForm.startTime}
                                         onChange={e => {
-                                            console.log("Setting Time:", e.target.value)
                                             setChallengeForm({ ...challengeForm, startTime: e.target.value })
                                         }}
                                         className="bg-background/50 border-white/10 h-9 text-xs"

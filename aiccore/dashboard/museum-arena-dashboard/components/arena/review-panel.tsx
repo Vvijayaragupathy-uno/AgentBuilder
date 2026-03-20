@@ -64,7 +64,6 @@ function SubmissionCard({
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [isHistoryMode, setIsHistoryMode] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
 
   const currentNodes = useMemo(() => {
     if (historyIndex === -1 || !history[historyIndex]) return sub.nodes
@@ -201,7 +200,7 @@ function SubmissionCard({
               </DialogHeader>
               <div className="flex-1 bg-zinc-900 overflow-hidden relative">
                 <iframe
-                  src={`${getApiBase().replace(':7860', ':5173')}/?session_id=${sub.session_id}`}
+                  src={`${getApiBase()}/?session_id=${sub.session_id}`}
                   className="w-full h-full border-0"
                   title="Builder Inspection"
                 />
@@ -335,8 +334,6 @@ export function ReviewPanel() {
   const [achievements, setAchievements] = useState<Achievement[]>([])
   const [loading, setLoading] = useState(true)
 
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
-
   const fetchData = async () => {
     try {
       const apiBase = getApiBase()
@@ -355,10 +352,10 @@ export function ReviewPanel() {
           challenge_name: d.challenge_name,
           station: d.station_id || "0",
           submittedAt: new Date(d.submitted_at).toLocaleTimeString(),
-          flowName: d.flow_snapshot?.name || "Agent Prototype",
-          description: d.flow_snapshot?.description || "Custom agent flow developed during session.",
-          approved: d.is_winner || false,
-          winner: d.is_winner,
+          flowName: d.flow_snapshot?.name || "Untitled Flow",
+          description: d.flow_snapshot?.description || "",
+          approved: Boolean(d.is_approved),
+          winner: Boolean(d.is_winner),
           nodes: (d.flow_snapshot?.nodes || []).map((n: any) => ({
             id: n.id,
             label: n.data?.node?.display_name || n.label || "Component",
@@ -391,10 +388,14 @@ export function ReviewPanel() {
     return () => clearInterval(interval)
   }, [])
 
-  function handleApprove(id: string) {
-    setItems((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, approved: true } : s))
-    )
+  async function handleApprove(id: string) {
+    try {
+      const apiBase = getApiBase()
+      const res = await fetch(`${apiBase}/api/v1/aiccore/submissions/${id}/approve`, { method: "POST" })
+      if (res.ok) await fetchData()
+    } catch (error) {
+      console.error("Failed to approve submission:", error)
+    }
   }
 
   async function handlePublishWinner(id: string) {

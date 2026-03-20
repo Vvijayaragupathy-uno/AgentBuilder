@@ -3,13 +3,27 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 import json
 import asyncio
+import threading
 from datetime import datetime, timezone
+from typing import Dict
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from .database import engine
 from .models import Event
 from .broadcast import broadcast_manager
+
+_event_seq_locks: Dict[str, threading.Lock] = {}
+_event_seq_locks_guard = threading.Lock()
+
+
+def _get_event_seq_lock(session_id: UUID) -> threading.Lock:
+    key = str(session_id)
+    with _event_seq_locks_guard:
+        if key not in _event_seq_locks:
+            _event_seq_locks[key] = threading.Lock()
+        return _event_seq_locks[key]
+
 
 class AICCoreEventMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -164,9 +178,12 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             is_complex = len(nodes) > 10
             
             with Session(engine) as db_session:
-                from .models import User, Achievement, Session as AICSession
-                # Get the user for this session
-                stmt = select(User).join(AICSession).where(AICSession.id == session_id)
+                from .models import Participant, Achievement, Session as AICSession
+                stmt = (
+                    select(Participant)
+                    .join(AICSession, AICSession.user_id == Participant.id)
+                    .where(AICSession.id == session_id)
+                )
                 user = db_session.execute(stmt).scalars().first()
                 
                 if user:
@@ -184,7 +201,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         from .models import Achievement
         
         # Check if user already has it
-        if any(h.get("name") == badge_name for h in user.honors.values()):
+        if any(h.get("name") == badge_name for h in (user.honors or {}).values()):
             return
             
         # Ensure the Achievement exists in the registry
@@ -211,13 +228,14 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         try:
             import asyncio
             from .broadcast import broadcast_manager
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(broadcast_manager.broadcast({
-                    "type": "HONOR_AWARDED", 
-                    "data": {"user_id": str(user.id), "achievement": badge_name, "is_auto": True}
-                }))
-        except:
+            loop = asyncio.get_running_loop()
+            loop.create_task(broadcast_manager.broadcast({
+                "type": "HONOR_AWARDED",
+                "data": {"user_id": str(user.id), "achievement": badge_name, "is_auto": True}
+            }))
+        except RuntimeError:
+            pass  # No running loop
+        except Exception:
             pass
 
     async def _handle_granular_event(self, request: Request, call_next, session_id: UUID, category: str):
@@ -263,37 +281,36 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             print(f"⚠️ Heartbeat Update Error: {e}")
 
     def _log_event(self, session_id: UUID, event_type: str, payload: dict):
-        with Session(engine) as db_session:
-            # Get next sequence number
-            stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
-            last_event = db_session.execute(stmt).scalars().first()
-            seq = (last_event.sequence_number + 1) if last_event else 0
-            
-            event = Event(
-                session_id=session_id,
-                sequence_number=seq,
-                event_type=event_type,
-                payload=payload
-            )
-            db_session.add(event)
-            db_session.commit()
-            
-            # Broadcast the event for live dashboard
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
+        with _get_event_seq_lock(session_id):
+            with Session(engine) as db_session:
+                stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
+                last_event = db_session.execute(stmt).scalars().first()
+                seq = (last_event.sequence_number + 1) if last_event else 0
+
+                event = Event(
+                    session_id=session_id,
+                    sequence_number=seq,
+                    event_type=event_type,
+                    payload=payload
+                )
+                db_session.add(event)
+                db_session.commit()
+                db_session.refresh(event)
+
+                try:
+                    loop = asyncio.get_running_loop()
                     event_data = {
                         "session_id": str(session_id),
                         "event_type": event_type,
                         "sequence_number": seq,
-                        "timestamp": event.timestamp,
+                        "timestamp": event.timestamp.isoformat(),
                         "payload": payload
                     }
-                    # Local Broadcast
                     loop.create_task(broadcast_manager.broadcast(event_data))
-                    
-                    # Cloud Broadcast (If configured)
+
                     from .sync import push_event_to_cloud
                     loop.create_task(push_event_to_cloud(event_data))
-            except Exception as e:
-                print(f"❌ Failed to broadcast event: {e}")
+                except RuntimeError:
+                    pass
+                except Exception as e:
+                    print(f"❌ Failed to broadcast event: {e}")

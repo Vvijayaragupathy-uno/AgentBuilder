@@ -71,14 +71,22 @@ export function MosaicDisplay() {
         }
         fetchSessions()
 
-        // 2. Connect to WebSocket
-        const apiBase = getApiBase()
-        const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws";
-        const ws = new WebSocket(wsUrl)
+        // 2. Connect to WebSocket with auto-reconnect
+        let ws: WebSocket | null = null
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+        let retryDelay = 1000
+        let destroyed = false
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data)
-            if (!data || !data.event_type) return
+        const handleMessage = (data: any) => {
+            if (!data) return
+
+            if (data.type === "SESSIONS_CLEARED") {
+                setSessions({})
+                setActiveIds([])
+                return
+            }
+
+            if (!data.event_type) return
 
             if (data.event_type === "flow_saved" || data.event_type === "submitted") {
                 const payload = data.payload
@@ -159,13 +167,40 @@ export function MosaicDisplay() {
             }
         }
 
-        return () => ws.close()
+        const connectWs = () => {
+            if (destroyed) return
+            const apiBase = getApiBase()
+            const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws"
+            ws = new WebSocket(wsUrl)
+
+            ws.onmessage = (event) => {
+                try {
+                    handleMessage(JSON.parse(event.data))
+                } catch { /* ignore malformed messages */ }
+            }
+
+            ws.onopen = () => { retryDelay = 1000 }
+
+            ws.onclose = () => {
+                if (destroyed) return
+                reconnectTimer = setTimeout(() => {
+                    retryDelay = Math.min(retryDelay * 2, 30_000)
+                    connectWs()
+                }, retryDelay)
+            }
+        }
+        connectWs()
+
+        return () => {
+            destroyed = true
+            if (reconnectTimer) clearTimeout(reconnectTimer)
+            ws?.close()
+        }
     }, [])
 
-    // Dynamic grid column calculation
+    // Dynamic grid: all active sessions (scroll if many — no silent cap at 9)
     const count = activeIds.length
     const cols = count <= 1 ? "grid-cols-1" : count <= 4 ? "grid-cols-2" : "grid-cols-3"
-    const rows = count <= 2 ? "grid-rows-1" : count <= 6 ? "grid-rows-2" : "grid-rows-3"
 
     if (count === 0) {
         return (
@@ -177,8 +212,8 @@ export function MosaicDisplay() {
     }
 
     return (
-        <div className={cn("grid h-full w-full gap-4 p-4 text-white", cols, rows)}>
-            {activeIds.slice(0, 9).map((id) => {
+        <div className={cn("grid h-full w-full min-h-0 gap-3 overflow-y-auto p-3 text-white auto-rows-[minmax(180px,1fr)]", cols)}>
+            {activeIds.map((id) => {
                 const session = sessions[id]
                 if (!session) return null
                 return (

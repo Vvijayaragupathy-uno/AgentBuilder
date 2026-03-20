@@ -20,13 +20,14 @@ class BroadcastManager:
     async def broadcast(self, message: dict):
         if not self.active_connections:
             return
-            
+
         message_str = json.dumps(message, default=str)
-        # print(f"📡 Broadcasting to {len(self.active_connections)} spectators")
-        
-        # Send concurrently to all
-        tasks = [conn.send_text(message_str) for conn in self.active_connections]
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        # Snapshot list — disconnect mutates active_connections during iteration
+        conns = list(self.active_connections)
+        tasks = [conn.send_text(message_str) for conn in conns]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for conn, result in zip(conns, results):
+            if isinstance(result, Exception):
+                self.disconnect(conn)
 
 broadcast_manager = BroadcastManager()

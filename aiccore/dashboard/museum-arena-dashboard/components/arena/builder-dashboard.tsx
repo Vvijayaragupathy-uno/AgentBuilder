@@ -37,30 +37,62 @@ function BuilderDashboardInner() {
 
   const [activeTab, setActiveTab] = useState(initialTab)
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null)
-  const [stationCount, setStationCount] = useState(8)
+  const [stationCount, setStationCount] = useState(0)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [showAdminLogin, setShowAdminLogin] = useState(false)
 
   useEffect(() => {
-    const isAuth = document.cookie.includes("aiccore_admin=true")
-    setIsAuthenticated(isAuth)
+    const cookies = Object.fromEntries(
+      document.cookie.split("; ").filter(Boolean).map(pair => {
+        const idx = pair.indexOf("=")
+        return [pair.slice(0, idx), pair.slice(idx + 1)]
+      })
+    )
+    setIsAuthenticated(cookies["aiccore_admin"] === "true")
   }, [])
 
-  // Real-time updates for admin
+  // Real-time updates for admin with auto-reconnect
   useEffect(() => {
     if (!isAuthenticated) return
-    const wsUrl = getApiBase().replace(/^http/, "ws") + "/api/v1/aiccore/ws"
-    const ws = new WebSocket(wsUrl)
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        if (["REGISTRY_UPDATE", "LEADERBOARD_UPDATE", "SUBMISSION_UPDATE"].includes(msg.type)) {
-          setRefreshKey(k => k + 1)
-        }
-      } catch {}
+
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let retryDelay = 1000
+    let destroyed = false
+
+    const connect = () => {
+      if (destroyed) return
+      const wsUrl = getApiBase().replace(/^http/, "ws") + "/api/v1/aiccore/ws"
+      ws = new WebSocket(wsUrl)
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (["REGISTRY_UPDATE", "LEADERBOARD_UPDATE", "SUBMISSION_UPDATE"].includes(msg.type)) {
+            setRefreshKey(k => k + 1)
+          }
+        } catch {}
+      }
+
+      ws.onopen = () => { retryDelay = 1000 }
+
+      ws.onclose = () => {
+        if (destroyed) return
+        reconnectTimer = setTimeout(() => {
+          retryDelay = Math.min(retryDelay * 2, 30_000)
+          connect()
+        }, retryDelay)
+      }
     }
-    return () => ws.close()
+
+    connect()
+
+    return () => {
+      destroyed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      ws?.close()
+    }
   }, [isAuthenticated])
 
   const handleLogin = async (password: string) => {

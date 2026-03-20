@@ -193,3 +193,36 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+/* --- TV Display Animations --- */
+@keyframes tv-confetti-fall {
+  0%   { transform: translateY(-80px) rotate(0deg);   opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+}
+
+@keyframes tv-toast-slide {
+  0%   { transform: translateX(120%); opacity: 0; }
+  12%  { transform: translateX(0);    opacity: 1; }
+  80%  { transform: translateX(0);    opacity: 1; }
+  100% { transform: translateX(120%); opacity: 0; }
+}
+
+@keyframes tv-progress-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+@keyframes tv-float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-14px); }
+}
+
+@keyframes tv-ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes tv-live-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}

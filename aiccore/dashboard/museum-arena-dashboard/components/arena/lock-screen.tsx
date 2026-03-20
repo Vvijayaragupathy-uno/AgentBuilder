@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, getApiBase, getOrCreateBuilderStationId } from "@/lib/utils"
 import { Loader2, ArrowRight, CheckCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
@@ -48,7 +48,11 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
             const res = await fetch(`${getApiBase()}/api/v1/aiccore/auth/unlock`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ unlock_code: code }),
+                // Each laptop gets its own ws-* id → multiple concurrent builders on the big TV mosaic
+                body: JSON.stringify({
+                    unlock_code: code,
+                    station_id: getOrCreateBuilderStationId(),
+                }),
                 credentials: "include"
             })
             if (!res.ok) throw new Error("invalid")

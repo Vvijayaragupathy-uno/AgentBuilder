@@ -82,7 +82,13 @@ async def capture_full_workspace_snapshot(session_id: UUID):
 
 async def purge_langflow_workspace():
     """
-    Clears all user-custom content but surgically keeps system starter projects and structure.
+    Clears Langflow DB content (flows/folders/vars) for this **entire** Langflow instance,
+    keeping only protected starter folders — **not** scoped per AICCORE participant.
+
+    Important for multi-laptop / big-TV setups: if several builders share **one** Langflow
+    backend + one Langflow DB (typical AUTO_LOGIN single user), calling purge while another
+    builder is active will **wipe their flows**. True parallel builders need isolated Langflow
+    runtimes (or per-builder Langflow users), not only distinct `station_id` in AICCORE.
     """
     logger.info("🧹 AICCORE: Purging Langflow workspace for new session...")
     try:
@@ -209,28 +215,56 @@ async def submit_workspace_as_flow(session_id: UUID):
                 aic_session_obj = db.get(AICSession, session_id)
                 if not aic_session_obj:
                     raise Exception("AICCORE Session not found.")
-                
+
+                # Guard against flows with no data (just created, never edited)
+                flow_snapshot = main_flow.data or {}
+
                 new_submission = Submission(
                     session_id=session_id,
-                    flow_snapshot=main_flow.data
+                    flow_snapshot=flow_snapshot
                 )
                 db.add(new_submission)
                 aic_session_obj.is_submitted = True
-                
-                # Log event
+
+                # Log event — include snapshot so history reel shows final state
                 stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
                 last_event = db.execute(stmt).scalars().first()
                 seq = (last_event.sequence_number + 1) if last_event else 0
-                
+
                 sub_event = Event(
                     session_id=session_id,
                     sequence_number=seq,
                     event_type="submitted",
-                    payload={"submission_id": str(new_submission.id)}
+                    payload={
+                        "submission_id": str(new_submission.id),
+                        "nickname": aic_session_obj.nickname,
+                        "snapshot": flow_snapshot,
+                    }
                 )
                 db.add(sub_event)
-                
                 db.commit()
+
+                # Broadcast so TV display shows "X just submitted!" toast
+                import asyncio
+                from .broadcast import broadcast_manager
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(broadcast_manager.broadcast({
+                        "session_id": str(session_id),
+                        "event_type": "submitted",
+                        "payload": {
+                            "submission_id": str(new_submission.id),
+                            "nickname": aic_session_obj.nickname,
+                            "station_id": aic_session_obj.station_id,
+                        }
+                    }))
+                    loop.create_task(broadcast_manager.broadcast({
+                        "type": "SUBMISSION_UPDATE",
+                        "data": {"session_id": str(session_id)}
+                    }))
+                except RuntimeError:
+                    pass  # No running loop
+
                 return str(new_submission.id)
     except Exception as e:
         logger.error(f"❌ AICCORE: Failed to submit workspace: {e}")

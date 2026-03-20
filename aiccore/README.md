@@ -41,6 +41,27 @@ Accessible at: `http://localhost:3000`
 
 ---
 
+## Railway / production URLs (`getApiBase()`)
+
+The dashboard calls AICCORE REST + WebSocket via **`getApiBase()`** in `museum-arena-dashboard/lib/utils.ts`:
+
+1. **`NEXT_PUBLIC_AICCORE_API_URL`** (recommended on Railway)  
+   Set this to the **public HTTPS URL of the Langflow wrapper** service (the same app you run with `uvicorn … --port 7860` locally).  
+   Example: `https://your-aiccore-api.up.railway.app`  
+   **No `:7860` in production** — Railway terminates TLS on 443; the platform maps that to your container port.
+
+2. **If that variable is not set** and the user is **not** on `localhost`, the code falls back to  
+   `https://<current-dashboard-hostname>`  
+   That only works if the **Next.js dashboard and the Python API share the same hostname** (single service / reverse proxy).  
+   If the dashboard and API are **two Railway services** with **different** public URLs, you **must** set `NEXT_PUBLIC_AICCORE_API_URL` or API calls and WebSockets will hit the wrong host.
+
+3. **Builder iframe (`getLangflowUrl()`)**  
+   Set **`NEXT_PUBLIC_LANGFLOW_URL`** to the same wrapper URL as above when the embedded builder should load that host (often identical to `NEXT_PUBLIC_AICCORE_API_URL`).
+
+**Summary:** Railway is “fixed” when you define **`NEXT_PUBLIC_AICCORE_API_URL`** (and usually **`NEXT_PUBLIC_LANGFLOW_URL`**) to your deployed backend. The `:7860` example is **local dev only**, not Railway’s public URL.
+
+---
+
 ## Configuration & Competition Flow
 
 ### Student Stations

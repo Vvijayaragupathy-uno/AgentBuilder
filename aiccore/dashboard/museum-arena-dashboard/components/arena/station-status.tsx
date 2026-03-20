@@ -51,8 +51,43 @@ export function StationStatus() {
 
     useEffect(() => {
         fetchStations()
-        const interval = setInterval(fetchStations, 10000)
-        return () => clearInterval(interval)
+        // Poll as a fallback every 30s (WebSocket handles real-time below)
+        const interval = setInterval(fetchStations, 30000)
+
+        // WebSocket: re-fetch immediately when any station event arrives, with auto-reconnect
+        let ws: WebSocket | null = null
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+        let retryDelay = 1000
+        let destroyed = false
+
+        const connectWs = () => {
+            if (destroyed) return
+            const apiBase = getApiBase()
+            const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws"
+            ws = new WebSocket(wsUrl)
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data)
+                    if (msg.type === "STATION_UPDATE") fetchStations()
+                } catch (_) {}
+            }
+            ws.onopen = () => { retryDelay = 1000 }
+            ws.onclose = () => {
+                if (destroyed) return
+                reconnectTimer = setTimeout(() => {
+                    retryDelay = Math.min(retryDelay * 2, 30_000)
+                    connectWs()
+                }, retryDelay)
+            }
+        }
+        connectWs()
+
+        return () => {
+            destroyed = true
+            clearInterval(interval)
+            if (reconnectTimer) clearTimeout(reconnectTimer)
+            ws?.close()
+        }
     }, [])
 
     const onlineCount = stations.filter(s => s.status !== "maintenance" && s.status !== "offline").length
@@ -66,7 +101,7 @@ export function StationStatus() {
             {/* System Status Header */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-2">
                 <div>
-                    <h2 className="text-2xl font-black uppercase tracking-tighter italic flex items-center gap-2">
+                    <h2 className="text-2xl font-black uppercase tracking-tighter flex items-center gap-2">
                         <Activity className="h-6 w-6 text-primary animate-pulse" />
                         Station Status
                     </h2>
@@ -99,7 +134,7 @@ export function StationStatus() {
                                 <div className="flex items-center gap-2">
                                     <div className={cn(
                                         "flex h-8 w-8 items-center justify-center rounded-lg ring-1",
-                                        s.status === "active" ? "bg-emerald-500/15 text-emerald-400 ring-emerald-500/30" :
+                                        s.status === "available" ? "bg-emerald-500/15 text-emerald-400 ring-emerald-500/30" :
                                             s.status === "occupied" ? "bg-primary/15 text-primary ring-primary/30" :
                                                 "bg-rose-500/15 text-rose-400 ring-rose-500/30"
                                     )}>
@@ -112,7 +147,7 @@ export function StationStatus() {
                                 </div>
                                 <Badge variant="outline" className={cn(
                                     "text-[10px] uppercase font-bold px-1.5 py-0",
-                                    s.status === "active" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                    s.status === "available" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
                                         s.status === "occupied" ? "bg-primary/10 text-primary border-primary/20" :
                                             "bg-rose-500/10 text-rose-400 border-rose-500/20"
                                 )}>

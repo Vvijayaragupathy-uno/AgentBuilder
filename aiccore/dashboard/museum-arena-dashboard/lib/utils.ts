@@ -27,6 +27,32 @@ export function getApiBase() {
   return 'http://localhost:7860'
 }
 
+const BUILDER_STATION_STORAGE_KEY = "aiccore_builder_station_id"
+
+/**
+ * Stable ID for this browser / laptop. Sent on unlock so each device is a separate
+ * "station" for the backend — avoids every laptop sharing `STATION_LOCAL`, which
+ * would deactivate the previous builder and show only one tile on the TV mosaic.
+ */
+export function getOrCreateBuilderStationId(): string {
+  if (typeof window === "undefined") {
+    return "STATION_SSR"
+  }
+  try {
+    let id = localStorage.getItem(BUILDER_STATION_STORAGE_KEY)
+    if (!id || id.length < 8) {
+      id =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? `ws-${crypto.randomUUID()}`
+          : `ws-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+      localStorage.setItem(BUILDER_STATION_STORAGE_KEY, id)
+    }
+    return id
+  } catch {
+    return `ws-fallback-${Date.now()}`
+  }
+}
+
 export function getLangflowUrl() {
   const envUrl = process.env.NEXT_PUBLIC_LANGFLOW_URL
   if (envUrl) {

@@ -21,7 +21,17 @@ from typing import Optional, Dict, Any, List
 
 # Import AICCORE backend
 from aiccore.backend.database import init_db, get_session, engine
-from aiccore.backend.models import Session as AICSession, Participant as User, Station, Submission, Event, Challenge, Achievement, ChallengeRegistration
+from aiccore.backend.models import (
+    Session as AICSession,
+    Participant as User,
+    Station,
+    Submission,
+    Event,
+    Challenge,
+    Achievement,
+    ChallengeRegistration,
+    ArenaState,
+)
 from aiccore.backend.middleware import AICCoreEventMiddleware
 from aiccore.backend.eraser import purge_langflow_workspace
 from aiccore.backend.broadcast import broadcast_manager
@@ -35,7 +45,21 @@ import re
 FAILED_ATTEMPTS = {}
 LOCKOUT_DURATION_SECONDS = 300 # 5 minutes
 MAX_ATTEMPTS = 5
-ARENA_LOCKED = False # Global switch to block all station unlocks
+
+
+def _get_or_create_arena_row(db: Session) -> ArenaState:
+    """Persisted lock — shared across workers and survives process restarts."""
+    row = db.get(ArenaState, 1)
+    if row is None:
+        row = ArenaState(id=1, arena_locked=False)
+        db.add(row)
+        db.flush()
+    return row
+
+
+def is_arena_locked_db(db: Session) -> bool:
+    return bool(_get_or_create_arena_row(db).arena_locked)
+
 
 def sanitize_string(s: str, length: int = 50) -> str:
     # Remove special chars, allow alphanumeric and underscores
@@ -85,6 +109,10 @@ class AchievementRequest(BaseModel):
     name: str
     description: str
     icon_url: Optional[str] = None
+
+
+class SubmissionScoreBody(BaseModel):
+    score: float
 
 class StationRegisterRequest(BaseModel):
     id: str
@@ -256,15 +284,19 @@ def create_aiccore_app():
                 wait_time = int((failed["locked_until"] - now).total_seconds())
                 raise HTTPException(status_code=429, detail=f"Too many failed attempts. Try again in {wait_time}s")
         
-        # 0. Check if Arena is Globally Locked
-        if ARENA_LOCKED:
-            raise HTTPException(status_code=403, detail="The Arena is currently closed by the administrator.")
+        code = (req.unlock_code or "").strip()
+        if not code or len(code) < 4:
+            raise HTTPException(status_code=400, detail="Valid unlock code required")
 
-        print(f"🔑 Unlock attempt for code {req.unlock_code} from IP {client_ip}")
+        print(f"🔑 Unlock attempt for code {code} from IP {client_ip}")
         
         with Session(engine) as db_session:
-            # 1. Find User by unlock_code
-            stmt = select(User).where(User.unlock_code == req.unlock_code)
+            # 0. Check if Arena is locked (persisted — all workers see the same value)
+            if is_arena_locked_db(db_session):
+                raise HTTPException(status_code=403, detail="The Arena is currently closed by the administrator.")
+
+            # 1. Find User by unlock_code (NULL = already consumed / must regenerate)
+            stmt = select(User).where(User.unlock_code == code)
             user = db_session.execute(stmt).scalars().first()
             
             if not user:
@@ -278,22 +310,7 @@ def create_aiccore_app():
                     raise HTTPException(status_code=429, detail="Maximum attempts reached. IP locked for 5 minutes.")
                 
                 FAILED_ATTEMPTS[client_ip] = failed
-                
-                # For Phase 1 testing, let's auto-create or reset a user if code is '0000'
-                if req.unlock_code == "0000":
-                    stmt = select(User).where(User.username == "testuser")
-                    user = db_session.execute(stmt).scalars().first()
-                    if user:
-                        user.unlock_code = "0000"
-                        user.unlock_code_generated_at = datetime.now(timezone.utc)
-                    else:
-                        user = User(username="testuser", nickname="Test Builder", unlock_code="0000", unlock_code_generated_at=datetime.now(timezone.utc))
-                        db_session.add(user)
-                    
-                    db_session.commit()
-                    db_session.refresh(user)
-                else:
-                    raise HTTPException(status_code=401, detail=f"Invalid unlock code. {MAX_ATTEMPTS - failed['attempts']} attempts remaining.")
+                raise HTTPException(status_code=401, detail=f"Invalid unlock code. {MAX_ATTEMPTS - failed['attempts']} attempts remaining.")
             
             # Reset failures on success
             if client_ip in FAILED_ATTEMPTS:
@@ -319,9 +336,12 @@ def create_aiccore_app():
                 station = db_session.execute(stmt).scalars().first()
             
             # 3. Create Session
+            # Prefer registered Station row; else use client station_id (per-laptop ws-* UUID from dashboard).
+            # Without a unique station_id per device, every browser fell back to STATION_LOCAL and only
+            # one builder could be active — bad for 2–4 laptops on one TV mosaic.
             station_id = station.id if station else (req.station_id or "STATION_LOCAL")
-            
-            # 3.5 Cleanup: Deactivate any other active sessions on THIS station
+
+            # 3.5 One physical seat: end prior session on THIS station_id only (not other laptops).
             db_session.execute(
                 update(AICSession)
                 .where(AICSession.station_id == station_id, AICSession.is_active == True)
@@ -374,10 +394,11 @@ def create_aiccore_app():
             if station:
                 station.status = "occupied"
                 station.current_session_id = new_session.id
-                
-            # 4.5 Security Hardening: Clear unlock code after use (One-Time Use)
-            # user.unlock_code = "" # Removed because of UNIQUE constraint on empty strings
-            
+
+            # 4.5 One-time OTP: clear code after successful unlock (NULL allowed — unique per Postgres/SQLite)
+            user.unlock_code = None
+            user.unlock_code_generated_at = None
+
             db_session.commit()
             db_session.refresh(new_session)
             
@@ -387,6 +408,22 @@ def create_aiccore_app():
             # 5. Purge Langflow Workspace (The Eraser)
             try:
                 from aiccore.backend.eraser import restore_user_workspace
+                with Session(engine) as cnt_sess:
+                    active_n = (
+                        cnt_sess.execute(
+                            select(func.count(AICSession.id)).where(AICSession.is_active == True)
+                        ).scalar()
+                        or 0
+                    )
+                if active_n > 1:
+                    print(
+                        "⚠️ AICCORE: Multiple active AICCORE sessions — shared Langflow workspace. "
+                        "purge_langflow_workspace() removes flows for the WHOLE Langflow DB, "
+                        "not per laptop. Other builders may lose unsaved work. "
+                        "For 2–4 concurrent stations use separate Langflow instances/DBs or "
+                        "a multi-user Langflow setup; station_id only isolates AICCORE sessions, "
+                        "not Langflow storage."
+                    )
                 await purge_langflow_workspace()
                 
                 # 5.5 Sync Persistence: Restore the FULL workspace from latest manifest
@@ -454,6 +491,29 @@ def create_aiccore_app():
                 raise HTTPException(status_code=404, detail="Session not found")
             return {"is_submitted": session.is_submitted}
 
+    @app.post("/api/v1/aiccore/session/{session_id}/deactivate")
+    async def deactivate_session(session_id: UUID):
+        """Called by the builder page when the user exits (logs out / starts over)."""
+        with Session(engine) as db_session:
+            session_obj = db_session.get(AICSession, session_id)
+            if not session_obj:
+                return {"status": "not_found"}
+            session_obj.is_active = False
+            session_obj.end_time = datetime.now(timezone.utc)
+            # Free the station so the next user can unlock it
+            if session_obj.station_id:
+                station = db_session.get(Station, session_obj.station_id)
+                if station and station.status == "occupied":
+                    station.status = "available"
+                if station and station.current_session_id == session_id:
+                    station.current_session_id = None
+            db_session.commit()
+        await broadcast_manager.broadcast({
+            "type": "LEADERBOARD_UPDATE",
+            "data": {"session_id": str(session_id), "event": "deactivated"}
+        })
+        return {"status": "deactivated"}
+
     @app.get("/api/v1/aiccore/sessions/active")
     async def list_active_sessions():
         with Session(engine) as db_session:
@@ -489,7 +549,17 @@ def create_aiccore_app():
         with Session(engine) as db_session:
             stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.asc())
             events = db_session.execute(stmt).scalars().all()
-            return events
+            return [
+                {
+                    "id": e.id,
+                    "session_id": str(e.session_id),
+                    "sequence_number": e.sequence_number,
+                    "timestamp": e.timestamp.isoformat(),
+                    "event_type": e.event_type,
+                    "payload": e.payload,
+                }
+                for e in events
+            ]
 
     @app.post("/api/v1/aiccore/submit")
     async def submit_flow(req: SubmissionRequest):
@@ -498,7 +568,17 @@ def create_aiccore_app():
             session_obj = db_session.get(AICSession, req.session_id)
             if not session_obj:
                 raise HTTPException(status_code=404, detail="Session not found")
-            
+
+            if session_obj.is_submitted:
+                existing = db_session.execute(
+                    select(Submission).where(Submission.session_id == req.session_id)
+                    .order_by(Submission.submitted_at.desc())
+                ).scalars().first()
+                return {
+                    "status": "already_submitted",
+                    "submission_id": str(existing.id) if existing else None,
+                }
+
             # Create submission
             new_submission = Submission(
                 session_id=req.session_id,
@@ -521,16 +601,47 @@ def create_aiccore_app():
                 session_id=req.session_id,
                 sequence_number=seq,
                 event_type="submitted",
-                payload={"submission_id": str(new_submission.id)}
+                payload={
+                    "submission_id": str(new_submission.id),
+                    "snapshot": req.flow_snapshot,
+                }
             )
             db_session.add(sub_event)
             
             db_session.commit()
             db_session.refresh(new_submission)
+
+            # Broadcast so TV display shows "X just submitted!" toast
+            session_nickname = session_obj.nickname if session_obj else "A builder"
+            await broadcast_manager.broadcast({
+                "session_id": str(req.session_id),
+                "event_type": "submitted",
+                "payload": {
+                    "submission_id": str(new_submission.id),
+                    "nickname": session_nickname,
+                    "station_id": session_obj.station_id if session_obj else None,
+                }
+            })
+            await broadcast_manager.broadcast({
+                "type": "SUBMISSION_UPDATE",
+                "data": {"session_id": str(req.session_id)}
+            })
             return {"submission_id": str(new_submission.id), "status": "submitted"}
 
     @app.post("/api/v1/aiccore/session/{session_id}/submit")
     async def trigger_workspace_submission(session_id: UUID):
+        # Guard against double-submission (timer fire + manual click race)
+        with Session(engine) as db_session:
+            session_obj = db_session.get(AICSession, session_id)
+            if not session_obj:
+                raise HTTPException(status_code=404, detail="Session not found")
+            if session_obj.is_submitted:
+                existing = db_session.execute(
+                    select(Submission).where(Submission.session_id == session_id)
+                    .order_by(Submission.submitted_at.desc())
+                ).scalars().first()
+                return {"status": "already_submitted", "submission_id": str(existing.id) if existing else None}
+
         from aiccore.backend.eraser import submit_workspace_as_flow
         try:
             sub_id = await submit_workspace_as_flow(session_id)
@@ -567,7 +678,8 @@ def create_aiccore_app():
                     "submitted_at": sub.submitted_at.isoformat(),
                     "flow_snapshot": sub.flow_snapshot,
                     "score": sub.score,
-                    "is_winner": sub.is_winner
+                    "is_winner": sub.is_winner,
+                    "is_approved": sub.is_approved,
                 })
             return output
 
@@ -589,16 +701,62 @@ def create_aiccore_app():
     @app.post("/api/v1/aiccore/submissions/{submission_id}/winner")
     async def mark_winner(submission_id: UUID):
         with Session(engine) as db_session:
-            # First, unset any previous winner if we only want one (optional but usually clear)
-            db_session.execute(update(Submission).values(is_winner=False))
-            
             sub_obj = db_session.get(Submission, submission_id)
             if not sub_obj:
                 raise HTTPException(status_code=404, detail="Submission not found")
-            
+
+            # Unmark only previous winners in the same challenge to avoid
+            # wiping winners from other challenges
+            sub_session = db_session.get(AICSession, sub_obj.session_id)
+            if sub_session and sub_session.challenge_id:
+                same_challenge_session_ids = select(AICSession.id).where(
+                    AICSession.challenge_id == sub_session.challenge_id
+                )
+                db_session.execute(
+                    update(Submission)
+                    .where(Submission.session_id.in_(same_challenge_session_ids))
+                    .values(is_winner=False)
+                )
+            else:
+                # No challenge context — only unmark this single submission if re-marking
+                db_session.execute(
+                    update(Submission).where(Submission.id == submission_id).values(is_winner=False)
+                )
+
             sub_obj.is_winner = True
             db_session.commit()
+
+            await broadcast_manager.broadcast({
+                "type": "LEADERBOARD_UPDATE",
+                "data": {"winner_submission_id": str(submission_id)}
+            })
             return {"status": "winner_marked", "submission_id": str(sub_obj.id)}
+
+    @app.post("/api/v1/aiccore/submissions/{submission_id}/approve")
+    async def approve_submission(submission_id: UUID):
+        """Mark a submission as reviewed/approved (persists; separate from winner)."""
+        with Session(engine) as db_session:
+            sub_obj = db_session.get(Submission, submission_id)
+            if not sub_obj:
+                raise HTTPException(status_code=404, detail="Submission not found")
+            sub_obj.is_approved = True
+            db_session.commit()
+        await broadcast_manager.broadcast({
+            "type": "SUBMISSION_UPDATE",
+            "data": {"submission_id": str(submission_id), "approved": True},
+        })
+        return {"status": "approved", "submission_id": str(submission_id)}
+
+    @app.patch("/api/v1/aiccore/submissions/{submission_id}/score")
+    async def set_submission_score(submission_id: UUID, body: SubmissionScoreBody):
+        with Session(engine) as db_session:
+            sub_obj = db_session.get(Submission, submission_id)
+            if not sub_obj:
+                raise HTTPException(status_code=404, detail="Submission not found")
+            sub_obj.score = body.score
+            db_session.commit()
+        await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {"submission_id": str(submission_id)}})
+        return {"status": "updated", "submission_id": str(submission_id), "score": body.score}
 
     @app.get("/api/v1/aiccore/leaderboard")
     async def get_leaderboard():
@@ -711,6 +869,7 @@ def create_aiccore_app():
             new_challenge = Challenge(
                 title=req.title,
                 description=req.description,
+                is_active=False,
                 complexity_level=req.complexity_level,
                 max_participants=req.max_participants,
                 duration_minutes=req.duration_minutes,
@@ -718,7 +877,7 @@ def create_aiccore_app():
                 location=req.location,
                 is_registration_open=req.is_registration_open,
                 starter_assets_url=req.starter_assets_url,
-                banner_image_url=req.banner_image_url
+                banner_image_url=req.banner_image_url,
             )
             db_session.add(new_challenge)
             db_session.commit()
@@ -770,33 +929,83 @@ def create_aiccore_app():
             u = db_session.get(User, UUID(user_id))
             if not u: raise HTTPException(status_code=404, detail="User not found")
             
-            # Check if challenge is open
+            # Check if challenge exists and registration is open
             c = db_session.get(Challenge, challenge_id)
             if not c or not c.is_registration_open:
                 raise HTTPException(status_code=403, detail="Registration is closed for this challenge")
-            
+
+            # Enforce max_participants capacity
+            if c.max_participants:
+                current_count_stmt = select(func.count(ChallengeRegistration.id)).where(
+                    ChallengeRegistration.challenge_id == challenge_id
+                )
+                current_count = db_session.execute(current_count_stmt).scalar() or 0
+                if current_count >= c.max_participants:
+                    raise HTTPException(status_code=409, detail="Challenge is full — maximum participants reached")
+
             # Check if already registered
-            stmt = select(ChallengeRegistration).where(ChallengeRegistration.user_id == u.id, ChallengeRegistration.challenge_id == challenge_id)
+            stmt = select(ChallengeRegistration).where(
+                ChallengeRegistration.user_id == u.id,
+                ChallengeRegistration.challenge_id == challenge_id
+            )
             existing = db_session.execute(stmt).scalars().first()
             if existing:
                 return {"status": "already_registered"}
-            
+
             reg = ChallengeRegistration(user_id=u.id, challenge_id=challenge_id)
             db_session.add(reg)
             db_session.commit()
-            
+            db_session.refresh(reg)  # ensure reg.id is populated
+
             # Broadcast registry update
             await broadcast_manager.broadcast({"type": "REGISTRY_UPDATE", "data": {"challenge_id": str(challenge_id)}})
             return {"status": "success", "registration_id": reg.id}
 
+    @app.post("/api/v1/aiccore/sessions/clear")
+    async def clear_all_sessions():
+        """Deactivates all active sessions — use before a new challenge to wipe stale Langflow workflows."""
+        with Session(engine) as db_session:
+            active_ids = list(
+                db_session.execute(
+                    select(AICSession.id).where(AICSession.is_active == True)
+                ).scalars().all()
+            )
+            result = db_session.execute(
+                update(AICSession)
+                .where(AICSession.is_active == True)
+                .values(is_active=False, end_time=datetime.now(timezone.utc))
+            )
+            cleared = result.rowcount
+            if active_ids:
+                db_session.execute(
+                    update(Station)
+                    .where(Station.current_session_id.in_(active_ids))
+                    .values(current_session_id=None, status="available")
+                )
+            db_session.commit()
+
+        # Broadcast so MosaicDisplay clears itself instantly on all clients
+        await broadcast_manager.broadcast({
+            "type": "SESSIONS_CLEARED",
+            "cleared_count": cleared,
+        })
+        return {"status": "cleared", "sessions_cleared": cleared}
+
     @app.post("/api/v1/aiccore/system/finalize")
     async def finalize_deployment():
-        global ARENA_LOCKED
-        ARENA_LOCKED = True
-        # Broadcast Finalize command (Confetti + Lock)
+        with Session(engine) as db_session:
+            row = _get_or_create_arena_row(db_session)
+            row.arena_locked = True
+            active_challenges = db_session.execute(
+                select(Challenge).where(Challenge.is_active == True)
+            ).scalars().all()
+            for c in active_challenges:
+                c.is_active = False
+                c.is_finalized = True
+            db_session.commit()
         await broadcast_manager.broadcast({
             "type": "SYSTEM_FINALIZE",
-            "locked": True
+            "locked": True,
         })
         return {"status": "deployment_finalized"}
 
@@ -824,19 +1033,23 @@ def create_aiccore_app():
 
     @app.post("/api/v1/aiccore/system/lock")
     async def toggle_system_lock():
-        global ARENA_LOCKED
-        ARENA_LOCKED = not ARENA_LOCKED
-        return {"locked": ARENA_LOCKED}
+        with Session(engine) as db_session:
+            row = _get_or_create_arena_row(db_session)
+            row.arena_locked = not row.arena_locked
+            locked = row.arena_locked
+            db_session.commit()
+        return {"locked": locked}
 
     @app.get("/api/v1/aiccore/system/status")
     async def get_system_status():
         with Session(engine) as db_session:
+            locked = is_arena_locked_db(db_session)
             # Get the single active challenge to show on landing pages if needed
             stmt = select(Challenge).where(Challenge.is_active == True).limit(1)
             active_challenge = db_session.execute(stmt).scalars().first()
             
             return {
-                "locked": ARENA_LOCKED,
+                "locked": locked,
                 "active_challenge": active_challenge.title if active_challenge else None,
                 "starter_assets_url": active_challenge.starter_assets_url if active_challenge else None,
                 "duration_minutes": active_challenge.duration_minutes if active_challenge else None,
@@ -849,20 +1062,31 @@ def create_aiccore_app():
             stmt = select(Station)
             stations = db_session.execute(stmt).scalars().all()
             
-            # Auto-offline check: If no heartbeat in 60s, mark as offline unless maintenance
+            # Stale heartbeat: persist status + free ghost "occupied" stations (matches API reality to DB)
             now = datetime.now(timezone.utc)
             results = []
+            dirty = False
             for s in stations:
                 status = s.status
                 if s.status != "maintenance" and s.last_heartbeat:
                     lh = s.last_heartbeat
-                    if lh.tzinfo is None: lh = lh.replace(tzinfo=timezone.utc)
-                    if (now - lh).total_seconds() > 300: # 5 Minute Timeout
-                        # If it was occupied due to connection, release it
-                        if s.status == "occupied": 
+                    if lh.tzinfo is None:
+                        lh = lh.replace(tzinfo=timezone.utc)
+                    if (now - lh).total_seconds() > 300:  # 5 minute timeout
+                        if s.status == "occupied":
                             status = "available"
+                            if s.current_session_id:
+                                sess = db_session.get(AICSession, s.current_session_id)
+                                if sess and sess.is_active:
+                                    sess.is_active = False
+                                    sess.end_time = now
+                            s.status = "available"
+                            s.current_session_id = None
+                            dirty = True
                         elif s.status == "available":
                             status = "offline"
+                            s.status = "offline"
+                            dirty = True
                 
                 results.append({
                     "id": s.id,
@@ -872,6 +1096,8 @@ def create_aiccore_app():
                     "temp": s.core_temp,
                     "last_active": s.last_heartbeat.isoformat() if s.last_heartbeat else None
                 })
+            if dirty:
+                db_session.commit()
             return results
 
     @app.post("/api/v1/aiccore/stations/{station_id}/heartbeat")
@@ -881,15 +1107,26 @@ def create_aiccore_app():
             if not s:
                 raise HTTPException(status_code=404, detail="Station not found")
             
+            came_back_online = s.status == "offline"
             s.last_heartbeat = datetime.now(timezone.utc)
             s.cpu_load = payload.get("load", s.cpu_load)
             s.core_temp = payload.get("temp", s.core_temp)
             
-            # If it was offline, bring it back
-            if s.status == "offline":
+            if came_back_online:
                 s.status = "available"
                 
             db_session.commit()
+
+            # Broadcast on first heartbeat after going offline (station came back)
+            # and on every heartbeat so the dashboard stays live
+            await broadcast_manager.broadcast({
+                "type": "STATION_UPDATE",
+                "station_id": station_id,
+                "event": "online" if came_back_online else "heartbeat",
+                "load": s.cpu_load,
+                "temp": s.core_temp,
+                "status": s.status
+            })
             return {"status": "ok"}
 
     @app.get("/api/v1/aiccore/achievements")
@@ -897,7 +1134,16 @@ def create_aiccore_app():
         from sqlalchemy import select
         with Session(engine) as db_session:
             stmt = select(Achievement)
-            return db_session.execute(stmt).scalars().all()
+            rows = db_session.execute(stmt).scalars().all()
+            return [
+                {
+                    "id": str(a.id),
+                    "name": a.name,
+                    "description": a.description,
+                    "icon_url": a.icon_url,
+                }
+                for a in rows
+            ]
 
     @app.post("/api/v1/aiccore/achievements")
     async def create_achievement(req: AchievementRequest):
@@ -966,6 +1212,11 @@ def create_aiccore_app():
                 station = Station(id=req.id, ip_address=req.ip_address)
                 db_session.add(station)
             db_session.commit()
+            await broadcast_manager.broadcast({
+                "type": "STATION_UPDATE",
+                "station_id": req.id,
+                "event": "registered"
+            })
             return {"status": "registered", "station_id": station.id, "ip": station.ip_address}
 
     @app.get("/api/v1/aiccore/users/{user_id}/history")
@@ -993,11 +1244,11 @@ def create_aiccore_app():
             from fastapi.responses import JSONResponse
             res = JSONResponse(content={"status": "authenticated", "role": "admin"})
             res.set_cookie(
-                key="aiccore_admin", 
-                value="true", 
-                httponly=True, 
+                key="aiccore_admin",
+                value="true",
+                httponly=False,  # Must be readable by JS (document.cookie) for auth detection
                 samesite="lax",
-                max_age=86400 # 1 day
+                max_age=86400  # 1 day
             )
             return res
         
@@ -1045,42 +1296,99 @@ def create_aiccore_app():
                     else:
                         raise HTTPException(status_code=401, detail="INCORRECT_PASSWORD")
 
-                # User matches or no password set yet - regenerate code
-                existing.unlock_code = generate_unlock_code()
+                # Regenerate OTP (exclude this user when checking uniqueness — code may still be NULL)
+                new_code = None
+                for _ in range(40):
+                    cand = generate_unlock_code()
+                    collision = db_session.execute(
+                        select(User).where(User.unlock_code == cand, User.id != existing.id)
+                    ).scalars().first()
+                    if not collision:
+                        new_code = cand
+                        break
+                if not new_code:
+                    raise HTTPException(status_code=500, detail="Could not generate a unique unlock code")
+                existing.unlock_code = new_code
                 existing.unlock_code_generated_at = datetime.now(timezone.utc)
+
+                # Same challenge registration rules as new sign-up (returning users with ?challenge_id=)
+                if req.challenge_id:
+                    try:
+                        challenge_uuid = UUID(req.challenge_id)
+                        challenge = db_session.get(Challenge, challenge_uuid)
+                        if challenge and challenge.is_registration_open:
+                            cap_stmt = select(func.count(ChallengeRegistration.id)).where(
+                                ChallengeRegistration.challenge_id == challenge_uuid
+                            )
+                            cap_count = db_session.execute(cap_stmt).scalar() or 0
+                            if not challenge.max_participants or cap_count < challenge.max_participants:
+                                dup = db_session.execute(
+                                    select(ChallengeRegistration).where(
+                                        ChallengeRegistration.user_id == existing.id,
+                                        ChallengeRegistration.challenge_id == challenge_uuid,
+                                    )
+                                ).scalars().first()
+                                if not dup:
+                                    db_session.add(
+                                        ChallengeRegistration(user_id=existing.id, challenge_id=challenge_uuid)
+                                    )
+                    except (ValueError, TypeError):
+                        pass
+
                 db_session.commit()
                 db_session.refresh(existing)
-                
+
+                if req.challenge_id:
+                    await broadcast_manager.broadcast(
+                        {"type": "REGISTRY_UPDATE", "data": {"user_id": str(existing.id)}}
+                    )
+
                 stats = await get_user_stats(db_session, existing.id)
-                
+
                 return {
                     "id": str(existing.id),
                     "username": existing.username,
                     "nickname": existing.nickname,
                     "unlock_code": existing.unlock_code,
-                    "stats": stats
+                    "stats": stats,
                 }
             if not clean_nickname:
                 raise HTTPException(status_code=400, detail="Display nickname is required for new profiles")
+
+            new_code = None
+            for _ in range(40):
+                cand = generate_unlock_code()
+                if not db_session.execute(select(User).where(User.unlock_code == cand)).scalars().first():
+                    new_code = cand
+                    break
+            if not new_code:
+                raise HTTPException(status_code=500, detail="Could not generate a unique unlock code")
 
             new_user = User(
                 username=clean_username,
                 nickname=clean_nickname,
                 password=req.password,
-                unlock_code=generate_unlock_code(),
+                unlock_code=new_code,
                 unlock_code_generated_at=datetime.now(timezone.utc)
             )
             db_session.add(new_user)
             db_session.flush()  # get new_user.id before committing
 
-            # Register the user to the chosen challenge if provided
+            # Register the user to the chosen challenge if provided — enforce same
+            # rules as the standalone /register endpoint
             if req.challenge_id:
                 try:
                     challenge_uuid = UUID(req.challenge_id)
                     challenge = db_session.get(Challenge, challenge_uuid)
-                    if challenge:
-                        reg = ChallengeRegistration(user_id=new_user.id, challenge_id=challenge_uuid)
-                        db_session.add(reg)
+                    if challenge and challenge.is_registration_open:
+                        # Check capacity
+                        cap_stmt = select(func.count(ChallengeRegistration.id)).where(
+                            ChallengeRegistration.challenge_id == challenge_uuid
+                        )
+                        cap_count = db_session.execute(cap_stmt).scalar() or 0
+                        if not challenge.max_participants or cap_count < challenge.max_participants:
+                            reg = ChallengeRegistration(user_id=new_user.id, challenge_id=challenge_uuid)
+                            db_session.add(reg)
                 except (ValueError, TypeError):
                     pass  # invalid UUID — ignore silently
 
@@ -1106,13 +1414,18 @@ def create_aiccore_app():
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
             
-            # Generate a unique code
-            new_code = generate_unlock_code()
-            # Ensure uniqueness (simple loop for 4 digits)
-            stmt = select(User).where(User.unlock_code == new_code)
-            if not db_session.execute(stmt).scalars().first():
-                pass # Already unique or fallback logic needed
-            
+            new_code = None
+            for _ in range(40):
+                cand = generate_unlock_code()
+                collision = db_session.execute(
+                    select(User).where(User.unlock_code == cand, User.id != user_id)
+                ).scalars().first()
+                if not collision:
+                    new_code = cand
+                    break
+            if not new_code:
+                raise HTTPException(status_code=500, detail="Could not generate a unique unlock code")
+
             user.unlock_code = new_code
             user.unlock_code_generated_at = datetime.now(timezone.utc)
             db_session.commit()
@@ -1124,9 +1437,20 @@ def create_aiccore_app():
             user = db_session.get(User, user_id)
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
-            
-            # Cleanup active sessions first
-            db_session.execute(delete(AICSession).where(AICSession.user_id == user_id))
+
+            # Collect session IDs before deletion so we can cascade to child rows
+            session_ids_stmt = select(AICSession.id).where(AICSession.user_id == user_id)
+            session_ids = [row[0] for row in db_session.execute(session_ids_stmt).all()]
+
+            if session_ids:
+                # Delete child rows in dependency order: Events → Submissions → Sessions
+                db_session.execute(delete(Event).where(Event.session_id.in_(session_ids)))
+                db_session.execute(delete(Submission).where(Submission.session_id.in_(session_ids)))
+                db_session.execute(delete(AICSession).where(AICSession.id.in_(session_ids)))
+
+            # Delete challenge registrations
+            db_session.execute(delete(ChallengeRegistration).where(ChallengeRegistration.user_id == user_id))
+
             db_session.delete(user)
             db_session.commit()
             return {"status": "deleted", "user_id": str(user_id)}

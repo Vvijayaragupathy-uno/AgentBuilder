@@ -103,31 +103,51 @@ export default function BuilderPage() {
         }
     }, [])
 
-    // WebSocket Listener for Broadcasts & Ceremony
+    // WebSocket Listener for Broadcasts & Ceremony (with auto-reconnect)
     useEffect(() => {
-        const apiBase = getApiBase()
-        const wsUrl = apiBase.replace(/^http/, "ws")
-        const ws = new WebSocket(`${wsUrl}/api/v1/aiccore/ws`)
+        let ws: WebSocket | null = null
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+        let retryDelay = 1000
+        let destroyed = false
 
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data)
+        const connect = () => {
+            if (destroyed) return
+            const apiBase = getApiBase()
+            ws = new WebSocket(`${apiBase.replace(/^http/, "ws")}/api/v1/aiccore/ws`)
 
-                if (data.type === "ADMIN_BROADCAST") {
-                    setBroadcast(data.message)
-                    // Auto-hide broadcast after 10 seconds
-                    setTimeout(() => setBroadcast(null), 10000)
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data)
+                    if (data.type === "ADMIN_BROADCAST") {
+                        setBroadcast(data.message)
+                        setTimeout(() => setBroadcast(null), 10000)
+                    }
+                    if (data.type === "SYSTEM_FINALIZE") {
+                        setIsSystemLocked(true)
+                    }
+                } catch (err) {
+                    console.error("WS parse error:", err)
                 }
+            }
 
-                if (data.type === "SYSTEM_FINALIZE") {
-                    setIsSystemLocked(true)
-                }
-            } catch (err) {
-                console.error("WS error:", err)
+            ws.onopen = () => { retryDelay = 1000 }
+
+            ws.onclose = () => {
+                if (destroyed) return
+                reconnectTimer = setTimeout(() => {
+                    retryDelay = Math.min(retryDelay * 2, 30_000)
+                    connect()
+                }, retryDelay)
             }
         }
 
-        return () => ws.close()
+        connect()
+
+        return () => {
+            destroyed = true
+            if (reconnectTimer) clearTimeout(reconnectTimer)
+            ws?.close()
+        }
     }, [])
 
     useEffect(() => {

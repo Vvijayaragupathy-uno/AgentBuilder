@@ -24,16 +24,16 @@ interface BuilderSidebarProps {
 }
 
 const publicItems = [
-  { id: "live",       label: "Leaderboard", icon: LayoutDashboard },
-  { id: "challenges", label: "Challenges",  icon: Search },
-  { id: "mosaic",     label: "Display",     icon: Trophy },
+  { id: "live",        label: "Live Board",  icon: LayoutDashboard },
+  { id: "review",      label: "Review",      icon: ClipboardCheck },
+  { id: "contestants", label: "Registry",    icon: Users },
+  { id: "challenges",  label: "Challenges",  icon: Search },
+  { id: "mosaic",      label: "Display",     icon: Trophy },
 ]
 
 const adminItems = [
-  { id: "contestants", label: "Participants", icon: Users },
-  { id: "review",      label: "Submissions",  icon: ClipboardCheck },
-  { id: "stations",    label: "Stations",     icon: Cpu },
-  { id: "settings",    label: "Settings",     icon: Settings },
+  { id: "stations", label: "Stations", icon: Cpu },
+  { id: "settings", label: "Settings", icon: Settings },
 ]
 
 export function BuilderSidebar({

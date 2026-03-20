@@ -34,10 +34,16 @@ function RegisterContent() {
         try {
             const apiBase = getApiBase()
             // 1. Create/Login User
+            // Single atomic path: user + optional challenge registration in one backend transaction
             const userRes = await fetch(`${apiBase}/api/v1/aiccore/users`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ nickname, username, password }),
+                body: JSON.stringify({
+                    nickname,
+                    username,
+                    password,
+                    ...(challengeId ? { challenge_id: challengeId } : {}),
+                }),
                 credentials: "include"
             })
 
@@ -47,21 +53,6 @@ function RegisterContent() {
             }
 
             const userData = await userRes.json()
-
-            // 2. Register for Challenge if ID exists
-            if (challengeId) {
-                const regRes = await fetch(`${apiBase}/api/v1/aiccore/challenges/${challengeId}/register`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ user_id: userData.id }),
-                    credentials: "include"
-                })
-
-                if (!regRes.ok) {
-                    const regErr = await regRes.json().catch(() => ({ detail: "Unknown Error" }))
-                    console.error("Challenge registration failed:", regErr.detail)
-                }
-            }
 
             setSuccessData({ code: userData.unlock_code, nickname: userData.nickname })
             setStep(3)
@@ -181,7 +172,7 @@ function RegisterContent() {
                                 <Rocket className="h-5 w-5 text-primary mt-1 shrink-0" />
                                 <div className="flex flex-col gap-1">
                                     <span className="text-xs font-bold text-white uppercase tracking-tight">Active Deployment</span>
-                                    <p className="text-[10px] text-muted-foreground leading-relaxed">Enter this code at any local Builder Station to start building. Code is valid for 24 hours.</p>
+                                    <p className="text-[10px] text-muted-foreground leading-relaxed">Enter this code at any local Builder Station to start building. Code is valid for 15 minutes.</p>
                                 </div>
                             </div>
                             <Link href="/builder">

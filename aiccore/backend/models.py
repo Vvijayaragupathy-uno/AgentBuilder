@@ -24,7 +24,8 @@ class Participant(Base):
     username: Mapped[str] = mapped_column(String, unique=True)
     nickname: Mapped[str] = mapped_column(String)
     password: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    unlock_code: Mapped[str] = mapped_column(String, unique=True, index=True)
+    # NULL after successful station unlock (one-time OTP); new codes via register/regenerate
+    unlock_code: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
     unlock_code_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     honors: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -37,7 +38,8 @@ class Challenge(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     title: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(String)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # New challenges start inactive so TV does not jump to "live" until admin enables
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     complexity_level: Mapped[str] = mapped_column(String, default="Beginner")
     max_participants: Mapped[int] = mapped_column(Integer, default=10)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=60)
@@ -91,6 +93,7 @@ class Submission(Base):
     flow_snapshot: Mapped[Dict[str, Any]] = mapped_column(JSON)
     score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ChallengeRegistration(Base):
@@ -116,6 +119,15 @@ class Station(Base):
     last_heartbeat: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     cpu_load: Mapped[int] = mapped_column(Integer, default=0)
     core_temp: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ArenaState(Base):
+    """Single-row persisted arena lock (works across uvicorn workers; survives restarts)."""
+    __tablename__ = "arena_state"
+    __table_args__ = {"schema": AICCORE_SCHEMA}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # always 1
+    arena_locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Achievement(Base):
