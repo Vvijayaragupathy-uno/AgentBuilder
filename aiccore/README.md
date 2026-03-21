@@ -73,6 +73,16 @@ Then `getApiBase()` and `getLangflowUrl()` become `https://your-dashboard.up.rai
 
 **WebSockets** use the same prefix, e.g. `wss://your-dashboard/aiccore-api/api/v1/aiccore/ws`. If your host does not proxy WS upgrades, use the backend URL directly (no `NEXT_PUBLIC_AICCORE_PROXY_PREFIX`) for that deployment.
 
+### Builder: Langflow shows “Couldn’t establish a connection”
+
+That message comes from the **embedded Langflow UI** when its HTTP or WebSocket calls to the API fail (network error, wrong host, CORS/mixed content, or backend down). Checklist:
+
+1. **Wrapper is running** — `uvicorn aiccore.wrapper.main:app` reachable at the URL you configured.
+2. **`NEXT_PUBLIC_AICCORE_API_URL`** points at that **same** public URL (HTTPS in production; no stray `:7860` on Railway unless you really expose that port).
+3. **Iframe origin matches API origin** — either set **`NEXT_PUBLIC_LANGFLOW_URL`** to the same value as the API URL, or use **`NEXT_PUBLIC_AICCORE_PROXY_PREFIX=/aiccore-api`** with **`AICCORE_UPSTREAM_URL`** (or `NEXT_PUBLIC_AICCORE_API_URL`) so both `getApiBase()` and `getLangflowUrl()` use the dashboard host + rewrite.
+4. **HTTPS parent + HTTP iframe** — avoid embedding `http://…` Langflow inside an `https://` dashboard; the browser may block or behave inconsistently. Use HTTPS for both or same-origin proxy.
+5. In DevTools **Network**, confirm requests from the iframe (e.g. `/api/v1/…`) return **200**, not failed/CORS.
+
 ### SQLite dev DB
 
 If an old `aiccore.db` still has `participant.unlock_code` **NOT NULL**, startup runs a **one-time table rebuild** so NULL is allowed after OTP consume. New databases get the correct schema from `create_all`.
@@ -108,6 +118,8 @@ Until the Python server restarts, it is still running the **old** in-memory code
 ### Concurrent Langflow
 
 If **more than one** active AICCORE session exists, **global Langflow purge is skipped**; only **restore/merge** runs so other laptops are not wiped. For a totally clean workspace per seat, run **separate Langflow instances** (or accept shared flow list until submit).
+
+**TV mosaic:** The backend prefers each session’s own **`flow_saved`** events for the mosaic snapshot. If there is no `flow_saved` yet, it may fall back to a **workspace_snapshot** (shared DB); starter-template folders are skipped when picking a fallback flow so the grid is less likely to show a generic template instead of a builder canvas.
 
 **This is not “automatic separate DB per station” in one deployment** — that’s an ops choice (multiple services/DBs). See **`docs/STATION_ISOLATION.md`**.
 

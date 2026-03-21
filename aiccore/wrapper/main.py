@@ -201,6 +201,8 @@ class ChallengeRequest(BaseModel):
     is_registration_open: Optional[bool] = True
     starter_assets_url: Optional[str] = None
     banner_image_url: Optional[str] = None
+    instructions_text: Optional[str] = None
+    instructions_document_url: Optional[str] = None
 
 class AchievementRequest(BaseModel):
     name: str
@@ -1193,7 +1195,9 @@ def create_aiccore_app():
                     "is_registration_open": bool(c.is_registration_open) and not bool(c.is_active),
                     "registration_count": reg_count,
                     "starter_assets_url": c.starter_assets_url,
-                    "banner_image_url": c.banner_image_url
+                    "banner_image_url": c.banner_image_url,
+                    "instructions_text": c.instructions_text,
+                    "instructions_document_url": c.instructions_document_url,
                 }
                 output.append(c_data)
             return output
@@ -1261,6 +1265,8 @@ def create_aiccore_app():
                 is_registration_open=req.is_registration_open,
                 starter_assets_url=req.starter_assets_url,
                 banner_image_url=req.banner_image_url,
+                instructions_text=req.instructions_text or None,
+                instructions_document_url=req.instructions_document_url or None,
             )
             db_session.add(new_challenge)
             db_session.commit()
@@ -1288,6 +1294,8 @@ def create_aiccore_app():
                 c.is_registration_open = req.is_registration_open
             c.starter_assets_url = req.starter_assets_url
             c.banner_image_url = req.banner_image_url
+            c.instructions_text = req.instructions_text or None
+            c.instructions_document_url = req.instructions_document_url or None
             db_session.commit()
             db_session.refresh(c)
             return c
@@ -1482,6 +1490,10 @@ def create_aiccore_app():
                 "active_challenge": active_challenge.title if active_challenge else None,
                 "active_challenge_id": str(active_challenge.id) if active_challenge else None,
                 "starter_assets_url": active_challenge.starter_assets_url if active_challenge else None,
+                "instructions_text": active_challenge.instructions_text if active_challenge else None,
+                "instructions_document_url": active_challenge.instructions_document_url
+                if active_challenge
+                else None,
                 "duration_minutes": active_challenge.duration_minutes if active_challenge else None,
                 "start_time": active_challenge.start_time.isoformat() if active_challenge and active_challenge.start_time else None,
                 "mission_build_window_open": mission_build_window_open,

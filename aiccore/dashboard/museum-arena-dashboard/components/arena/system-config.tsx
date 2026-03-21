@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { cn, getApiBase, localDatetimeLocalToUtcIso } from "@/lib/utils"
 import { ChallengeDetail } from "./challenge-detail"
 
@@ -70,6 +71,8 @@ interface Challenge {
     registration_count: number
     starter_assets_url?: string
     banner_image_url?: string
+    instructions_text?: string | null
+    instructions_document_url?: string | null
 }
 
 interface Achievement {
@@ -155,7 +158,9 @@ export function SystemConfig() {
         location: "Main Arena",
         isRegistrationOpen: true,
         starterAssetsUrl: "",
-        bannerImageUrl: ""
+        bannerImageUrl: "",
+        instructionsText: "",
+        instructionsDocumentUrl: "",
     })
 
     const [newAchievement, setNewAchievement] = useState({
@@ -342,8 +347,10 @@ export function SystemConfig() {
                     start_time: localDatetimeLocalToUtcIso(challengeForm.startTime),
                     location: challengeForm.location,
                     is_registration_open: challengeForm.isRegistrationOpen,
-                    starter_assets_url: challengeForm.starterAssetsUrl,
-                    banner_image_url: challengeForm.bannerImageUrl
+                    starter_assets_url: challengeForm.starterAssetsUrl || null,
+                    banner_image_url: challengeForm.bannerImageUrl || null,
+                    instructions_text: challengeForm.instructionsText.trim() || null,
+                    instructions_document_url: challengeForm.instructionsDocumentUrl.trim() || null,
                 })
             })
 
@@ -400,6 +407,31 @@ export function SystemConfig() {
         }
     }
 
+    const handleInstructionsDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+
+        const formData = new FormData()
+        formData.append("file", file)
+
+        try {
+            const apiBase = getApiBase()
+            const res = await fetch(`${apiBase}/api/v1/aiccore/upload`, {
+                method: "POST",
+                body: formData
+            })
+            if (res.ok) {
+                const data = await res.json()
+                setChallengeForm(prev => ({
+                    ...prev,
+                    instructionsDocumentUrl: `${apiBase}${data.url}`,
+                }))
+            }
+        } catch (err) {
+            console.error("Instructions document upload failed", err)
+        }
+    }
+
     const resetForm = () => {
         setChallengeForm({
             title: "",
@@ -412,7 +444,9 @@ export function SystemConfig() {
             location: "Main Arena",
             isRegistrationOpen: true,
             starterAssetsUrl: "",
-            bannerImageUrl: ""
+            bannerImageUrl: "",
+            instructionsText: "",
+            instructionsDocumentUrl: "",
         })
         setEditingId(null)
     }
@@ -448,7 +482,9 @@ export function SystemConfig() {
             location: c.location || "Main Building Station",
             isRegistrationOpen: c.is_registration_open,
             starterAssetsUrl: c.starter_assets_url || "",
-            bannerImageUrl: c.banner_image_url || ""
+            bannerImageUrl: c.banner_image_url || "",
+            instructionsText: c.instructions_text || "",
+            instructionsDocumentUrl: c.instructions_document_url || "",
         })
     }
 
@@ -694,7 +730,7 @@ export function SystemConfig() {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-1.5 flex flex-col">
-                                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">Mission Guidelines (PDF/Doc)</Label>
+                                    <Label className="text-[10px] uppercase font-bold text-muted-foreground">Starter kit / assets URL</Label>
                                     <div className="flex gap-2">
                                         <div className="relative flex-1">
                                             <FileText className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -761,6 +797,60 @@ export function SystemConfig() {
                                     className="bg-background/50 border-white/10 h-9 text-xs"
                                     required
                                 />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                                    Instructions (TV slide + builder)
+                                </Label>
+                                <Textarea
+                                    placeholder="Bullet goals, constraints, judging criteria — appears on the attract-loop spotlight and in the builder instructions panel."
+                                    value={challengeForm.instructionsText}
+                                    onChange={e =>
+                                        setChallengeForm({ ...challengeForm, instructionsText: e.target.value })
+                                    }
+                                    className="bg-background/50 border-white/10 min-h-[88px] text-xs resize-y"
+                                />
+                            </div>
+
+                            <div className="space-y-1.5 flex flex-col">
+                                <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                                    Instructions handout (PDF / DOC / DOCX)
+                                </Label>
+                                <div className="flex gap-2">
+                                    <div className="relative flex-1">
+                                        <FileText className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                                        <Input
+                                            placeholder="URL after upload or external link"
+                                            value={challengeForm.instructionsDocumentUrl}
+                                            onChange={e =>
+                                                setChallengeForm({
+                                                    ...challengeForm,
+                                                    instructionsDocumentUrl: e.target.value,
+                                                })
+                                            }
+                                            className="bg-background/50 border-white/10 h-9 pl-8 text-[10px]"
+                                        />
+                                    </div>
+                                    <div className="relative">
+                                        <Input
+                                            type="file"
+                                            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                            className="hidden"
+                                            id="instructions-doc-upload"
+                                            onChange={handleInstructionsDocUpload}
+                                        />
+                                        <Label
+                                            htmlFor="instructions-doc-upload"
+                                            className="h-9 px-3 flex items-center justify-center rounded-md border border-white/10 bg-white/5 hover:bg-white/10 cursor-pointer text-[10px] uppercase font-bold"
+                                        >
+                                            Upload
+                                        </Label>
+                                    </div>
+                                </div>
+                                <p className="text-[9px] text-muted-foreground leading-relaxed">
+                                    Shown on the TV challenge slide and embedded in the builder &ldquo;Challenge instructions&rdquo; panel (preferred over starter kit for long PDF briefs).
+                                </p>
                             </div>
 
                             <div className="flex flex-col gap-2 border-t border-white/5 pt-4">

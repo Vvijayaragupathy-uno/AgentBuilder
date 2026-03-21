@@ -210,8 +210,26 @@ def admin_advance_demo(db: Session) -> dict:
     return {"status": "advanced", "cursor": row.demo_cursor}
 
 
+def _starter_template_folder_ids(manifest: Dict[str, Any]) -> set[str]:
+    """Folder IDs for Langflow built-in templates — not the builder's own canvas."""
+    names = frozenset({"Starter Projects", "Starter Project"})
+    out: set[str] = set()
+    for folder in manifest.get("folders") or []:
+        if (folder.get("name") or "").strip() in names:
+            fid = folder.get("id")
+            if fid is not None:
+                out.add(str(fid))
+    return out
+
+
 def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, Any]:
-    """Snapshot for TV mosaic HTTP poll: prefer flow_saved; else richest Langflow flow in workspace_snapshot."""
+    """Mosaic HTTP poll: use latest flow_saved for this session (even if empty).
+
+    Only if there is no flow_saved do we fall back to workspace_snapshot, picking the
+    richest flow **outside** starter template folders. Previously an empty flow_saved
+    caused a fallback that picked the globally largest flow — wrong when multiple
+    builders share one Langflow DB or when starter templates have more nodes.
+    """
     flow_stmt = (
         select(Event)
         .where(Event.session_id == session_id, Event.event_type == "flow_saved")
@@ -219,12 +237,11 @@ def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, 
         .limit(1)
     )
     latest_flow = db.execute(flow_stmt).scalars().first()
-    if latest_flow and latest_flow.payload:
-        snap = latest_flow.payload.get("snapshot") or {}
-        nodes = snap.get("nodes") or []
-        edges = snap.get("edges") or []
-        if len(nodes) or len(edges):
+    if latest_flow and latest_flow.payload is not None:
+        snap = latest_flow.payload.get("snapshot")
+        if isinstance(snap, dict):
             return snap
+        return {}
 
     ws_stmt = (
         select(Event)
@@ -235,9 +252,15 @@ def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, 
     ws_ev = db.execute(ws_stmt).scalars().first()
     if ws_ev and ws_ev.payload:
         flows = ws_ev.payload.get("flows") or []
+        starter_ids = _starter_template_folder_ids(ws_ev.payload)
         best_data: Optional[Dict[str, Any]] = None
         best_n = 0
         for f in flows:
+            if f.get("is_component"):
+                continue
+            fid = f.get("folder_id")
+            if fid is not None and str(fid) in starter_ids:
+                continue
             data = f.get("data")
             if not isinstance(data, dict):
                 continue
@@ -251,8 +274,6 @@ def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, 
                 "edges": best_data.get("edges") or [],
             }
 
-    if latest_flow and latest_flow.payload:
-        return latest_flow.payload.get("snapshot") or {}
     return {}
 
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Crown, Monitor, Rocket, Zap, UserCheck, LogIn, Clock, Trophy } from "lucide-react"
 import { MosaicDisplay, type MosaicEmptyState } from "./mosaic-display"
 import { FlowPreviewCard } from "./flow-preview-card"
+import { playTVSting } from "@/lib/tv-audio"
 import { applyServerTimeFromIso, cn, formatBuilderSeatLabel, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
 import type { Challenge, TVStudent } from "./tv-display"
 
@@ -294,6 +295,22 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
 
   /** During full-screen demo, show this slot’s countdown — not the mission build clock (avoids “two timers”). */
   const [demoSlotClock, setDemoSlotClock] = useState<string | null>(null)
+  const prevPresentingRef = useRef(false)
+
+  useEffect(() => {
+    if (showCongrats) {
+      playTVSting("submit", 0.38)
+    }
+  }, [showCongrats])
+
+  useEffect(() => {
+    const now = Boolean(presenting)
+    if (now && !prevPresentingRef.current) {
+      playTVSting("demoStart", 0.4)
+    }
+    prevPresentingRef.current = now
+  }, [presenting])
+
   useEffect(() => {
     if (!presenting || !demo?.presenting?.segment_ends_at) {
       setDemoSlotClock(null)

@@ -93,6 +93,8 @@ def _ensure_schema_migrations():
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_gate_open BOOLEAN DEFAULT false NOT NULL",
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_cursor INTEGER DEFAULT -1 NOT NULL",
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_segment_ends_at TIMESTAMPTZ",
+            "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_text TEXT",
+            "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_document_url VARCHAR",
         ):
             try:
                 with engine.begin() as conn:
@@ -117,6 +119,22 @@ def _ensure_schema_migrations():
                 ("demo_segment_ends_at", "ALTER TABLE arena_state ADD COLUMN demo_segment_ends_at TEXT"),
             ):
                 if col not in arena_cols:
+                    try:
+                        with engine.connect() as conn:
+                            conn.execute(text(ddl))
+                            conn.commit()
+                    except Exception:
+                        pass
+        ch_cols = _col_names("challenge")
+        if ch_cols:
+            for col, ddl in (
+                ("instructions_text", "ALTER TABLE challenge ADD COLUMN instructions_text TEXT"),
+                (
+                    "instructions_document_url",
+                    "ALTER TABLE challenge ADD COLUMN instructions_document_url VARCHAR",
+                ),
+            ):
+                if col not in ch_cols:
                     try:
                         with engine.connect() as conn:
                             conn.execute(text(ddl))

@@ -10,23 +10,18 @@ import {
   Clock,
   Users,
   Rocket,
-  CheckCircle2,
-  Circle,
-  Loader2,
-  WifiOff,
-  Wrench,
   PlayCircle,
   MessageSquare,
   FileText,
   Database,
   Send,
 } from "lucide-react"
-import { cn, getApiBase, skewedNow } from "@/lib/utils"
+import { cn, skewedNow } from "@/lib/utils"
 import {
-  LANGFLOW_TEACH_SEGMENTS,
+  LANGFLOW_TEACH_CLIP_END_SEC,
+  LANGFLOW_TEACH_CLIP_START_SEC,
   LANGFLOW_TEACH_VIDEO_ID,
-  langflowSegmentDurationMs,
-  langflowTeachPlaylistTotalMs,
+  langflowTeachSlideDurationMs,
 } from "@/lib/langflow-teach"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import type { Challenge } from "./tv-display"
@@ -75,7 +70,7 @@ function HookSlide() {
 function WhatSlide() {
   const features = [
     { icon: Layers, label: "Drag & Drop",  desc: "Connect components visually"      },
-    { icon: Brain,  label: "Real AI",       desc: "Powered by LLMs like GPT-4"       },
+    { icon: Brain,  label: "Web-grounded",  desc: "Live search and current answers from the open web — built for 2026, not a 2023 snapshot" },
     { icon: Zap,    label: "No Code",       desc: "Build without writing a line"      },
     { icon: Cpu,    label: "Live Agents",   desc: "See them think in real time"       },
   ]
@@ -111,7 +106,7 @@ function WhatSlide() {
 
 function HowSlide() {
   const steps = [
-    { num: "01", label: "Walk to a station",  desc: "Find Station 1, 2, or 3 in the room"       },
+    { num: "01", label: "Join the makerspace", desc: "Use a kiosk or tablet in the room to get started" },
     { num: "02", label: "Register",           desc: "Enter your name to get a builder code"      },
     { num: "03", label: "Build your AI",      desc: "Connect nodes to create an intelligent flow" },
     { num: "04", label: "Submit",             desc: "Hit submit before time runs out"             },
@@ -276,31 +271,19 @@ function NextSlide({ challenges }: { challenges: Challenge[] }) {
       </div>
 
       <p className="text-[18px] font-bold text-muted-foreground uppercase tracking-wider">
-        Walk to a station to register
+        Register at a kiosk before the challenge starts
       </p>
     </div>
   )
 }
 
-// ── Langflow teach — ONE carousel slide; five chapters play back-to-back inside it ─────────
+// ── Langflow teach — one carousel slide, single continuous embed (no chapter iframe swaps) ─
 
 function LangflowTeachPlaylistSlide() {
-  const [partIndex, setPartIndex] = useState(0)
-  const total = LANGFLOW_TEACH_SEGMENTS.length
-  const segment = LANGFLOW_TEACH_SEGMENTS[partIndex]
-
-  useEffect(() => {
-    const ms = langflowSegmentDurationMs(segment)
-    const id = window.setTimeout(() => {
-      setPartIndex(i => (i < total - 1 ? i + 1 : i))
-    }, ms)
-    return () => clearTimeout(id)
-  }, [partIndex, segment, total])
-
   const src =
     `https://www.youtube.com/embed/${LANGFLOW_TEACH_VIDEO_ID}` +
-    `?start=${segment.startSec}` +
-    `&end=${segment.endSec}` +
+    `?start=${LANGFLOW_TEACH_CLIP_START_SEC}` +
+    `&end=${LANGFLOW_TEACH_CLIP_END_SEC}` +
     "&autoplay=1" +
     "&mute=1" +
     "&playsinline=1" +
@@ -316,10 +299,10 @@ function LangflowTeachPlaylistSlide() {
           Learn Langflow — full walkthrough
         </span>
         <h2 className="text-[52px] font-black uppercase tracking-tighter leading-none text-foreground">
-          Chapter {partIndex + 1} of {total}
+          Watch the tutorial
         </h2>
         <p className="text-[20px] text-muted-foreground font-medium max-w-2xl mx-auto">
-          {segment.blurb}
+          From the canvas to running your flow — one continuous clip.
         </p>
       </div>
 
@@ -327,8 +310,7 @@ function LangflowTeachPlaylistSlide() {
         className="relative w-full max-w-5xl aspect-video rounded-2xl overflow-hidden ring-2 ring-primary/25 shadow-[0_0_60px_-12px_rgba(250,204,21,0.35)] bg-black"
       >
         <iframe
-          key={`${segment.startSec}-${segment.endSec}-${partIndex}`}
-          title={`Langflow tutorial chapter ${partIndex + 1}`}
+          title="Langflow tutorial walkthrough"
           src={src}
           className="absolute inset-0 h-full w-full"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -337,7 +319,7 @@ function LangflowTeachPlaylistSlide() {
       </div>
 
       <p className="text-[14px] text-white/35 font-semibold uppercase tracking-wider">
-        One slide plays all chapters — unmute at your station if you want sound
+        Unmute on this display if you want sound
       </p>
     </div>
   )
@@ -359,7 +341,7 @@ function ChallengeSpotlightSlide({ challenge, index, total }: {
                                     { text: "text-rose-400",    bg: "bg-rose-400/10",    ring: "ring-rose-400/30",    glow: "rgba(248,113,113,0.12)" }
 
   const steps = [
-    "Walk to any available station",
+    "Open registration on a kiosk in the room",
     "Enter your name to get a builder code",
     `Build your AI flow — you have ${challenge.duration_minutes} min`,
     "Hit Submit before the timer ends",
@@ -425,6 +407,29 @@ function ChallengeSpotlightSlide({ challenge, index, total }: {
         {challenge.description}
       </p>
 
+      {(challenge.instructions_text?.trim() ||
+        challenge.instructions_document_url ||
+        challenge.starter_assets_url) && (
+        <div className="flex flex-col gap-3 max-w-4xl">
+          <p className="text-[11px] font-black uppercase tracking-[0.4em] text-white/25">
+            Challenge instructions
+          </p>
+          {challenge.instructions_text?.trim() && (
+            <p className="text-[17px] text-white/55 leading-relaxed line-clamp-6 whitespace-pre-wrap">
+              {challenge.instructions_text.trim()}
+            </p>
+          )}
+          {(challenge.instructions_document_url || challenge.starter_assets_url) && (
+            <p className="text-[14px] font-bold text-primary/90">
+              Full brief: open the PDF/DOC from the challenge link —{" "}
+              <span className="text-white/45 font-mono text-[12px] break-all">
+                {(challenge.instructions_document_url || challenge.starter_assets_url)!.replace(/^https?:\/\//, "")}
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Divider */}
       <div className="h-px bg-white/8 w-full" />
 
@@ -463,7 +468,7 @@ function ChallengeSpotlightSlide({ challenge, index, total }: {
           "text-[12px] font-black uppercase tracking-wider",
           isOpen ? "text-emerald-400" : "text-white/35",
         )}>
-          {isOpen ? "Registration Open — Walk to a station now" : "Coming Soon"}
+          {isOpen ? "Registration Open — join at a kiosk now" : "Coming Soon"}
         </span>
       </div>
     </div>
@@ -664,72 +669,11 @@ function AnimatedFlow() {
   )
 }
 
-// ── Station status row ────────────────────────────────────────────────────────
-
-type StationState = "available" | "building" | "done" | "offline" | "maintenance"
-
-function StationPill({ num, state }: { num: number; state: StationState }) {
-  const config = {
-    available:   { label: "Available",   icon: Circle,       color: "text-emerald-400", bg: "bg-emerald-400/10", ring: "ring-emerald-400/25" },
-    building:    { label: "Building…",   icon: Loader2,      color: "text-amber-400",   bg: "bg-amber-400/10",   ring: "ring-amber-400/25"   },
-    done:        { label: "Submitted",   icon: CheckCircle2, color: "text-blue-400",    bg: "bg-blue-400/10",    ring: "ring-blue-400/25"    },
-    offline:     { label: "Offline",     icon: WifiOff,      color: "text-slate-400",   bg: "bg-slate-400/10",   ring: "ring-slate-400/25"   },
-    maintenance: { label: "Maintenance", icon: Wrench,       color: "text-orange-400",  bg: "bg-orange-400/10",  ring: "ring-orange-400/25"  },
-  }[state]
-  const Icon = config.icon
-
-  return (
-    <div className={cn("flex-1 flex flex-col items-center gap-1.5 glass rounded-xl py-3 ring-1", config.ring)}>
-      <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center", config.bg)}>
-        <Icon className={cn("h-4 w-4", config.color, state === "building" && "animate-spin")} />
-      </div>
-      <p className="text-[13px] font-black text-white/80">Station {num}</p>
-      <p className={cn("text-[10px] font-bold uppercase tracking-wider", config.color)}>{config.label}</p>
-    </div>
-  )
-}
-
 // ── Right Live Panel (replaces video) ────────────────────────────────────────
-
-interface RealStation {
-  id: string
-  status: string
-}
-
-function stationStatusToState(status: string): StationState {
-  if (status === "occupied") return "building"
-  if (status === "maintenance") return "maintenance"
-  if (status === "offline") return "offline"
-  return "available"
-}
 
 function LivePanel({ challenges }: { challenges: Challenge[] }) {
   const upcoming = challenges.filter(isPromotableOnAttract).slice(0, 2)
   const totalRegistered = challenges.reduce((sum, c) => sum + (c.registration_count ?? 0), 0)
-
-  const [stations, setStations] = useState<RealStation[]>([])
-
-  useEffect(() => {
-    const fetchStations = async () => {
-      try {
-        const res = await fetch(`${getApiBase()}/api/v1/aiccore/stations`)
-        if (res.ok) setStations(await res.json())
-      } catch { /* ignore */ }
-    }
-    fetchStations()
-    const id = setInterval(fetchStations, 10_000)
-    return () => clearInterval(id)
-  }, [])
-
-  // Show up to 3 real stations; fall back to a placeholder if none registered yet
-  const displayStations: { id: string; state: StationState }[] =
-    stations.length > 0
-      ? stations.slice(0, 3).map(s => ({ id: s.id, state: stationStatusToState(s.status) }))
-      : [
-          { id: "1", state: "available" },
-          { id: "2", state: "available" },
-          { id: "3", state: "available" },
-        ]
 
   return (
     <div className="w-[36%] shrink-0 flex flex-col border-l border-white/8 bg-black/20 backdrop-blur-sm relative z-10">
@@ -747,16 +691,6 @@ function LivePanel({ challenges }: { challenges: Challenge[] }) {
         <AnimatedFlow />
         {/* Fade bottom edge into panel */}
         <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
-      </div>
-
-      {/* ── Stations ── */}
-      <div className="px-5 pb-4 flex flex-col gap-3">
-        <p className="text-[11px] font-black uppercase tracking-[0.3em] text-white/30">Station Status</p>
-        <div className="flex gap-3">
-          {displayStations.map((s, i) => (
-            <StationPill key={s.id} num={i + 1} state={s.state} />
-          ))}
-        </div>
       </div>
 
       {/* ── Stats ── */}
@@ -802,8 +736,8 @@ function LivePanel({ challenges }: { challenges: Challenge[] }) {
 
       {/* ── CTA ── */}
       <div className="mt-auto mx-5 mb-12 glass rounded-xl px-4 py-5 ring-1 ring-primary/25 text-center">
-        <p className="text-[15px] font-black uppercase tracking-wider text-primary">Walk to a station</p>
-        <p className="text-[12px] text-muted-foreground/55 mt-1">to register and join the challenge</p>
+        <p className="text-[15px] font-black uppercase tracking-wider text-primary">Register at a kiosk</p>
+        <p className="text-[12px] text-muted-foreground/55 mt-1">Get your code and join the challenge</p>
       </div>
     </div>
   )
@@ -815,7 +749,7 @@ function MarqueeTicker({ challenges }: { challenges: Challenge[] }) {
   const items = [
     `Welcome to ${AICCORE_MAKERSPACE}`,
     `${challenges.length || "—"} challenge${challenges.length !== 1 ? "s" : ""} available today`,
-    "Walk to any station to register and participate",
+    "Visit a kiosk in the room to register and participate",
     "Build intelligent AI flows with Langflow — no coding needed",
     "Each student designs and runs a real AI agent live",
     ...challenges.map(c => `Challenge: ${c.title}`),
@@ -866,7 +800,7 @@ function LiveClock() {
 // ── Main Attract Component ────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 5 intro slides + 1 Langflow teach slide (5 chapters inside) + one spotlight per promotable challenge
+  // 5 intro slides + 1 Langflow teach slide (single video) + one spotlight per promotable challenge
   const spotlightChallenges = challenges.filter(isPromotableOnAttract)
   const TOTAL = 5 + 1 + spotlightChallenges.length
   const slideDurationsMs = useMemo(() => {
@@ -877,7 +811,7 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
       SLIDE_DURATION,
       SLIDE_DURATION,
     ]
-    const langflow = [langflowTeachPlaylistTotalMs()]
+    const langflow = [langflowTeachSlideDurationMs()]
     const spots = spotlightChallenges.map(() => SLIDE_DURATION)
     return [...base, ...langflow, ...spots]
   }, [spotlightChallenges.length])
@@ -988,7 +922,7 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
         </div>
       </div>
 
-      {/* ── Right: live panel (flow diagram + stations + info) ── */}
+      {/* ── Right: live panel (flow diagram + stats + info) ── */}
       <LivePanel challenges={challenges} />
 
       {/* ── Full-width ticker — floats above both columns ── */}

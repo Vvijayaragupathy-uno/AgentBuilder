@@ -23,7 +23,8 @@ export default function BuilderPage() {
     const [iframeLoaded, setIframeLoaded] = useState(false)
     const [isSubmitted, setIsSubmitted] = useState(false)
     const [broadcast, setBroadcast] = useState<string | null>(null)
-    const [challengeAssets, setChallengeAssets] = useState<string | null>(null)
+    const [instructionText, setInstructionText] = useState<string | null>(null)
+    const [instructionFrameUrl, setInstructionFrameUrl] = useState<string | null>(null)
     const [challengeInstructionsOpen, setChallengeInstructionsOpen] = useState(false)
     const [isSystemLocked, setIsSystemLocked] = useState(false)
     const [timeLeft, setTimeLeft] = useState<number | null>(null)
@@ -64,9 +65,19 @@ export default function BuilderPage() {
             const res = await fetch(`${apiBase}/api/v1/aiccore/system/status`)
             const status = await res.json()
             applyServerTimeFromIso(status.server_time)
-            if (status.starter_assets_url) {
-                setChallengeAssets(status.starter_assets_url)
-            }
+            const doc =
+                typeof status.instructions_document_url === "string" &&
+                status.instructions_document_url.trim()
+                    ? status.instructions_document_url.trim()
+                    : null
+            const starter =
+                typeof status.starter_assets_url === "string" && status.starter_assets_url.trim()
+                    ? status.starter_assets_url.trim()
+                    : null
+            setInstructionFrameUrl(doc || starter || null)
+            setInstructionText(
+                typeof status.instructions_text === "string" ? status.instructions_text : null,
+            )
             setHasActiveChallenge(!!status.active_challenge)
             if (status.active_challenge && status.duration_minutes != null) {
                 if (status.start_time) {
@@ -111,6 +122,8 @@ export default function BuilderPage() {
                 setChallengeInfo(null)
                 setServerBuildWindowOpen(null)
                 setTimeLeft(null)
+                setInstructionText(null)
+                setInstructionFrameUrl(null)
             }
         } catch {
             /* ignore */
@@ -126,9 +139,12 @@ export default function BuilderPage() {
         sessionRef.current = session
     }, [session])
 
+    const hasChallengeInstructions =
+        Boolean(instructionText?.trim()) || Boolean(instructionFrameUrl)
+
     useEffect(() => {
-        if (!challengeAssets) setChallengeInstructionsOpen(false)
-    }, [challengeAssets])
+        if (!hasChallengeInstructions) setChallengeInstructionsOpen(false)
+    }, [hasChallengeInstructions])
 
     // Handle unlock from LockScreen
     const handleUnlock = (sessionId: string, nickname: string, userStats?: any) => {
@@ -648,7 +664,7 @@ export default function BuilderPage() {
                         </div>
                     ) : null}
 
-                    {challengeAssets && (
+                    {hasChallengeInstructions && (
                         <button
                             type="button"
                             onClick={() => setChallengeInstructionsOpen(true)}
@@ -705,7 +721,7 @@ export default function BuilderPage() {
                 </div>
             )}
 
-            {challengeAssets && (
+            {hasChallengeInstructions && (
                 <Sheet open={challengeInstructionsOpen} onOpenChange={setChallengeInstructionsOpen}>
                     <SheetContent
                         side="right"
@@ -714,24 +730,37 @@ export default function BuilderPage() {
                         <SheetHeader className="space-y-2 border-b border-border bg-card/95 px-4 py-4 pr-12 text-left">
                             <SheetTitle className="text-base">Challenge instructions</SheetTitle>
                             <SheetDescription className="text-xs leading-relaxed">
-                                Preview here while you keep building. If it stays blank, the file may block embedding — use the link below.
+                                Preview here while you keep building. If the document stays blank, it may block embedding — use the link below.
                             </SheetDescription>
-                            <a
-                                href={challengeAssets}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-secondary/80 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
-                            >
-                                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                                Open in new tab
-                            </a>
+                            {instructionFrameUrl && (
+                                <a
+                                    href={instructionFrameUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-secondary/80 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
+                                >
+                                    <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                    Open handout in new tab
+                                </a>
+                            )}
                         </SheetHeader>
-                        <div className="min-h-0 flex-1 bg-muted/30">
-                            <iframe
-                                src={challengeAssets}
-                                title="Challenge instructions"
-                                className="h-full min-h-[45vh] w-full border-0"
-                            />
+                        <div className="flex min-h-0 flex-1 flex-col bg-muted/30">
+                            {instructionText?.trim() && (
+                                <div className="max-h-[38vh] shrink-0 overflow-y-auto border-b border-border px-4 py-3 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+                                    {instructionText.trim()}
+                                </div>
+                            )}
+                            {instructionFrameUrl ? (
+                                <iframe
+                                    src={instructionFrameUrl}
+                                    title="Challenge instructions handout"
+                                    className="min-h-[45vh] flex-1 w-full border-0"
+                                />
+                            ) : (
+                                <div className="flex flex-1 items-center justify-center px-4 py-8 text-center text-xs text-muted-foreground">
+                                    Text-only briefing — use the mission description on the TV if you need more context.
+                                </div>
+                            )}
                         </div>
                     </SheetContent>
                 </Sheet>

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from uuid import UUID, uuid4
-from sqlalchemy import Column, String, DateTime, Boolean, JSON, ForeignKey, Integer, Float
+from sqlalchemy import String, DateTime, Boolean, JSON, ForeignKey, Integer, Float, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
@@ -49,6 +49,9 @@ class Challenge(Base):
     is_finalized: Mapped[bool] = mapped_column(Boolean, default=False)
     starter_assets_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     banner_image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Optional TV + builder briefing (separate from short description / starter kit URL).
+    instructions_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    instructions_document_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 

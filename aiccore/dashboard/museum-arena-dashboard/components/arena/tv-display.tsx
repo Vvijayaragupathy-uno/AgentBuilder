@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from "rea
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { TVAttract } from "./tv-attract"
 import { TVLive } from "./tv-live"
+import { TVAmbientAudio } from "./tv-ambient-audio"
+import { playTVSting } from "@/lib/tv-audio"
 import { applyServerTimeFromIso, cn, getApiBase, skewedNow } from "@/lib/utils"
 import { Crown, Rocket, Clock, Users, RotateCcw } from "lucide-react"
 
@@ -23,6 +25,11 @@ export interface Challenge {
   max_participants?: number
   registration_count?: number
   banner_image_url?: string
+  starter_assets_url?: string | null
+  /** Longer briefing copy for TV spotlight + builder (optional). */
+  instructions_text?: string | null
+  /** PDF/DOC handout URL for TV + builder instructions panel. */
+  instructions_document_url?: string | null
 }
 
 export interface TVStudent {
@@ -101,6 +108,13 @@ function TVResults({
 
   const winner = leaderboard[0]
   const podium = leaderboard.slice(0, 3)
+  const winnerStingRef = useRef(false)
+
+  useEffect(() => {
+    if (!winner || winnerStingRef.current) return
+    winnerStingRef.current = true
+    playTVSting("winner", 0.42)
+  }, [winner])
 
   const podiumStyles = [
     { ring: "ring-amber-400/40", text: "text-amber-400", bg: "bg-amber-400/15", py: "py-10" },
@@ -395,6 +409,8 @@ function TVDisplayInner() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-background">
+      <TVAmbientAudio />
+
       {current === "attract" && (
         <TVAttract challenges={challenges} />
       )}
