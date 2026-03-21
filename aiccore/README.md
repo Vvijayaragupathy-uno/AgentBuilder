@@ -79,7 +79,7 @@ If an old `aiccore.db` still has `participant.unlock_code` **NOT NULL**, startup
 
 ### Server clock
 
-`GET /api/v1/aiccore/system/status` includes **`server_time`** (UTC ISO). The TV and builder apply a skew so countdowns match the server even if the device clock is wrong.
+`GET /api/v1/aiccore/system/status` includes **`server_time`** (UTC ISO), **`active_challenge_id`**, **`mission_build_window_open`**, and **`mission_build_ends_at`** (UTC ISO end instant = mission `start_time` + `duration_minutes` when both are set). The **builder** and **TV live** countdown use that end instant when it matches the displayed mission so both stay aligned with the server. Only one challenge may be **`is_active`** at a time: activating one in the admin toggle deactivates the others; any duplicate actives are also trimmed when **`system/status`** runs.
 
 ### Session-bound `POST /api/v1/aiccore/submit`
 

@@ -27,10 +27,18 @@ export default function BuilderPage() {
     const [challengeInstructionsOpen, setChallengeInstructionsOpen] = useState(false)
     const [isSystemLocked, setIsSystemLocked] = useState(false)
     const [timeLeft, setTimeLeft] = useState<number | null>(null)
-    const [challengeInfo, setChallengeInfo] = useState<{ start_time: string; duration: number; mode: "mission" | "per_seat" } | null>(null)
+    const [challengeInfo, setChallengeInfo] = useState<{
+        start_time: string
+        duration: number
+        mode: "mission" | "per_seat"
+        /** Server UTC instant for mission end — aligns countdown with mission_build_window_open. */
+        missionBuildEndsAt?: string | null
+    } | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [hasActiveChallenge, setHasActiveChallenge] = useState(false)
     const [isBeforeStart, setIsBeforeStart] = useState(false)
+    /** Server truth for scheduled missions — avoids disabled Submit when client clock ≠ UTC start instant. */
+    const [serverBuildWindowOpen, setServerBuildWindowOpen] = useState<boolean | null>(null)
     const [demoInfo, setDemoInfo] = useState<{
         myPosition?: number
         total: number
@@ -45,6 +53,14 @@ export default function BuilderPage() {
         if (!session) return
         try {
             const apiBase = getApiBase()
+            await fetch(
+                `${apiBase}/api/v1/aiccore/session/${session.id}/attach-to-live-mission`,
+                {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "X-AICCORE-Session-Id": session.id },
+                }
+            ).catch(() => { /* non-fatal */ })
             const res = await fetch(`${apiBase}/api/v1/aiccore/system/status`)
             const status = await res.json()
             applyServerTimeFromIso(status.server_time)
@@ -54,13 +70,29 @@ export default function BuilderPage() {
             setHasActiveChallenge(!!status.active_challenge)
             if (status.active_challenge && status.duration_minutes != null) {
                 if (status.start_time) {
+                    try {
+                        localStorage.removeItem(SESSION_BUILD_START_MS_KEY)
+                    } catch {
+                        /* ignore */
+                    }
                     setChallengeInfo({
                         start_time: status.start_time,
                         duration: status.duration_minutes,
                         mode: "mission",
+                        missionBuildEndsAt:
+                            typeof status.mission_build_ends_at === "string"
+                                ? status.mission_build_ends_at
+                                : null,
                     })
-                    setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
+                    if (typeof status.mission_build_window_open === "boolean") {
+                        setServerBuildWindowOpen(status.mission_build_window_open)
+                        setIsBeforeStart(!status.mission_build_window_open)
+                    } else {
+                        setServerBuildWindowOpen(null)
+                        setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
+                    }
                 } else {
+                    setServerBuildWindowOpen(null)
                     let stored = localStorage.getItem(SESSION_BUILD_START_MS_KEY)
                     if (!stored) {
                         const n = skewedNow()
@@ -71,11 +103,13 @@ export default function BuilderPage() {
                         start_time: new Date(Number(stored)).toISOString(),
                         duration: status.duration_minutes,
                         mode: "per_seat",
+                        missionBuildEndsAt: null,
                     })
                     setIsBeforeStart(false)
                 }
             } else {
                 setChallengeInfo(null)
+                setServerBuildWindowOpen(null)
                 setTimeLeft(null)
             }
         } catch {
@@ -140,6 +174,10 @@ export default function BuilderPage() {
         setDemoQueueError(null)
         setDemoJoining(false)
         setSubmitError(null)
+        setServerBuildWindowOpen(null)
+        setIsBeforeStart(false)
+        setHasActiveChallenge(false)
+        setChallengeInfo(null)
         autoSubmitFiredRef.current = false
     }
 
@@ -297,6 +335,22 @@ export default function BuilderPage() {
         return () => clearInterval(interval)
     }, [session, refreshMissionFromServer])
 
+    // Pick up mission_build_window_open soon after scheduled start (don't wait only on 10s poll).
+    useEffect(() => {
+        if (!session || isSubmitted || !isBeforeStart) return
+        const id = setInterval(() => void refreshMissionFromServer(), 2000)
+        return () => clearInterval(id)
+    }, [session, isSubmitted, isBeforeStart, refreshMissionFromServer])
+
+    useEffect(() => {
+        const onVis = () => {
+            if (typeof document === "undefined" || document.visibilityState !== "visible") return
+            if (sessionRef.current) void refreshMissionRef.current()
+        }
+        document.addEventListener("visibilitychange", onVis)
+        return () => document.removeEventListener("visibilitychange", onVis)
+    }, [])
+
     const handleSubmit = useCallback(async () => {
         if (!session || isSubmitting || isSubmitted) return
         setIsSubmitting(true)
@@ -332,7 +386,7 @@ export default function BuilderPage() {
     }, [session, isSubmitting, isSubmitted])
 
     const challengeTickKey = challengeInfo
-        ? `${challengeInfo.mode}:${challengeInfo.start_time ?? ""}:${challengeInfo.duration}`
+        ? `${challengeInfo.mode}:${challengeInfo.start_time ?? ""}:${challengeInfo.duration}:${challengeInfo.missionBuildEndsAt ?? ""}`
         : ""
 
     useEffect(() => {
@@ -393,13 +447,20 @@ export default function BuilderPage() {
 
         const timer = setInterval(() => {
             const start = new Date(challengeInfo.start_time).getTime()
-            const end = start + challengeInfo.duration * 60 * 1000
+            const end =
+                challengeInfo.mode === "mission" && challengeInfo.missionBuildEndsAt
+                    ? new Date(challengeInfo.missionBuildEndsAt).getTime()
+                    : start + challengeInfo.duration * 60 * 1000
             const now = skewedNow()
 
-            if (challengeInfo.mode === "mission" && now < start) {
-                setIsBeforeStart(true)
-                setTimeLeft(null)
-                return
+            if (challengeInfo.mode === "mission") {
+                const beforeStart =
+                    serverBuildWindowOpen === null ? now < start : !serverBuildWindowOpen
+                if (beforeStart) {
+                    setIsBeforeStart(true)
+                    setTimeLeft(null)
+                    return
+                }
             }
 
             setIsBeforeStart(false)
@@ -415,7 +476,7 @@ export default function BuilderPage() {
         }, 1000)
 
         return () => clearInterval(timer)
-    }, [challengeInfo, isSubmitted, isSystemLocked, handleSubmit])
+    }, [challengeInfo, isSubmitted, isSystemLocked, handleSubmit, serverBuildWindowOpen])
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60)

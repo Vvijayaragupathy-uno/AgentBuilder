@@ -26,27 +26,38 @@ interface DemoStatusPayload {
 
 // ── Countdown Timer Hook ──────────────────────────────────────────────────────
 
-function useCountdown(challenge: Challenge): string {
+/** When set for the same mission as `challenge`, uses server `mission_build_ends_at` (matches builder). */
+function useCountdown(
+  challenge: Challenge,
+  serverMissionEnd: { endsAtIso: string } | null,
+): string {
   const [display, setDisplay] = useState("--:--")
-  // Primitives only — parent re-fetches challenges every 5s and replaces the object; `[challenge]` reset the timer every poll.
   const challengeId = challenge.id
   const startTime = challenge.start_time
   const durationMinutes = challenge.duration_minutes
+  const serverIso = serverMissionEnd?.endsAtIso ?? null
 
   useEffect(() => {
-    if (!startTime) {
-      setDisplay("—:—")
-      return
+    let endTime: number | null = null
+    if (serverIso) {
+      const parsed = Date.parse(serverIso)
+      if (Number.isFinite(parsed)) endTime = parsed
     }
-
-    const endTime = new Date(startTime).getTime() + durationMinutes * 60_000
-    if (!Number.isFinite(endTime)) {
+    if (endTime == null) {
+      if (!startTime) {
+        setDisplay("—:—")
+        return
+      }
+      const t = new Date(startTime).getTime() + durationMinutes * 60_000
+      endTime = Number.isFinite(t) ? t : null
+    }
+    if (endTime == null) {
       setDisplay("—:—")
       return
     }
 
     const tick = () => {
-      const remaining = Math.max(0, endTime - skewedNow())
+      const remaining = Math.max(0, endTime! - skewedNow())
       const mins = Math.floor(remaining / 60_000)
       const secs = Math.floor((remaining % 60_000) / 1000)
       setDisplay(`${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`)
@@ -55,7 +66,7 @@ function useCountdown(challenge: Challenge): string {
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
-  }, [challengeId, startTime, durationMinutes])
+  }, [challengeId, startTime, durationMinutes, serverIso])
 
   return display
 }
@@ -199,7 +210,8 @@ function TVLeaderboard() {
 // ── Main TVLive Component ─────────────────────────────────────────────────────
 
 export function TVLive({ challenge }: { challenge: Challenge }) {
-  const timer = useCountdown(challenge)
+  const [missionEndFromServer, setMissionEndFromServer] = useState<{ endsAtIso: string } | null>(null)
+  const timer = useCountdown(challenge, missionEndFromServer)
   const [congrats, setCongrats] = useState<{ nickname: string; until: number } | null>(null)
   const [demo, setDemo] = useState<DemoStatusPayload | null>(null)
   const wsRetryRef = useRef(1000)
@@ -210,11 +222,18 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
       if (st.ok) {
         const j = await st.json()
         applyServerTimeFromIso(j.server_time)
+        const sid = typeof j.active_challenge_id === "string" ? j.active_challenge_id : ""
+        const end = typeof j.mission_build_ends_at === "string" ? j.mission_build_ends_at : ""
+        if (sid && end && sid === challenge.id) {
+          setMissionEndFromServer({ endsAtIso: end })
+        } else {
+          setMissionEndFromServer(null)
+        }
       }
       const res = await fetch(`${getApiBase()}/api/v1/aiccore/demo/status`)
       if (res.ok) setDemo(await res.json())
     } catch { /* ignore */ }
-  }, [])
+  }, [challenge.id])
 
   useEffect(() => {
     loadDemo()

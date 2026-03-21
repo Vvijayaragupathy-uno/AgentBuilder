@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # /app/aiccore/wrapper/main.py → parent×3 = /app (project root in container)
@@ -449,6 +449,7 @@ def create_aiccore_app():
             from aiccore.backend.models import ChallengeRegistration, Challenge
 
             active_challenge_id = None
+            unlock_explicit_challenge = False
             if req.challenge_id:
                 try:
                     cid = UUID(req.challenge_id.strip())
@@ -466,6 +467,7 @@ def create_aiccore_app():
                         detail="You are not registered for this challenge. Open the correct challenge link or register first.",
                     )
                 active_challenge_id = cid
+                unlock_explicit_challenge = True
             else:
                 reg_stmt = (
                     select(ChallengeRegistration)
@@ -475,6 +477,29 @@ def create_aiccore_app():
                 )
                 reg = db_session.execute(reg_stmt).scalars().first()
                 active_challenge_id = reg.challenge_id if reg else None
+
+            # Stale registration: "latest reg" may point at a mission that already ended (inactive).
+            # Without this, the seat stays CHECKED_IN off the live mission until manual DB fix.
+            if active_challenge_id is not None:
+                ch_row = db_session.get(Challenge, active_challenge_id)
+                if ch_row is None or not ch_row.is_active:
+                    if unlock_explicit_challenge:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="That mission is not live. Use the link for the current challenge or open /builder without challenge_id.",
+                        )
+                    active_challenge_id = None
+
+            # Museum default: no live-bound row yet — attach to the currently active mission.
+            if active_challenge_id is None:
+                live_ch = db_session.execute(
+                    select(Challenge)
+                    .where(Challenge.is_active == True)
+                    .order_by(Challenge.created_at.asc())
+                    .limit(1)
+                ).scalars().first()
+                if live_ch is not None:
+                    active_challenge_id = live_ch.id
 
             new_session = AICSession(
                 user_id=user.id,
@@ -611,6 +636,62 @@ def create_aiccore_app():
             if not session:
                 raise HTTPException(status_code=404, detail="Session not found")
             return {"is_submitted": session.is_submitted}
+
+    @app.post("/api/v1/aiccore/session/{session_id}/attach-to-live-mission")
+    async def attach_session_to_live_mission(session_id: UUID, request: Request):
+        """If this seat has no challenge_id but a mission is live, bind it (fixes CHECKED_IN + disabled Submit)."""
+        if not _aiccore_session_auth_ok(request, session_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Session cookie or X-AICCORE-Session-Id header required",
+            )
+        attached_cid: Optional[str] = None
+        cleared_stale = False
+        broadcast_lb = False
+        with Session(engine) as db_session:
+            sess = db_session.get(AICSession, session_id)
+            if not sess:
+                raise HTTPException(status_code=404, detail="Session not found")
+            live_ch = db_session.execute(
+                select(Challenge)
+                .where(Challenge.is_active == True)
+                .order_by(Challenge.created_at.asc())
+                .limit(1)
+            ).scalars().first()
+            bound = (
+                db_session.get(Challenge, sess.challenge_id)
+                if sess.challenge_id is not None
+                else None
+            )
+            if bound is not None and bound.is_active:
+                return {
+                    "status": "unchanged",
+                    "challenge_id": str(sess.challenge_id),
+                }
+            if live_ch is None:
+                if sess.challenge_id is not None:
+                    sess.challenge_id = None
+                    cleared_stale = True
+                    broadcast_lb = True
+                    db_session.commit()
+                if broadcast_lb:
+                    await broadcast_manager.broadcast(
+                        {
+                            "type": "LEADERBOARD_UPDATE",
+                            "data": {"session_attached": str(session_id)},
+                        }
+                    )
+                return {
+                    "status": "no_active_mission",
+                    "cleared_stale_binding": cleared_stale,
+                }
+            sess.challenge_id = live_ch.id
+            attached_cid = str(live_ch.id)
+            db_session.commit()
+        await broadcast_manager.broadcast(
+            {"type": "LEADERBOARD_UPDATE", "data": {"session_attached": str(session_id)}}
+        )
+        return {"status": "attached", "challenge_id": attached_cid}
 
     @app.get("/api/v1/aiccore/demo/status")
     async def demo_status_endpoint(
@@ -1128,6 +1209,12 @@ def create_aiccore_app():
             c.is_active = not c.is_active
             now_active = c.is_active
             if now_active and not was_active:
+                # Exactly one live mission — prevents two is_active rows (TV / binding ambiguity).
+                db_session.execute(
+                    update(Challenge)
+                    .where(Challenge.id != challenge_id, Challenge.is_active == True)
+                    .values(is_active=False)
+                )
                 c.is_registration_open = False
             mission_title = c.title
             mission_cid = str(c.id)
@@ -1353,17 +1440,49 @@ def create_aiccore_app():
         with Session(engine) as db_session:
             mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             locked = is_arena_locked_db(db_session)
-            # Get the single active challenge to show on landing pages if needed
-            stmt = select(Challenge).where(Challenge.is_active == True).limit(1)
+            # Heal DBs with >1 active challenge (old toggles / races) — keep oldest active by created_at.
+            _multi = db_session.execute(
+                select(Challenge)
+                .where(Challenge.is_active == True)
+                .order_by(Challenge.created_at.asc())
+            ).scalars().all()
+            if len(_multi) > 1:
+                for _stale in _multi[1:]:
+                    _stale.is_active = False
+                db_session.commit()
+            stmt = (
+                select(Challenge)
+                .where(Challenge.is_active == True)
+                .order_by(Challenge.created_at.asc())
+                .limit(1)
+            )
             active_challenge = db_session.execute(stmt).scalars().first()
+            now_utc = datetime.now(timezone.utc)
+            mission_build_window_open = bool(
+                active_challenge
+                and challenge_is_live_build_window(active_challenge, now_utc)
+            )
+            mission_build_ends_at: Optional[str] = None
+            if (
+                active_challenge
+                and active_challenge.start_time is not None
+                and active_challenge.duration_minutes is not None
+            ):
+                st_utc = challenge_start_time_utc(active_challenge)
+                if st_utc is not None:
+                    end_utc = st_utc + timedelta(minutes=int(active_challenge.duration_minutes))
+                    mission_build_ends_at = end_utc.isoformat()
 
             result = {
                 "locked": locked,
                 "active_challenge": active_challenge.title if active_challenge else None,
+                "active_challenge_id": str(active_challenge.id) if active_challenge else None,
                 "starter_assets_url": active_challenge.starter_assets_url if active_challenge else None,
                 "duration_minutes": active_challenge.duration_minutes if active_challenge else None,
                 "start_time": active_challenge.start_time.isoformat() if active_challenge and active_challenge.start_time else None,
-                "server_time": datetime.now(timezone.utc).isoformat(),
+                "mission_build_window_open": mission_build_window_open,
+                "mission_build_ends_at": mission_build_ends_at,
+                "server_time": now_utc.isoformat(),
             }
 
         if mission_live_payload:
