@@ -34,6 +34,13 @@ import type { Challenge } from "./tv-display"
 const SLIDE_DURATION = 10_000  // ms each slide stays (default)
 const TRANSITION_MS  = 600     // fade duration
 
+/** Matches catalog “open” missions — avoids showing closed/finalized rows as “Coming Up” on the TV. */
+function isPromotableOnAttract(c: Challenge): boolean {
+  if (c.is_active) return false
+  if (c.is_finalized === true) return false
+  return c.is_registration_open === true
+}
+
 // ── Slide 1 — Hook ────────────────────────────────────────────────────────────
 
 function HookSlide() {
@@ -138,7 +145,7 @@ function HowSlide() {
 // ── Slide 4 — Available Challenges ────────────────────────────────────────────
 
 function ChallengesSlide({ challenges }: { challenges: Challenge[] }) {
-  const visible = challenges.filter(c => !c.is_active).slice(0, 4)
+  const visible = challenges.filter(isPromotableOnAttract).slice(0, 4)
 
   if (visible.length === 0) {
     return (
@@ -207,7 +214,12 @@ function ChallengesSlide({ challenges }: { challenges: Challenge[] }) {
 
 function NextSlide({ challenges }: { challenges: Challenge[] }) {
   const [now, setNow] = useState(skewedNow)
-  const upcoming = challenges.find(c => c.is_registration_open && !c.is_active && c.start_time)
+  const upcoming = challenges.find(
+    c =>
+      isPromotableOnAttract(c) &&
+      Boolean(c.start_time) &&
+      new Date(c.start_time!).getTime() > now,
+  )
 
   useEffect(() => {
     const id = setInterval(() => setNow(skewedNow()), 1000)
@@ -692,7 +704,7 @@ function stationStatusToState(status: string): StationState {
 }
 
 function LivePanel({ challenges }: { challenges: Challenge[] }) {
-  const upcoming = challenges.filter(c => !c.is_active).slice(0, 2)
+  const upcoming = challenges.filter(isPromotableOnAttract).slice(0, 2)
   const totalRegistered = challenges.reduce((sum, c) => sum + (c.registration_count ?? 0), 0)
 
   const [stations, setStations] = useState<RealStation[]>([])
@@ -854,8 +866,8 @@ function LiveClock() {
 // ── Main Attract Component ────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 5 intro slides + 1 Langflow teach slide (5 chapters inside) + one spotlight per challenge
-  const spotlightChallenges = challenges.filter(c => !c.is_active)
+  // 5 intro slides + 1 Langflow teach slide (5 chapters inside) + one spotlight per promotable challenge
+  const spotlightChallenges = challenges.filter(isPromotableOnAttract)
   const TOTAL = 5 + 1 + spotlightChallenges.length
   const slideDurationsMs = useMemo(() => {
     const base = [

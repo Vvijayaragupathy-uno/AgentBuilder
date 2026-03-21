@@ -292,6 +292,29 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
   const presenting = demo?.gate_open && demo.presenting
 
+  /** During full-screen demo, show this slot’s countdown — not the mission build clock (avoids “two timers”). */
+  const [demoSlotClock, setDemoSlotClock] = useState<string | null>(null)
+  useEffect(() => {
+    if (!presenting || !demo?.presenting?.segment_ends_at) {
+      setDemoSlotClock(null)
+      return
+    }
+    const end = new Date(demo.presenting.segment_ends_at).getTime()
+    const tick = () => {
+      if (!Number.isFinite(end)) {
+        setDemoSlotClock("—:—")
+        return
+      }
+      const sec = Math.max(0, Math.floor((end - skewedNow()) / 1000))
+      const m = Math.floor(sec / 60)
+      const s = sec % 60
+      setDemoSlotClock(`${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`)
+    }
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [presenting, demo?.presenting?.segment_ends_at])
+
   /** Empty mosaic copy: scheduled end at 00:00, or open-ended mission + demo gate / queue. */
   const mosaicEmptyState = useMemo((): MosaicEmptyState => {
     const qlen = demo?.queue_length ?? 0
@@ -372,11 +395,36 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
           </h1>
         </div>
 
-        <div className="flex items-center gap-3 glass rounded-xl px-5 py-2.5 ring-1 ring-primary/20 shrink-0">
-          <Clock className="h-5 w-5 text-primary shrink-0" />
-          <span className="text-[36px] font-black font-mono tabular-nums text-primary leading-none">
-            {timer}
-          </span>
+        <div
+          className={cn(
+            "flex flex-col items-end gap-0.5 glass rounded-xl px-5 py-2 ring-1 shrink-0 min-w-[140px]",
+            presenting ? "ring-violet-500/30" : "ring-primary/20",
+          )}
+        >
+          {presenting && demoSlotClock != null ? (
+            <>
+              <span className="text-[9px] font-black uppercase tracking-widest text-violet-300/90">
+                Demo slot (auto-next or admin Advance)
+              </span>
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-violet-400 shrink-0" />
+                <span className="text-[36px] font-black font-mono tabular-nums text-violet-200 leading-none">
+                  {demoSlotClock}
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground/75 text-right leading-snug max-w-[220px]">
+                Mission build window still{" "}
+                <span className="font-mono font-bold text-primary/85">{timer}</span> until challenge ends or finalize
+              </p>
+            </>
+          ) : (
+            <div className="flex items-center gap-3 py-0.5">
+              <Clock className="h-5 w-5 text-primary shrink-0" />
+              <span className="text-[36px] font-black font-mono tabular-nums text-primary leading-none">
+                {timer}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

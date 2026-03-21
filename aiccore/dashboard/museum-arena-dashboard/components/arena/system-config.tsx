@@ -535,7 +535,8 @@ export function SystemConfig() {
                                 <p className="text-[10px] text-center text-violet-200/90 font-medium">{demoMsg}</p>
                             )}
                             <p className="text-[9px] text-muted-foreground/50 text-center leading-tight">
-                                Skips the current timed demo segment (admin cookie required)
+                                Skips the current presenter slot (admin cookie). Slots also auto-advance when time runs out — length{" "}
+                                <span className="font-mono">AICCORE_DEMO_SEGMENT_SECONDS</span> (default 90s, not 5 min).
                             </p>
                         </div>
 

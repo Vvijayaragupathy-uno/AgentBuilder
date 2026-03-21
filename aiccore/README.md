@@ -99,6 +99,12 @@ Until the Python server restarts, it is still running the **old** in-memory code
 - Optional: **`/builder?challenge_id=<uuid>`** — sent on unlock so the session binds to that challenge (must already be registered).  
 - **`?mode=auto`** on the TV (or remove `mode`) restores automatic attract/live/results. Forced demo modes still use `?mode=live` etc.; use **“Auto TV mode”** on screen to clear.
 
+### TV demo queue vs mission timer
+
+- **Per-presenter slot** (how long one person’s flow is on the big screen): **`AICCORE_DEMO_SEGMENT_SECONDS`** env on the Python server (default **90 seconds**, clamped 15–3600 in code). When it expires, the backend advances to the next queue entry or back to mosaic (`cursor` −1). There is **no builder “I’m done”** button — early handoff is **facilitator-only** via dashboard **Advance presenter on TV** (`POST /api/v1/aiccore/demo/next`, requires admin cookie).
+- **Mission / build window** (shared challenge countdown): **independent** — it can still run while demos play. The TV live header shows **demo slot** time prominently during full-screen demo, with the mission clock as secondary text. **End the whole run:** deactivate the challenge in admin, **`POST /api/v1/aiccore/system/finalize`** (locks arena + ends active missions), or wait for mission time + submissions per your rules.
+- **Mosaic during demo:** Hidden while **`presenting`** (full-screen iframe). If you still see the grid, you are in **queue / between** segments (`gate_open` but no current presenter), not in active full-screen playback.
+
 ### Concurrent Langflow
 
 If **more than one** active AICCORE session exists, **global Langflow purge is skipped**; only **restore/merge** runs so other laptops are not wiped. For a totally clean workspace per seat, run **separate Langflow instances** (or accept shared flow list until submit).

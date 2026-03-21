@@ -15,6 +15,8 @@ export interface Challenge {
   description: string
   complexity_level: string
   is_active: boolean
+  /** Archived / ended round — hide from attract “coming up” carousel. */
+  is_finalized?: boolean
   is_registration_open: boolean
   start_time: string | null
   duration_minutes: number
@@ -277,7 +279,10 @@ function TVDisplayInner() {
       } else if (wasActive) {
         prevActiveRef.current = null
         const lb = await fetchLeaderboard()
-        const upcoming = data.find(c => c.is_registration_open && !c.is_active) ?? null
+        const upcoming =
+          data.find(
+            c => c.is_registration_open && !c.is_active && c.is_finalized !== true,
+          ) ?? null
         setResultsChallenge(wasActive)
         setResultsLB(lb)
         setNextChallenge(upcoming)

@@ -746,6 +746,9 @@ def create_aiccore_app():
             raise HTTPException(status_code=403, detail="Admin only")
         with Session(engine) as db_session:
             result = admin_advance_demo(db_session)
+        await broadcast_manager.broadcast(
+            {"type": "DEMO_QUEUE_UPDATE", "data": {"event": "admin_advance"}}
+        )
         return result
 
     @app.post("/api/v1/aiccore/session/{session_id}/deactivate")
@@ -1180,6 +1183,7 @@ def create_aiccore_app():
                     "title": c.title,
                     "description": c.description,
                     "is_active": c.is_active,
+                    "is_finalized": bool(c.is_finalized),
                     "complexity_level": c.complexity_level,
                     "max_participants": c.max_participants,
                     "duration_minutes": c.duration_minutes,
