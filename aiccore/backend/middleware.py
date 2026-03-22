@@ -1,19 +1,46 @@
 import gzip
 import json
 import asyncio
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import Request
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response, JSONResponse
-from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import select
+
 from .database import engine
 from .models import Event
 from .broadcast import broadcast_manager
 from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
+
+
+async def _read_starlette_response_body(response: Response) -> bytes:
+    """Drain response bytes; StreamingResponse has body_iterator, not async body()."""
+    it = getattr(response, "body_iterator", None)
+    if it is not None:
+        parts: list[bytes] = []
+        async for chunk in it:
+            parts.append(chunk)
+        return b"".join(parts)
+    body_fn = getattr(response, "body", None)
+    if callable(body_fn):
+        return await body_fn()
+    raw = getattr(response, "body", None)
+    if isinstance(raw, (bytes, memoryview, bytearray)):
+        return bytes(raw)
+    return b""
+
+
+def _passthrough_raw_response(body_bytes: bytes, response: Response) -> Response:
+    """Rebuild response after the upstream body was consumed (do not return ``response``)."""
+    return Response(
+        content=body_bytes,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+    )
 
 
 class AICCoreEventMiddleware(BaseHTTPMiddleware):
@@ -291,27 +318,19 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         if not root_id:
             return response
 
-        body_bytes = await response.body()
+        body_bytes = await _read_starlette_response_body(response)
         enc = (response.headers.get("content-encoding") or "").lower()
         raw = body_bytes
         if enc == "gzip":
             try:
                 raw = gzip.decompress(body_bytes)
             except Exception:
-                return Response(
-                    content=body_bytes,
-                    status_code=response.status_code,
-                    headers=dict(response.headers),
-                )
+                return _passthrough_raw_response(body_bytes, response)
 
         try:
             payload = json.loads(raw.decode("utf-8"))
         except Exception:
-            return Response(
-                content=body_bytes,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-            )
+            return _passthrough_raw_response(body_bytes, response)
 
         try:
             async with session_scope() as lf:
@@ -321,7 +340,8 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                     if row:
                         allowed.add(row.id)
         except Exception:
-            return response
+            # Body was already drained — must not return the original streaming response.
+            return _passthrough_raw_response(body_bytes, response)
 
         allowed_str = {str(x) for x in allowed}
         path = request.url.path.rstrip("/")

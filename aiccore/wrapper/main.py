@@ -269,6 +269,20 @@ def sanitize_string(s: str, length: int = 50) -> str:
     s = re.sub(r'[^\w\s-]', '', s)
     return s[:length].strip()
 
+
+def _admin_cookie_kwargs(request: Request) -> dict:
+    """
+    Cross-origin dashboard (Next on host A, API on host B) sends credentialed POSTs
+    (e.g. practice-session). SameSite=Lax cookies are not included on those requests;
+    SameSite=None + Secure on HTTPS fixes it. Local HTTP keeps Lax (Secure=False).
+    """
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if not proto:
+        proto = (request.url.scheme or "http").lower()
+    if proto == "https":
+        return {"samesite": "none", "secure": True}
+    return {"samesite": "lax", "secure": False}
+
 def generate_unlock_code():
     return f"{random.randint(0, 9999):04d}"
 
@@ -2004,19 +2018,20 @@ def create_aiccore_app():
             } for s in results]
 
     @app.post("/api/v1/aiccore/auth/admin-login")
-    async def admin_login(req: AdminLoginRequest):
+    async def admin_login(body: AdminLoginRequest, request: Request):
         admin_pass = os.getenv("AICCORE_ADMIN_PASS")
         if not admin_pass:
             raise HTTPException(status_code=503, detail="Admin authentication not configured. Set AICCORE_ADMIN_PASS.")
 
-        if req.password == admin_pass:
+        if body.password == admin_pass:
             res = JSONResponse(content={"status": "authenticated", "role": "admin"})
             res.set_cookie(
                 key="aiccore_admin",
                 value="true",
                 httponly=False,  # Must be readable by JS (document.cookie) for auth detection
-                samesite="lax",
-                max_age=86400  # 1 day
+                path="/",
+                max_age=86400,  # 1 day
+                **_admin_cookie_kwargs(request),
             )
             return res
         

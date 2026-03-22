@@ -318,7 +318,7 @@ export default function BuilderPage() {
         }
     }, [practiceMode])
 
-    // Admin Practice: POST /auth/practice-session (requires aiccore_admin cookie from same origin)
+    // Admin Practice: POST /auth/practice-session (requires aiccore_admin; cross-origin needs SameSite=None cookie from admin-login)
     useEffect(() => {
         if (practiceMode !== true || session) return
         let cancelled = false

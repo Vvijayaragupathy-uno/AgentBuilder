@@ -119,6 +119,7 @@ function BuilderDashboardInner() {
   const handleLogin = async (password: string) => {
     const res = await fetch(`${getApiBase()}/api/v1/aiccore/auth/admin-login`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     })
