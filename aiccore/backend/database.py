@@ -72,20 +72,19 @@ def _create_schema_if_needed():
 
         # 3. Optional: legacy one-time wipe of public.* (DANGEROUS if Langflow lives in public)
         if os.getenv("AICCORE_NUCLEAR_RESET_PUBLIC") == "true":
-            result = conn.execute(text(
-                "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
-            ))
-            public_tables = [row[0] for row in result]
-            if public_tables:
-                print(f"☢️  AICCORE: AICCORE_NUCLEAR_RESET_PUBLIC — dropping {len(public_tables)} public tables...")
-                for table in public_tables:
-                    try:
-                        conn.execute(text(f'DROP TABLE public."{table}" CASCADE'))
-                        conn.commit()
-                        print(f"  🧹 Dropped public.{table}")
-                    except Exception as e:
-                        conn.rollback()
-                        print(f"  ⚠️ Skipping public.{table} (maybe already dropped?): {e}")
+            print("☢️  AICCORE: AICCORE_NUCLEAR_RESET_PUBLIC — dropping and recreating public schema...")
+            # Dropping everything in public (tables, types, sequences) ensures a clean slate.
+            conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+            conn.execute(text("CREATE SCHEMA public"))
+            # Standard Postgres permissions for public
+            conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
+            try:
+                # Grant to current user if possible (some environments need this explicitly)
+                conn.execute(text("GRANT ALL ON SCHEMA public TO CURRENT_USER"))
+            except Exception:
+                pass
+            conn.commit()
+            print("  ✨ Public schema is now fresh.")
         else:
             print(
                 "🚀 AICCORE: Skipping public schema DROP (default). "
