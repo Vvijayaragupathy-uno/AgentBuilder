@@ -72,6 +72,8 @@ class Session(Base):
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_submitted: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Langflow folder root for this seat — scopes flows when multiple AICCORE sessions share one LF DB.
+    langflow_workspace_folder_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
 
 
 class Event(Base):

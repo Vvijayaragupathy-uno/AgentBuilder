@@ -1,16 +1,19 @@
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+import gzip
 import json
 import asyncio
-from datetime import datetime, timezone
 from uuid import UUID
+
+from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response, JSONResponse
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from .database import engine
 from .models import Event
 from .broadcast import broadcast_manager
-from .event_lock import get_event_seq_lock
+from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
 
 
 class AICCoreEventMiddleware(BaseHTTPMiddleware):
@@ -50,6 +53,10 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
 
         # Proactively update station heartbeat on every valid interaction
         self._update_station_heartbeat(session_id)
+
+        # Hide other seats' flows/folders in the Langflow UI when this session has an arena folder.
+        if method == "GET" and path.rstrip("/") in ("/api/v1/flows", "/api/v1/projects"):
+            return await self._filter_langflow_list_response(request, call_next, session_id)
 
         # Capture Workspace Changes (Flows, Folders, and Variables)
         # We intercept Creations (POST), Updates (PATCH), and Deletions (DELETE)
@@ -96,9 +103,8 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         # This is more robust than capturing individual changes
         if response.status_code < 300: # Only if operation succeeded
             try:
-                from .eraser import capture_full_workspace_snapshot
-                # Run in background to not block the UI
-                asyncio.create_task(capture_full_workspace_snapshot(session_id))
+                from .eraser import schedule_workspace_snapshot
+                schedule_workspace_snapshot(session_id)
             except Exception as e:
                 print(f"❌ Failed to trigger workspace snapshot: {e}")
 
@@ -113,13 +119,27 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             return {"type": "http.request", "body": body_bytes}
             
         new_request = Request(request.scope, receive=receive)
-        
+        req_path = request.url.path
+
         try:
             body = json.loads(body_bytes)
             flow_data = body.get("data", {})
-        except:
+        except Exception:
+            body = {}
             flow_data = {}
-        
+
+        # Put new flows into this seat's arena folder (concurrent builders share one Langflow DB).
+        if request.method == "POST" and "/api/v1/flows" in req_path and isinstance(body, dict) and not body.get("folder_id"):
+            try:
+                with Session(engine) as db_session:
+                    from .models import Session as AICSession
+                    s = db_session.get(AICSession, session_id)
+                    if s and s.langflow_workspace_folder_id:
+                        body["folder_id"] = str(s.langflow_workspace_folder_id)
+                        body_bytes = json.dumps(body).encode("utf-8")
+            except Exception:
+                pass
+
         # Get user details for broadcast
         nickname = "Builder"
         station_id = "0"
@@ -131,8 +151,11 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                 station_id = str(s.station_id)
 
         response = await call_next(new_request)
-        
-        # Log and Broadcast with snapshot
+
+        if response.status_code >= 300:
+            return response
+
+        # Log and Broadcast with snapshot (only after Langflow accepted the save)
         payload = {
             "nickname": nickname,
             "station_id": station_id,
@@ -141,14 +164,13 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                 "edges": flow_data.get("edges", [])
             }
         }
-        
+
         self._log_event(session_id, "flow_saved", payload)
 
-        # Also trigger a background snapshot for persistence
         try:
-            from .eraser import capture_full_workspace_snapshot
-            asyncio.create_task(capture_full_workspace_snapshot(session_id))
-        except:
+            from .eraser import schedule_workspace_snapshot
+            schedule_workspace_snapshot(session_id)
+        except Exception:
             pass
 
         # ---------------------------------------------------------
@@ -157,14 +179,14 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         try:
             nodes = flow_data.get("nodes", [])
             node_types = [n.get("type") for n in nodes if n.get("type")]
-            
+
             # 1. Database Master (Detect any DB/Vector DB nodes)
             db_keywords = ["PostgreSQL", "Supabase", "Memory", "VectorStore", "SQL"]
             has_db = any(any(kw in nt for kw in db_keywords) for nt in node_types)
-            
+
             # 2. Logic Architect (More than 10 nodes)
             is_complex = len(nodes) > 10
-            
+
             with Session(engine) as db_session:
                 from .models import Participant, Achievement, Session as AICSession
                 stmt = (
@@ -173,7 +195,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                     .where(AICSession.id == session_id)
                 )
                 user = db_session.execute(stmt).scalars().first()
-                
+
                 if user:
                     if has_db:
                         self._auto_award(db_session, user, "Database Explorer", "Successfully integrated a memory or database node.")
@@ -248,6 +270,104 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         self._log_event(session_id, f"{category}_completed", metadata)
         return response
 
+    async def _filter_langflow_list_response(self, request: Request, call_next, session_id: UUID):
+        """When AICCORE has a per-seat arena folder, hide other seats' flows/projects in Langflow."""
+        response = await call_next(request)
+        if response.status_code != 200:
+            return response
+
+        from sqlalchemy.orm import Session as AICSessionORM
+        from .database import engine as aic_engine
+        from .models import Session as AICSession
+        from langflow.services.database.models import Folder
+        from langflow.services.deps import session_scope
+        from langflow.services.database.models.folder.constants import DEFAULT_FOLDER_NAME
+        from langflow.initial_setup.constants import STARTER_FOLDER_NAME
+        from .eraser import collect_folder_descendants
+
+        with AICSessionORM(aic_engine) as db:
+            aic_sess = db.get(AICSession, session_id)
+            root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
+        if not root_id:
+            return response
+
+        body_bytes = await response.body()
+        enc = (response.headers.get("content-encoding") or "").lower()
+        raw = body_bytes
+        if enc == "gzip":
+            try:
+                raw = gzip.decompress(body_bytes)
+            except Exception:
+                return Response(
+                    content=body_bytes,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                )
+
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return Response(
+                content=body_bytes,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+            )
+
+        try:
+            async with session_scope() as lf:
+                allowed = await collect_folder_descendants(lf, root_id)
+                for name in (DEFAULT_FOLDER_NAME, STARTER_FOLDER_NAME):
+                    row = (await lf.execute(select(Folder).where(Folder.name == name))).scalars().first()
+                    if row:
+                        allowed.add(row.id)
+        except Exception:
+            return response
+
+        allowed_str = {str(x) for x in allowed}
+        path = request.url.path.rstrip("/")
+
+        def _filter_flow_items(items: list) -> list:
+            return [
+                p
+                for p in items
+                if p.get("folder_id") is not None and str(p.get("folder_id")) in allowed_str
+            ]
+
+        def _filter_project_items(items: list) -> list:
+            return [
+                p
+                for p in items
+                if str(p.get("id")) in allowed_str or p.get("name") == DEFAULT_FOLDER_NAME
+            ]
+
+        if path.endswith("/flows"):
+            if isinstance(payload, list):
+                payload = _filter_flow_items(payload)
+            elif isinstance(payload, dict) and isinstance(payload.get("items"), list):
+                payload = dict(payload)
+                payload["items"] = _filter_flow_items(payload["items"])
+        elif path.endswith("/projects"):
+            if isinstance(payload, list):
+                payload = _filter_project_items(payload)
+            elif isinstance(payload, dict) and isinstance(payload.get("items"), list):
+                payload = dict(payload)
+                payload["items"] = _filter_project_items(payload["items"])
+
+        if enc == "gzip":
+            json_data = json.dumps(jsonable_encoder(payload)).encode("utf-8")
+            compressed = gzip.compress(json_data, compresslevel=6)
+            return Response(
+                content=compressed,
+                status_code=response.status_code,
+                media_type="application/json",
+                headers={
+                    "Content-Encoding": "gzip",
+                    "Vary": "Accept-Encoding",
+                    "Content-Length": str(len(compressed)),
+                },
+            )
+        return JSONResponse(content=payload, status_code=response.status_code)
+
     def _update_station_heartbeat(self, session_id: UUID):
         """Updates the station's last heartbeat and ensures status is consistent."""
         try:
@@ -269,8 +389,9 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             print(f"⚠️ Heartbeat Update Error: {e}")
 
     def _log_event(self, session_id: UUID, event_type: str, payload: dict):
-        with get_event_seq_lock(session_id):
+        with event_sequence_write_lock(session_id):
             with Session(engine) as db_session:
+                ensure_pg_advisory_xact_lock(db_session, session_id)
                 stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
                 last_event = db_session.execute(stmt).scalars().first()
                 seq = (last_event.sequence_number + 1) if last_event else 0

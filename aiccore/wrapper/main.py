@@ -50,9 +50,14 @@ from aiccore.backend.demo_ceremony import (
     ensure_demo_playback_if_gate_open_idle,
 )
 from aiccore.backend.middleware import AICCoreEventMiddleware
-from aiccore.backend.eraser import purge_langflow_workspace
+from aiccore.backend.eraser import (
+    purge_langflow_workspace,
+    ensure_langflow_workspace_folder,
+    purge_langflow_workspace_scoped,
+    restore_user_workspace,
+)
 from aiccore.backend.broadcast import broadcast_manager
-from aiccore.backend.event_lock import get_event_seq_lock
+from aiccore.backend.event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, update, delete
 import random
@@ -64,6 +69,9 @@ import threading
 FAILED_ATTEMPTS = {}
 LOCKOUT_DURATION_SECONDS = 300 # 5 minutes
 MAX_ATTEMPTS = 5
+
+# Dedicated participant row for admin-only /builder?practice=1 (no PIN).
+PRACTICE_KIOSK_USERNAME = "__aiccore_practice_kiosk__"
 
 
 class _HttpOnlyRootMount(Mount):
@@ -235,6 +243,27 @@ def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
     return None
 
 
+def heal_duplicate_active_challenges(db_session: Session) -> int:
+    """
+    If a race or legacy data left >1 row with is_active=True, keep the oldest by
+    created_at and deactivate the rest. Prefer calling after admin mutations
+    (toggle) — not on GET /system/status (read-only there).
+    """
+    rows = list(
+        db_session.execute(
+            select(Challenge)
+            .where(Challenge.is_active == True)
+            .order_by(Challenge.created_at.asc())
+        ).scalars().all()
+    )
+    if len(rows) <= 1:
+        return 0
+    for stale in rows[1:]:
+        stale.is_active = False
+    db_session.commit()
+    return len(rows) - 1
+
+
 def sanitize_string(s: str, length: int = 50) -> str:
     # Remove special chars, allow alphanumeric and underscores
     s = re.sub(r'[^\w\s-]', '', s)
@@ -268,6 +297,10 @@ class UnlockRequest(BaseModel):
     station_id: Optional[str] = None
     # Optional: bind session to this challenge if user is registered (avoids "latest registration wins")
     challenge_id: Optional[str] = None
+
+class PracticeSessionRequest(BaseModel):
+    """Admin-only: open Langflow without a participant PIN (museum practice / facilitator)."""
+    station_id: Optional[str] = None
 
 class ChallengeRequest(BaseModel):
     title: str
@@ -388,9 +421,18 @@ def create_aiccore_app():
     @app.on_event("startup")
     async def startup_event():
         from aiccore.backend.sync import sync_to_cloud
+        from aiccore.backend.broadcast import broadcast_manager
         import asyncio
+
+        await broadcast_manager.start()
         asyncio.create_task(sync_to_cloud())
         print("☁️ Cloud Sync: Background worker active.")
+
+    @app.on_event("shutdown")
+    async def shutdown_broadcast():
+        from aiccore.backend.broadcast import broadcast_manager
+
+        await broadcast_manager.shutdown()
 
     # Middleware to allow IFrame embedding for our dashboard
     @app.middleware("http")
@@ -624,9 +666,8 @@ def create_aiccore_app():
             })
             await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {"session_id": str(new_session.id)}})
 
-            # 5. Purge Langflow Workspace (The Eraser)
+            # 5. Langflow workspace: one folder per AICCORE session so concurrent seats do not share flows.
             try:
-                from aiccore.backend.eraser import restore_user_workspace
                 with Session(engine) as cnt_sess:
                     active_n = (
                         cnt_sess.execute(
@@ -634,38 +675,40 @@ def create_aiccore_app():
                         ).scalar()
                         or 0
                     )
-                # NOTE: Langflow has ONE flow DB per server. Purge clears the whole DB; with >1 active
-                # AICCORE session we skip purge (so laptop B does not erase laptop A) and only merge
-                # restores — then every browser sees the same combined list of flows (not eraser "broken").
-                if active_n > 1:
+                seat_folder_id = await ensure_langflow_workspace_folder(new_session.id)
+                if seat_folder_id:
+                    await purge_langflow_workspace_scoped(seat_folder_id)
                     print(
-                        f"ℹ️ AICCORE: active_aiccore_sessions={active_n} — skipping global Langflow purge; "
-                        "merge-restore only (all laptops share one Langflow workspace)."
+                        f"ℹ️ AICCORE: Scoped Langflow purge for session folder {seat_folder_id} "
+                        f"(active_aiccore_sessions={active_n})."
                     )
                 else:
-                    print(f"ℹ️ AICCORE: active_aiccore_sessions={active_n} — purge Langflow then restore this user.")
-                    await purge_langflow_workspace()
-                
-                # 5.5 Sync Persistence: Restore the FULL workspace from latest manifest
+                    if active_n > 1:
+                        print(
+                            f"ℹ️ AICCORE: active_aiccore_sessions={active_n} — no arena folder; "
+                            "skipping global Langflow purge (merge-restore only)."
+                        )
+                    else:
+                        print(f"ℹ️ AICCORE: active_aiccore_sessions={active_n} — global Langflow purge (legacy).")
+                        await purge_langflow_workspace()
+
+                # 5.5 Sync Persistence: Restore workspace from latest manifest into this seat's folder when needed
                 if user.username and user.username != "testuser":
-                    # Search for the latest 'workspace_snapshot'
                     event_stmt = select(Event).join(AICSession).where(
-                        AICSession.user_id == user.id, 
+                        AICSession.user_id == user.id,
                         Event.event_type == "workspace_snapshot"
                     ).order_by(Event.timestamp.desc())
                     latest_event = db_session.execute(event_stmt).scalars().first()
-                    
+
                     if latest_event:
-                        await restore_user_workspace(latest_event.payload)
+                        await restore_user_workspace(latest_event.payload, default_flow_folder_id=seat_folder_id)
                         print(f"🔄 Persistence: Re-manifested full workspace for {user.username}")
                     else:
-                        # Legacy Fallback: Try for flow_saved or Submission if manifest doesn't exist yet
                         sub_stmt = select(Submission).join(AICSession).where(
                             AICSession.user_id == user.id
                         ).order_by(Submission.submitted_at.desc())
                         latest_sub = db_session.execute(sub_stmt).scalars().first()
                         if latest_sub:
-                            # Wrap submission in a basic manifest structure
                             legacy_manifest = {
                                 "folders": [],
                                 "flows": [{
@@ -675,7 +718,7 @@ def create_aiccore_app():
                                     "folder_id": None
                                 }]
                             }
-                            await restore_user_workspace(legacy_manifest)
+                            await restore_user_workspace(legacy_manifest, default_flow_folder_id=seat_folder_id)
                             print(f"🔄 Persistence: Restored legacy submission for {user.username}")
             except Exception as e:
                 print(f"❌ Failed to manage workspace on unlock: {e}")
@@ -704,6 +747,145 @@ def create_aiccore_app():
                 path="/",
             )
             return res
+
+    @app.post("/api/v1/aiccore/auth/practice-session")
+    async def practice_session(req: PracticeSessionRequest, request: Request):
+        """
+        Admin cookie only: start a sandbox Langflow session without consuming a 4-digit OTP.
+        Does not broadcast leaderboard/mosaic updates (keeps live board clean).
+        Ignores arena lock so staff can test when the floor is closed.
+        """
+        if request.cookies.get("aiccore_admin") != "true":
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+        station_id = (req.station_id or "").strip() or "STATION_LOCAL"
+
+        with Session(engine) as db_session:
+            user = db_session.execute(
+                select(User).where(User.username == PRACTICE_KIOSK_USERNAME)
+            ).scalars().first()
+            if not user:
+                user = User(
+                    username=PRACTICE_KIOSK_USERNAME,
+                    nickname="Practice",
+                    password=None,
+                    unlock_code=None,
+                    unlock_code_generated_at=None,
+                    honors={},
+                )
+                db_session.add(user)
+                db_session.commit()
+                db_session.refresh(user)
+
+            db_session.execute(
+                update(AICSession)
+                .where(AICSession.station_id == station_id, AICSession.is_active == True)
+                .values(is_active=False, end_time=datetime.now(timezone.utc))
+            )
+
+            new_session = AICSession(
+                user_id=user.id,
+                nickname="Practice",
+                station_id=station_id,
+                challenge_id=None,
+            )
+            db_session.add(new_session)
+            db_session.flush()
+
+            start_event = Event(
+                session_id=new_session.id,
+                sequence_number=0,
+                event_type="session_started",
+                payload={"station_id": station_id, "nickname": "Practice", "practice": True},
+            )
+            db_session.add(start_event)
+
+            sub_count_stmt = select(func.count(Submission.id)).join(AICSession).where(AICSession.user_id == user.id)
+            flows_count = db_session.execute(sub_count_stmt).scalar() or 0
+            ach_count = len(user.honors) if user.honors else 0
+
+            db_session.commit()
+            db_session.refresh(new_session)
+
+        try:
+            with Session(engine) as cnt_sess:
+                active_n = (
+                    cnt_sess.execute(
+                        select(func.count(AICSession.id)).where(AICSession.is_active == True)
+                    ).scalar()
+                    or 0
+                )
+            seat_folder_id = await ensure_langflow_workspace_folder(new_session.id)
+            if seat_folder_id:
+                await purge_langflow_workspace_scoped(seat_folder_id)
+                print(
+                    f"ℹ️ AICCORE practice: scoped Langflow purge {seat_folder_id} "
+                    f"(active_aiccore_sessions={active_n})."
+                )
+            else:
+                if active_n > 1:
+                    print(
+                        f"ℹ️ AICCORE practice: active_aiccore_sessions={active_n} — "
+                        "no arena folder; skipping global purge."
+                    )
+                else:
+                    await purge_langflow_workspace()
+
+            if user.username and user.username != "testuser":
+                with Session(engine) as db_session:
+                    event_stmt = (
+                        select(Event)
+                        .join(AICSession)
+                        .where(AICSession.user_id == user.id, Event.event_type == "workspace_snapshot")
+                        .order_by(Event.timestamp.desc())
+                    )
+                    latest_event = db_session.execute(event_stmt).scalars().first()
+                    if latest_event:
+                        await restore_user_workspace(latest_event.payload, default_flow_folder_id=seat_folder_id)
+                    else:
+                        sub_stmt = (
+                            select(Submission)
+                            .join(AICSession)
+                            .where(AICSession.user_id == user.id)
+                            .order_by(Submission.submitted_at.desc())
+                        )
+                        latest_sub = db_session.execute(sub_stmt).scalars().first()
+                        if latest_sub:
+                            legacy_manifest = {
+                                "folders": [],
+                                "flows": [
+                                    {
+                                        "id": str(uuid4()),
+                                        "name": "Restored Flow",
+                                        "data": latest_sub.flow_snapshot,
+                                        "folder_id": None,
+                                    }
+                                ],
+                            }
+                            await restore_user_workspace(legacy_manifest, default_flow_folder_id=seat_folder_id)
+        except Exception as e:
+            print(f"❌ Failed to manage workspace on practice session: {e}")
+
+        response = {
+            "session_id": str(new_session.id),
+            "nickname": "Practice",
+            "user_id": str(user.id),
+            "station_id": new_session.station_id,
+            "stats": {
+                "flows_count": flows_count,
+                "achievements_count": ach_count,
+            },
+        }
+        res = JSONResponse(content=response)
+        res.set_cookie(
+            key="aiccore_session_id",
+            value=str(new_session.id),
+            httponly=True,
+            samesite="lax",
+            max_age=86400,
+            path="/",
+        )
+        return res
 
     @app.get("/api/v1/aiccore/session/{session_id}/status")
     async def get_session_status(session_id: UUID):
@@ -828,8 +1010,19 @@ def create_aiccore_app():
         return result
 
     @app.post("/api/v1/aiccore/session/{session_id}/deactivate")
-    async def deactivate_session(session_id: UUID):
-        """Called by the builder page when the user exits (logs out / starts over)."""
+    async def deactivate_session(session_id: UUID, request: Request):
+        """Called by the builder page when the user exits (logs out / starts over).
+
+        Successful unlock consumes the one-time PIN; without issuing a new code, users could not
+        unlock again after Start Over. We regenerate a fresh PIN for the same participant (except
+        the shared admin Practice kiosk user).
+        """
+        if not _aiccore_session_auth_ok(request, session_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Session cookie or X-AICCORE-Session-Id header required",
+            )
+        user_id_for_regen: Optional[UUID] = None
         with Session(engine) as db_session:
             session_obj = db_session.get(AICSession, session_id)
             if not session_obj:
@@ -843,6 +1036,10 @@ def create_aiccore_app():
                     samesite="lax",
                 )
                 return res
+            if session_obj.user_id:
+                u = db_session.get(User, session_obj.user_id)
+                if u and u.username != PRACTICE_KIOSK_USERNAME:
+                    user_id_for_regen = session_obj.user_id
             session_obj.is_active = False
             session_obj.end_time = datetime.now(timezone.utc)
             # Free the station so the next user can unlock it
@@ -853,6 +1050,27 @@ def create_aiccore_app():
                 if station and station.current_session_id == session_id:
                     station.current_session_id = None
             db_session.commit()
+
+        new_unlock_code: Optional[str] = None
+        if user_id_for_regen:
+            with Session(engine) as db_session:
+                user = db_session.get(User, user_id_for_regen)
+                if user:
+                    cand = None
+                    for _ in range(40):
+                        trial = generate_unlock_code()
+                        collision = db_session.execute(
+                            select(User).where(User.unlock_code == trial, User.id != user.id)
+                        ).scalars().first()
+                        if not collision:
+                            cand = trial
+                            break
+                    if cand:
+                        user.unlock_code = cand
+                        user.unlock_code_generated_at = datetime.now(timezone.utc)
+                        db_session.commit()
+                        new_unlock_code = cand
+
         with Session(engine) as dq_session:
             remove_session_from_demo_queue(dq_session, session_id)
         demo_opened = False
@@ -865,7 +1083,10 @@ def create_aiccore_app():
             "type": "LEADERBOARD_UPDATE",
             "data": {"session_id": str(session_id), "event": "deactivated"}
         })
-        res = JSONResponse(content={"status": "deactivated"})
+        body: Dict[str, Any] = {"status": "deactivated"}
+        if new_unlock_code:
+            body["new_unlock_code"] = new_unlock_code
+        res = JSONResponse(content=body)
         res.set_cookie(
             key="aiccore_session_id",
             value="",
@@ -932,8 +1153,9 @@ def create_aiccore_app():
                 status_code=403,
                 detail="Matching session cookie or X-AICCORE-Session-Id header required",
             )
-        with get_event_seq_lock(req.session_id):
+        with event_sequence_write_lock(req.session_id):
             with Session(engine) as db_session:
+                ensure_pg_advisory_xact_lock(db_session, req.session_id)
                 session_obj = db_session.get(AICSession, req.session_id)
                 if not session_obj:
                     raise HTTPException(status_code=404, detail="Session not found")
@@ -954,6 +1176,7 @@ def create_aiccore_app():
                 )
                 db_session.add(new_submission)
                 session_obj.is_submitted = True
+                db_session.flush()  # ensure new_submission.id before Event payload
 
                 stmt = select(Event).where(Event.session_id == req.session_id).order_by(Event.sequence_number.desc())
                 last_event = db_session.execute(stmt).scalars().first()
@@ -995,7 +1218,12 @@ def create_aiccore_app():
                 return {"submission_id": str(new_submission.id), "status": "submitted"}
 
     @app.post("/api/v1/aiccore/session/{session_id}/submit")
-    async def trigger_workspace_submission(session_id: UUID):
+    async def trigger_workspace_submission(session_id: UUID, request: Request):
+        if not _aiccore_session_auth_ok(request, session_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Session cookie or X-AICCORE-Session-Id header required",
+            )
         # Guard against double-submission (timer fire + manual click race)
         with Session(engine) as db_session:
             session_obj = db_session.get(AICSession, session_id)
@@ -1272,6 +1500,7 @@ def create_aiccore_app():
                     "banner_image_url": c.banner_image_url,
                     "instructions_text": c.instructions_text,
                     "instructions_document_url": c.instructions_document_url,
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
                 }
                 output.append(c_data)
             return output
@@ -1320,8 +1549,18 @@ def create_aiccore_app():
                     "start_time": mission_start_iso,
                 },
             })
+        if was_active and not now_active:
+            await broadcast_manager.broadcast({
+                "type": "MISSION_ENDED",
+                "data": {
+                    "challenge_id": mission_cid,
+                    "title": mission_title,
+                },
+            })
         if demo_opened:
             await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
+        with Session(engine) as heal_db:
+            heal_duplicate_active_challenges(heal_db)
         return {"status": "updated", "is_active": now_active}
 
     @app.post("/api/v1/aiccore/challenges")
@@ -1526,16 +1765,8 @@ def create_aiccore_app():
         with Session(engine) as db_session:
             mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             locked = is_arena_locked_db(db_session)
-            # Heal DBs with >1 active challenge (old toggles / races) — keep oldest active by created_at.
-            _multi = db_session.execute(
-                select(Challenge)
-                .where(Challenge.is_active == True)
-                .order_by(Challenge.created_at.asc())
-            ).scalars().all()
-            if len(_multi) > 1:
-                for _stale in _multi[1:]:
-                    _stale.is_active = False
-                db_session.commit()
+            # Read-only: if >1 active (race), report the canonical mission (oldest by created_at).
+            # DB heal runs on challenge toggle, not on this GET.
             stmt = (
                 select(Challenge)
                 .where(Challenge.is_active == True)

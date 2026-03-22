@@ -12,7 +12,21 @@ if _raw_url.startswith("postgres"):
     # Ensure psycopg2 driver (not psycopg3) and fix scheme
     DATABASE_URL = _raw_url.replace("postgresql://", "postgresql+psycopg2://", 1) \
                            .replace("postgres://", "postgresql+psycopg2://", 1)
-    engine = create_engine(DATABASE_URL)
+
+    def _pool_int(name: str, default: int) -> int:
+        try:
+            return int(os.getenv(name, str(default)))
+        except ValueError:
+            return default
+
+    _pool_size = _pool_int("AICCORE_DB_POOL_SIZE", 12)
+    _max_overflow = _pool_int("AICCORE_DB_MAX_OVERFLOW", 24)
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=max(2, min(_pool_size, 50)),
+        max_overflow=max(0, min(_max_overflow, 100)),
+    )
 else:
     DATABASE_URL = _raw_url
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -107,6 +121,7 @@ def _ensure_schema_migrations():
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_segment_ends_at TIMESTAMPTZ",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_text TEXT",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_document_url VARCHAR",
+            "ALTER TABLE aiccore.session ADD COLUMN IF NOT EXISTS langflow_workspace_folder_id UUID",
         ):
             try:
                 with engine.begin() as conn:
@@ -153,6 +168,14 @@ def _ensure_schema_migrations():
                             conn.commit()
                     except Exception:
                         pass
+        sess_cols = _col_names("session")
+        if sess_cols and "langflow_workspace_folder_id" not in sess_cols:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE session ADD COLUMN langflow_workspace_folder_id TEXT"))
+                    conn.commit()
+            except Exception:
+                pass
         # Optional: rebuild participant so unlock_code can be NULL (one-time OTP consume).
         _sqlite_migrate_participant_unlock_nullable()
 

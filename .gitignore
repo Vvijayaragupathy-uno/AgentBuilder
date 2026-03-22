@@ -1,6 +1,10 @@
 # Local env secrets (copy .env.example → .env.local)
 .env.local
 .env
+# Railway CLI bulk apply (copy scripts/railway/*.example → *.local.env)
+scripts/railway/*.local.env
+scripts/railway/backend.env
+scripts/railway/dashboard.env
 
 # Python
 .venv/

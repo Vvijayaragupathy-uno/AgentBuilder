@@ -1,29 +1,138 @@
-from uuid import UUID
+import asyncio
+import os
+from uuid import UUID, uuid4
+from typing import Optional, Set, Dict
 from datetime import datetime
 from sqlalchemy import delete, select
 from langflow.services.database.models import Flow, MessageTable, Variable, TransactionTable, ApiKey, File, Folder, Job, User as LFUser
 from langflow.services.deps import session_scope
 from lfx.log.logger import logger
 
+
+async def collect_folder_descendants(lf_session, root_folder_id: UUID) -> Set[UUID]:
+    """All folder IDs at or under root (BFS)."""
+    out: Set[UUID] = {root_folder_id}
+    frontier = [root_folder_id]
+    while frontier:
+        q = select(Folder).where(Folder.parent_id.in_(frontier))
+        rows = (await lf_session.execute(q)).scalars().all()
+        frontier = []
+        for f in rows:
+            if f.id not in out:
+                out.add(f.id)
+                frontier.append(f.id)
+    return out
+
+
+async def ensure_langflow_workspace_folder(session_id: UUID) -> Optional[UUID]:
+    """
+    One Langflow folder per AICCORE session so concurrent seats can share one Langflow DB
+    without seeing each other's flows (see middleware response filtering).
+    """
+    from sqlalchemy.orm import Session as AICSessionORM
+    from .database import engine as aic_engine
+    from .models import Session as AICSession
+
+    with AICSessionORM(aic_engine) as db:
+        aic_sess = db.get(AICSession, session_id)
+        if not aic_sess:
+            return None
+        if aic_sess.langflow_workspace_folder_id:
+            return aic_sess.langflow_workspace_folder_id
+
+    async with session_scope() as lf:
+        user_obj = (await lf.execute(select(LFUser).limit(1))).scalar()
+        if not user_obj:
+            logger.error("AICCORE: No Langflow user — cannot create arena folder")
+            return None
+        uid = user_obj.id
+        folder_name = f"Arena {str(session_id).replace('-', '')[:8]}"
+        existing = (
+            await lf.execute(select(Folder).where(Folder.user_id == uid, Folder.name == folder_name))
+        ).scalars().first()
+        if existing:
+            new_folder = existing
+        else:
+            new_folder = Folder(
+                id=uuid4(),
+                name=folder_name,
+                description="AICCORE seat workspace",
+                parent_id=None,
+                user_id=uid,
+            )
+            lf.add(new_folder)
+            await lf.commit()
+            await lf.refresh(new_folder)
+        fid = new_folder.id
+
+    with AICSessionORM(aic_engine) as db:
+        aic_sess = db.get(AICSession, session_id)
+        if aic_sess:
+            aic_sess.langflow_workspace_folder_id = fid
+            db.commit()
+    return fid
+
+
+async def purge_langflow_workspace_scoped(root_folder_id: UUID) -> None:
+    """Delete only flows and folders under root_folder_id (plus descendants)."""
+    logger.info(f"🧹 AICCORE: Scoped purge for Langflow folder {root_folder_id}...")
+    try:
+        async with session_scope() as lf:
+            scope = await collect_folder_descendants(lf, root_folder_id)
+            await lf.execute(delete(Flow).where(Flow.folder_id.in_(scope)))
+
+            remaining = set(scope)
+            while remaining:
+                deleted_any = False
+                for fid in list(remaining):
+                    sub = (
+                        await lf.execute(select(Folder).where(Folder.parent_id == fid))
+                    ).scalars().first()
+                    if sub:
+                        continue
+                    await lf.execute(delete(Folder).where(Folder.id == fid))
+                    remaining.discard(fid)
+                    deleted_any = True
+                if not deleted_any:
+                    break
+            await lf.commit()
+            logger.info(f"✨ AICCORE: Scoped purge done ({len(scope)} folder slots cleared).")
+    except Exception as e:
+        logger.error(f"❌ AICCORE: Scoped purge failed: {e}")
+
+
 async def capture_full_workspace_snapshot(session_id: UUID):
     """
-    Captures the entire state of the workspace (all non-starter folders, all flows, and variables).
-    Stored as a manifest in the aiccore events.
+    Captures workspace state for persistence. When the session has langflow_workspace_folder_id,
+    only that folder subtree is captured (concurrent seats).
     """
     logger.info(f"📸 AICCORE: Capturing Full Workspace Snapshot for session {session_id}...")
     try:
-        async with session_scope() as session:
-            # 1. Fetch all folders (except Starters)
-            folder_stmt = select(Folder).where(Folder.name != "Starter Projects")
-            folders = (await session.execute(folder_stmt)).scalars().all()
-            
-            # 2. Fetch all flows
-            flow_stmt = select(Flow)
-            flows = (await session.execute(flow_stmt)).scalars().all()
+        from sqlalchemy.orm import Session as AICSessionORM
+        from .database import engine as aic_engine
+        from .models import Session as AICSession
 
-            # 3. Fetch all variables
-            var_stmt = select(Variable)
-            variables = (await session.execute(var_stmt)).scalars().all()
+        async with session_scope() as session:
+            root_id: Optional[UUID] = None
+            with AICSessionORM(aic_engine) as db:
+                aic_sess = db.get(AICSession, session_id)
+                if aic_sess and aic_sess.langflow_workspace_folder_id:
+                    root_id = aic_sess.langflow_workspace_folder_id
+
+            if root_id:
+                scope = await collect_folder_descendants(session, root_id)
+                folder_stmt = select(Folder).where(Folder.id.in_(scope))
+                flow_stmt = select(Flow).where(Flow.folder_id.in_(scope))
+                folders = (await session.execute(folder_stmt)).scalars().all()
+                flows = (await session.execute(flow_stmt)).scalars().all()
+                variables = []
+            else:
+                folder_stmt = select(Folder).where(Folder.name != "Starter Projects")
+                folders = (await session.execute(folder_stmt)).scalars().all()
+                flow_stmt = select(Flow)
+                flows = (await session.execute(flow_stmt)).scalars().all()
+                var_stmt = select(Variable)
+                variables = (await session.execute(var_stmt)).scalars().all()
             
             # 4. Build Manifest
             manifest = {
@@ -61,11 +170,12 @@ async def capture_full_workspace_snapshot(session_id: UUID):
             from .models import Event
             from sqlalchemy.orm import Session as AICSession
             
-            from .event_lock import get_event_seq_lock
+            from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
 
-            with get_event_seq_lock(session_id):
+            with event_sequence_write_lock(session_id):
                 with AICSession(aic_engine) as db:
                     from .models import Event
+                    ensure_pg_advisory_xact_lock(db, session_id)
                     stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
                     last_event = db.execute(stmt).scalars().first()
                     seq = (last_event.sequence_number + 1) if last_event else 0
@@ -82,6 +192,49 @@ async def capture_full_workspace_snapshot(session_id: UUID):
 
     except Exception as e:
         logger.error(f"❌ AICCORE: Failed to capture workspace: {e}")
+
+
+def _snapshot_debounce_seconds() -> float:
+    raw = os.getenv("AICCORE_SNAPSHOT_DEBOUNCE_SEC", "1.2")
+    try:
+        v = float(raw)
+        return max(0.2, min(v, 30.0))
+    except ValueError:
+        return 1.2
+
+
+_snapshot_debounce_sec = _snapshot_debounce_seconds()
+_pending_snapshots: Dict[str, asyncio.Task] = {}
+
+
+def schedule_workspace_snapshot(session_id: UUID) -> None:
+    """
+    Coalesce rapid Langflow saves (many users typing) into one snapshot per seat after quiet period.
+    Must run from an asyncio loop (e.g. middleware after request).
+    """
+    key = str(session_id)
+    prev = _pending_snapshots.get(key)
+    if prev is not None and not prev.done():
+        prev.cancel()
+
+    async def _debounced() -> None:
+        me = asyncio.current_task()
+        try:
+            await asyncio.sleep(_snapshot_debounce_sec)
+            await capture_full_workspace_snapshot(session_id)
+        except asyncio.CancelledError:
+            return
+        finally:
+            if me is not None and _pending_snapshots.get(key) is me:
+                _pending_snapshots.pop(key, None)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(_debounced())
+    _pending_snapshots[key] = task
+
 
 async def purge_langflow_workspace():
     """
@@ -120,9 +273,10 @@ async def purge_langflow_workspace():
     except Exception as e:
         logger.error(f"❌ AICCORE: Failed to purge workspace: {e}")
 
-async def restore_user_workspace(manifest: dict):
+async def restore_user_workspace(manifest: dict, default_flow_folder_id: Optional[UUID] = None):
     """
     Rebuilds the entire workspace from a manifest (Folders, Flows, Variables).
+    When default_flow_folder_id is set (arena seat folder), flows with no folder_id go there.
     """
     logger.info("🔄 AICCORE: Re-manifesting builder workspace...")
     try:
@@ -159,12 +313,14 @@ async def restore_user_workspace(manifest: dict):
                 if (await session.execute(existing_check)).scalar():
                     continue
 
+                raw_fid = f.get("folder_id")
+                flow_folder_id = UUID(raw_fid) if raw_fid else default_flow_folder_id
                 new_flow = Flow(
                     id=UUID(f["id"]),
                     name=f["name"],
                     description=f.get("description"),
                     data=f["data"],
-                    folder_id=UUID(f["folder_id"]) if f.get("folder_id") else None,
+                    folder_id=flow_folder_id,
                     is_component=f.get("is_component", False),
                     user_id=user_id
                 )
@@ -194,29 +350,52 @@ async def submit_workspace_as_flow(session_id: UUID):
     """
     logger.info(f"📤 AICCORE: Submitting workspace for session {session_id}...")
     try:
+        from sqlalchemy.orm import Session as AICSessionORM
+        from .database import engine as aic_engine
+        from .models import Session as AICSession
+
+        root_id: Optional[UUID] = None
+        with AICSessionORM(aic_engine) as db:
+            aic_sess = db.get(AICSession, session_id)
+            if aic_sess and aic_sess.langflow_workspace_folder_id:
+                root_id = aic_sess.langflow_workspace_folder_id
+
         async with session_scope() as session:
-            # 1. Fetch flows, sorted by updated_at
             from sqlalchemy import desc
-            flow_stmt = select(Flow).where(Flow.is_component == False).order_by(desc(Flow.updated_at)).limit(1)
+            if root_id:
+                scope = await collect_folder_descendants(session, root_id)
+                flow_stmt = (
+                    select(Flow)
+                    .where(Flow.is_component == False, Flow.folder_id.in_(scope))
+                    .order_by(desc(Flow.updated_at))
+                    .limit(1)
+                )
+            else:
+                flow_stmt = select(Flow).where(Flow.is_component == False).order_by(desc(Flow.updated_at)).limit(1)
             main_flow = (await session.execute(flow_stmt)).scalar()
-            
+
             if not main_flow:
-                # Fallback to any flow if no non-component flows found
-                flow_stmt = select(Flow).order_by(desc(Flow.updated_at)).limit(1)
+                if root_id:
+                    flow_stmt = (
+                        select(Flow)
+                        .where(Flow.folder_id.in_(scope))
+                        .order_by(desc(Flow.updated_at))
+                        .limit(1)
+                    )
+                else:
+                    flow_stmt = select(Flow).order_by(desc(Flow.updated_at)).limit(1)
                 main_flow = (await session.execute(flow_stmt)).scalar()
             
             if not main_flow:
                 raise Exception("No flows found in workspace to submit.")
 
             # 2. Save to AICCORE Submission table
-            from .database import engine as aic_engine
-            from .models import Submission, Session as AICSession, Event
-            from sqlalchemy.orm import Session as AICSessionORM
-            
-            from .event_lock import get_event_seq_lock
+            from .models import Submission, Event
+            from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
 
-            with get_event_seq_lock(session_id):
+            with event_sequence_write_lock(session_id):
                 with AICSessionORM(aic_engine) as db:
+                    ensure_pg_advisory_xact_lock(db, session_id)
                     aic_session_obj = db.get(AICSession, session_id)
                     if not aic_session_obj:
                         raise Exception("AICCORE Session not found.")
@@ -229,6 +408,7 @@ async def submit_workspace_as_flow(session_id: UUID):
                     )
                     db.add(new_submission)
                     aic_session_obj.is_submitted = True
+                    db.flush()  # ensure new_submission.id before Event payload
 
                     stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
                     last_event = db.execute(stmt).scalars().first()

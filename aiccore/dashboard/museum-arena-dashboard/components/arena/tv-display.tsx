@@ -30,6 +30,20 @@ export interface Challenge {
   instructions_text?: string | null
   /** PDF/DOC handout URL for TV + builder instructions panel. */
   instructions_document_url?: string | null
+  /** Server UTC instant — use to pick one “live” mission if multiple is_active (matches /system/status). */
+  created_at?: string | null
+}
+
+/** Oldest created_at among active challenges — aligns TV with canonical active_challenge on server. */
+function pickCanonicalActiveChallenge(data: Challenge[]): Challenge | null {
+  const actives = data.filter(c => c.is_active)
+  if (actives.length === 0) return null
+  if (actives.length === 1) return actives[0]
+  return actives.reduce((best, c) => {
+    const bt = best.created_at ? new Date(best.created_at).getTime() : 0
+    const ct = c.created_at ? new Date(c.created_at).getTime() : 0
+    return ct < bt ? c : best
+  })
 }
 
 export interface TVStudent {
@@ -278,12 +292,11 @@ function TVDisplayInner() {
 
       // In forced mode, always update challenge data for slides but never switch mode
       if (forcedMode) {
-        const nowActive = data.find(c => c.is_active) ?? null
-        setActiveChallenge(nowActive)
+        setActiveChallenge(pickCanonicalActiveChallenge(data))
         return
       }
 
-      const nowActive  = data.find(c => c.is_active) ?? null
+      const nowActive = pickCanonicalActiveChallenge(data)
       const wasActive  = prevActiveRef.current
 
       if (nowActive) {
@@ -317,6 +330,11 @@ function TVDisplayInner() {
       }
     } catch { /* ignore polling errors */ }
   }, [forcedMode, fetchLeaderboard, addToast])
+
+  const pollChallengesRef = useRef(pollChallenges)
+  useEffect(() => {
+    pollChallengesRef.current = pollChallenges
+  }, [pollChallenges])
 
   // Poll every 5 seconds
   useEffect(() => {
@@ -378,6 +396,15 @@ function TVDisplayInner() {
 
           if (msg.type === "SYSTEM_FINALIZE") {
             addToast("Challenge has ended!", "warning")
+            void pollChallengesRef.current()
+          }
+
+          if (
+            msg.type === "MISSION_LIVE" ||
+            msg.type === "MISSION_ENDED" ||
+            msg.type === "DEMO_GATE_OPEN"
+          ) {
+            void pollChallengesRef.current()
           }
         } catch { /* ignore malformed messages */ }
       }

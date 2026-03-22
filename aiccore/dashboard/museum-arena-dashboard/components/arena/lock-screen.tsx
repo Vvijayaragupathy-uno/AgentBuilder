@@ -15,9 +15,12 @@ interface Challenge {
 
 interface LockScreenProps {
     onUnlock: (sessionId: string, nickname: string, stats?: any) => void
+    /** After Start Over, server returns a fresh one-time PIN — prefill the keypad. */
+    prefillPin?: string
+    onPrefillConsumed?: () => void
 }
 
-export function LockScreen({ onUnlock }: LockScreenProps) {
+export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScreenProps) {
     const [view, setView] = useState<"unlock" | "register" | "login">("unlock")
     const [code, setCode] = useState("")
     const [nickname, setNickname] = useState("")
@@ -31,6 +34,14 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
     const [isMounted, setIsMounted] = useState(false)
 
     useEffect(() => { setIsMounted(true) }, [])
+
+    useEffect(() => {
+        if (!prefillPin || prefillPin.length !== 4) return
+        setView("unlock")
+        setCode(prefillPin.replace(/\D/g, "").slice(0, 4))
+        setError(null)
+        onPrefillConsumed?.()
+    }, [prefillPin, onPrefillConsumed])
 
     useEffect(() => {
         if (view !== "register") return
@@ -152,6 +163,13 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
                                 view === "register" ? "Fill in your details to get started." :
                                     "Enter your username and PIN."}
                         </p>
+                        {view === "unlock" && (
+                            <p className="mt-3 text-[11px] text-muted-foreground/90 leading-relaxed px-1">
+                                Each PIN works <span className="font-semibold text-foreground">once</span> per unlock. After you leave
+                                or tap Start Over, use the <span className="font-semibold text-foreground">new PIN</span> on this screen
+                                or <span className="font-semibold text-foreground">Sign in</span> below to generate one.
+                            </p>
+                        )}
                     </div>
 
                     {/* Success state */}

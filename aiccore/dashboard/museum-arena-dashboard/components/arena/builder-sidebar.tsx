@@ -12,6 +12,7 @@ import {
   KeyRound,
   LogOut,
   Monitor,
+  Sparkles,
 } from "lucide-react"
 
 /** Tabs that require Admin Access (cookie). */
@@ -21,6 +22,7 @@ export const ADMIN_ONLY_TAB_IDS = [
   "review",
   "stations",
   "settings",
+  "practice",
 ] as const
 
 import { cn } from "@/lib/utils"
@@ -41,6 +43,7 @@ const publicItems = [
 
 const adminItems = [
   { id: "mosaic",      label: "Display",     icon: Trophy },
+  { id: "practice",    label: "Practice",    icon: Sparkles },
   { id: "contestants", label: "Registry",    icon: Users },
   { id: "review",      label: "Review",      icon: ClipboardCheck },
   { id: "stations",    label: "Stations",    icon: Cpu },

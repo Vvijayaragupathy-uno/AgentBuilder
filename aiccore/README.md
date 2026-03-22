@@ -133,13 +133,13 @@ Until the Python server restarts, it is still running the **old** in-memory code
 - **Mission / build window** (shared challenge countdown): **independent** — it can still run while demos play. The TV live header shows **demo slot** time prominently during full-screen demo, with the mission clock as secondary text. **End the whole run:** deactivate the challenge in admin, **`POST /api/v1/aiccore/system/finalize`** (locks arena + ends active missions), or wait for mission time + submissions per your rules.
 - **Mosaic during demo:** Hidden while **`presenting`** (full-screen iframe). If you still see the grid, you are in **queue / between** segments (`gate_open` but no current presenter), not in active full-screen playback.
 
-### Concurrent Langflow
+### Concurrent Langflow (one Langflow DB, many seats)
 
-If **more than one** active AICCORE session exists, **global Langflow purge is skipped**; only **restore/merge** runs so other laptops are not wiped. For a totally clean workspace per seat, run **separate Langflow instances** (or accept shared flow list until submit).
+Each AICCORE unlock creates a dedicated Langflow **folder** (`Arena <sessionprefix>`) stored on `aiccore.session.langflow_workspace_folder_id`. **Purge is scoped** to that folder tree (so seat A does not wipe seat B). **New flows** default into that folder. **Middleware** filters `GET /api/v1/flows` and `GET /api/v1/projects` so the browser only lists flows/projects under that seat’s folder plus the normal **Starter Project** / **Starter Projects** trees (templates).
 
 **TV mosaic:** The backend prefers each session’s own **`flow_saved`** events for the mosaic snapshot. If there is no `flow_saved` yet, it may fall back to a **workspace_snapshot** (shared DB); starter-template folders are skipped when picking a fallback flow so the grid is less likely to show a generic template instead of a builder canvas.
 
-**This is not “automatic separate DB per station” in one deployment** — that’s an ops choice (multiple services/DBs). See **`docs/STATION_ISOLATION.md`**.
+**Separate Langflow instances per seat** are still optional for hard isolation at the DB file level; this folder + middleware model is the default single-service deployment.
 
 ---
 

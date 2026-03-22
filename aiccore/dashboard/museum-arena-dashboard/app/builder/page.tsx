@@ -5,7 +5,7 @@ import { LockScreen } from "@/components/arena/lock-screen"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut, PlayCircle, ExternalLink } from "lucide-react"
 import { LANGFLOW_TEACH_WATCH_URL } from "@/lib/langflow-teach"
-import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, skewedNow } from "@/lib/utils"
+import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, getOrCreateBuilderStationId, skewedNow } from "@/lib/utils"
 import {
     Sheet,
     SheetContent,
@@ -49,9 +49,36 @@ export default function BuilderPage() {
     const [demoQueueError, setDemoQueueError] = useState<string | null>(null)
     const [submitError, setSubmitError] = useState<string | null>(null)
     const autoSubmitFiredRef = useRef(false)
+    /** `null` until client reads `?practice=1` — avoids hydrating the wrong branch. */
+    const [practiceMode, setPracticeMode] = useState<boolean | null>(null)
+    const [practiceError, setPracticeError] = useState<string | null>(null)
+    /** After Start Over, server issues a new one-time PIN (old PIN was consumed at unlock). */
+    const [lockScreenPrefillPin, setLockScreenPrefillPin] = useState<string | null>(null)
+    const practiceModeRef = useRef(false)
+
+    useEffect(() => {
+        practiceModeRef.current = practiceMode === true
+    }, [practiceMode])
+
+    useEffect(() => {
+        const p = new URLSearchParams(window.location.search).get("practice") === "1"
+        setPracticeMode(p)
+    }, [])
+
+    const clearLockScreenPrefill = useCallback(() => setLockScreenPrefillPin(null), [])
 
     const refreshMissionFromServer = useCallback(async () => {
         if (!session) return
+        if (practiceMode === true) {
+            setHasActiveChallenge(false)
+            setChallengeInfo(null)
+            setServerBuildWindowOpen(null)
+            setIsBeforeStart(false)
+            setTimeLeft(null)
+            setInstructionText(null)
+            setInstructionFrameUrl(null)
+            return
+        }
         try {
             const apiBase = getApiBase()
             await fetch(
@@ -128,7 +155,7 @@ export default function BuilderPage() {
         } catch {
             /* ignore */
         }
-    }, [session])
+    }, [session, practiceMode])
 
     const refreshMissionRef = useRef(refreshMissionFromServer)
     const sessionRef = useRef<{ id: string; nickname: string } | null>(null)
@@ -165,17 +192,27 @@ export default function BuilderPage() {
     }
 
     const handleReset = async () => {
+        let newUnlockFromServer: string | null = null
         if (session) {
             try {
                 const apiBase = getApiBase()
-                await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/deactivate`, {
+                const res = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/deactivate`, {
                     method: "POST",
-                    credentials: "include"
+                    credentials: "include",
+                    headers: { "X-AICCORE-Session-Id": session.id },
                 })
+                if (res.ok) {
+                    const j = await res.json().catch(() => ({}))
+                    const pin = j?.new_unlock_code
+                    if (typeof pin === "string" && /^[0-9]{4}$/.test(pin)) {
+                        newUnlockFromServer = pin
+                    }
+                }
             } catch (err) {
                 console.error("Cleanup failed:", err)
             }
         }
+        setLockScreenPrefillPin(newUnlockFromServer)
         localStorage.removeItem("aiccore_session_id")
         localStorage.removeItem(SESSION_BUILD_START_MS_KEY)
         localStorage.removeItem("aiccore_nickname")
@@ -252,8 +289,9 @@ export default function BuilderPage() {
         return () => clearInterval(interval)
     }, [session, isSubmitted])
 
-    // Load session from storage if it exists
+    // Load session from storage if it exists (skip when /builder?practice=1 — that flow uses admin bootstrap)
     useEffect(() => {
+        if (practiceMode !== false) return // null: undecided; true: admin bootstrap
         const savedId = localStorage.getItem("aiccore_session_id")
         const savedName = localStorage.getItem("aiccore_nickname")
         const savedFlows = localStorage.getItem("aiccore_flows_count")
@@ -265,7 +303,58 @@ export default function BuilderPage() {
                 setStats({ flows: Number(savedFlows), achievements: Number(savedAchs) })
             }
         }
-    }, [])
+    }, [practiceMode])
+
+    // Admin Practice: POST /auth/practice-session (requires aiccore_admin cookie from same origin)
+    useEffect(() => {
+        if (practiceMode !== true || session) return
+        let cancelled = false
+        setPracticeError(null)
+        ;(async () => {
+            try {
+                const apiBase = getApiBase()
+                const res = await fetch(`${apiBase}/api/v1/aiccore/auth/practice-session`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ station_id: getOrCreateBuilderStationId() }),
+                })
+                if (cancelled) return
+                if (!res.ok) {
+                    let msg = res.status === 403 ? "Admin login required — use Admin Access on the dashboard, then open Practice again." : `Could not start practice (${res.status})`
+                    try {
+                        const err = await res.json()
+                        const d = err?.detail
+                        if (typeof d === "string") msg = d
+                    } catch {
+                        /* ignore */
+                    }
+                    setPracticeError(msg)
+                    return
+                }
+                const data = await res.json()
+                const sid = data.session_id as string
+                const nick = (data.nickname as string) || "Practice"
+                setSession({ id: sid, nickname: nick })
+                localStorage.setItem("aiccore_session_id", sid)
+                localStorage.setItem("aiccore_nickname", nick)
+                const st = data.stats as { flows_count?: number; achievements_count?: number } | undefined
+                if (st) {
+                    setStats({
+                        flows: st.flows_count ?? 0,
+                        achievements: st.achievements_count ?? 0,
+                    })
+                    localStorage.setItem("aiccore_flows_count", String(st.flows_count ?? 0))
+                    localStorage.setItem("aiccore_achievements_count", String(st.achievements_count ?? 0))
+                }
+            } catch {
+                if (!cancelled) setPracticeError("Network error — check connection and try again.")
+            }
+        })()
+        return () => {
+            cancelled = true
+        }
+    }, [practiceMode, session])
 
     // WebSocket Listener for Broadcasts & Ceremony (with auto-reconnect)
     useEffect(() => {
@@ -286,7 +375,7 @@ export default function BuilderPage() {
                         setBroadcast(data.message)
                         setTimeout(() => setBroadcast(null), 10000)
                     }
-                    if (data.type === "SYSTEM_FINALIZE") {
+                    if (data.type === "SYSTEM_FINALIZE" && !practiceModeRef.current) {
                         setIsSystemLocked(true)
                     }
                     if (data.type === "MISSION_LIVE" && data.data?.title) {
@@ -459,7 +548,7 @@ export default function BuilderPage() {
 
     // Timer: at 0s calls submit once (each browser). Mission mode = shared deadline; per_seat = from unlock.
     useEffect(() => {
-        if (!challengeInfo) return
+        if (!challengeInfo || practiceMode === true) return
 
         const timer = setInterval(() => {
             const start = new Date(challengeInfo.start_time).getTime()
@@ -492,7 +581,7 @@ export default function BuilderPage() {
         }, 1000)
 
         return () => clearInterval(timer)
-    }, [challengeInfo, isSubmitted, isSystemLocked, handleSubmit, serverBuildWindowOpen])
+    }, [challengeInfo, isSubmitted, isSystemLocked, handleSubmit, serverBuildWindowOpen, practiceMode])
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60)
@@ -500,13 +589,47 @@ export default function BuilderPage() {
         return `${mins}:${secs.toString().padStart(2, '0')}`
     }
 
-    if (!session) {
-        return <LockScreen onUnlock={handleUnlock} />
+    if (practiceMode === null) {
+        return (
+            <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c]">
+                <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            </div>
+        )
     }
 
+    if (practiceMode === true && !session) {
+        if (practiceError) {
+            return (
+                <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] p-8 text-center gap-4">
+                    <p className="text-sm text-muted-foreground max-w-md leading-relaxed">{practiceError}</p>
+                    <a
+                        href="/"
+                        className="text-sm font-semibold text-primary hover:underline"
+                    >
+                        Back to dashboard
+                    </a>
+                </div>
+            )
+        }
+        return (
+            <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] gap-3">
+                <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                <p className="text-xs text-muted-foreground">Opening practice builder…</p>
+            </div>
+        )
+    }
 
+    if (!session) {
+        return (
+            <LockScreen
+                onUnlock={handleUnlock}
+                prefillPin={lockScreenPrefillPin ?? undefined}
+                onPrefillConsumed={clearLockScreenPrefill}
+            />
+        )
+    }
 
-    if (isSubmitted || isSystemLocked) {
+    if ((isSubmitted || isSystemLocked) && practiceMode !== true) {
         return (
             <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] overflow-hidden">
                 <div className="absolute inset-0 bg-primary/5 [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]" />
@@ -586,6 +709,13 @@ export default function BuilderPage() {
                         </div>
                     )}
 
+                    <p className="text-xs text-muted-foreground text-left leading-relaxed max-w-md">
+                        Your submission is stored for the host (Review in the dashboard). Each successful unlock uses up
+                        that PIN — <strong className="text-foreground">Start Over</strong> ends this session and the next
+                        screen shows a <strong className="text-foreground">new PIN</strong> so you can open the builder again.
+                        Or use <strong className="text-foreground">Sign in</strong> on the lock screen anytime to get a fresh PIN.
+                    </p>
+
                     <button
                         onClick={handleReset}
                         className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.98] shadow-lg shadow-primary/20"
@@ -622,6 +752,11 @@ export default function BuilderPage() {
                     </span>
                     <span className="text-muted-foreground/40 shrink-0">·</span>
                     <span className="text-sm text-muted-foreground truncate">{session.nickname}</span>
+                    {practiceMode === true && (
+                        <span className="shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                            Practice
+                        </span>
+                    )}
                 </div>
 
                 {/* Right: tutorial · timer · instructions (if any) · submit · exit */}
@@ -637,7 +772,9 @@ export default function BuilderPage() {
                         <span className="hidden sm:inline">Langflow tutorial</span>
                         <span className="sm:hidden">Video</span>
                     </a>
-                    {/* Timer */}
+                    {/* Timer — hidden in admin Practice (no scored mission) */}
+                    {practiceMode !== true && (
+                        <>
                     {timeLeft !== null ? (
                         <div
                             title={
@@ -663,8 +800,10 @@ export default function BuilderPage() {
                             <span>Not started yet</span>
                         </div>
                     ) : null}
+                        </>
+                    )}
 
-                    {hasChallengeInstructions && (
+                    {hasChallengeInstructions && practiceMode !== true && (
                         <button
                             type="button"
                             onClick={() => setChallengeInstructionsOpen(true)}
@@ -677,7 +816,8 @@ export default function BuilderPage() {
                         </button>
                     )}
 
-                    {/* Submit — the primary action */}
+                    {/* Submit — the primary action (not shown in sandbox Practice) */}
+                    {practiceMode !== true && (
                     <button
                         onClick={handleSubmit}
                         disabled={isSubmitting || isSubmitted || isSystemLocked || isBeforeStart || !hasActiveChallenge}
@@ -696,6 +836,7 @@ export default function BuilderPage() {
                         <Rocket className={cn("h-3.5 w-3.5", isSubmitting && "animate-spin")} />
                         {isSubmitting ? "Submitting…" : "Submit"}
                     </button>
+                    )}
 
                     {/* Exit */}
                     <button
@@ -721,7 +862,7 @@ export default function BuilderPage() {
                 </div>
             )}
 
-            {hasChallengeInstructions && (
+            {hasChallengeInstructions && practiceMode !== true && (
                 <Sheet open={challengeInstructionsOpen} onOpenChange={setChallengeInstructionsOpen}>
                     <SheetContent
                         side="right"

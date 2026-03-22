@@ -22,6 +22,7 @@ const TAB_LABELS: Record<string, string> = {
   live:        "Leaderboard",
   challenges:  "Challenges",
   mosaic:      "Display",
+  practice:    "Practice",
   contestants: "Participants",
   review:      "Submissions",
   stations:    "Stations",
@@ -33,6 +34,7 @@ const VALID_TABS = new Set([
   "live",
   "challenges",
   "mosaic",
+  "practice",
   "contestants",
   "review",
   "stations",
@@ -204,12 +206,25 @@ function BuilderDashboardInner() {
                 <div className="rounded-xl border border-border/60 bg-card/40 p-8 text-center text-sm text-muted-foreground">
                   Use <strong className="text-foreground">Admin Access</strong> in the sidebar to open{" "}
                   <strong className="text-foreground">Display</strong> (live wall),{" "}
+                  <strong className="text-foreground">Practice</strong> (PIN-free Langflow),{" "}
                   <strong className="text-foreground">TV</strong> (full-screen URL in Admin section), Registry, Review,
                   Stations, and Settings.
                 </div>
               ) : activeTab === "mosaic" ? (
                 <div className="h-[calc(100vh-180px)]">
                   <MosaicDisplay />
+                </div>
+              ) : activeTab === "practice" ? (
+                <div className="flex h-[calc(100vh-180px)] min-h-[420px] flex-col gap-3">
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
+                    Langflow sandbox for facilitators — no participant PIN. Requires this browser to be logged in as Admin
+                    (same session as the sidebar). Opens <code className="text-[11px]">/builder?practice=1</code>.
+                  </p>
+                  <iframe
+                    title="Practice builder"
+                    src="/builder?practice=1"
+                    className="flex-1 w-full min-h-0 rounded-xl border border-border bg-[#0f111c]"
+                  />
                 </div>
               ) : (
                 <div className="pb-10">
