@@ -13,7 +13,7 @@ psycopg2-binary
 psycopg[binary]
 sqlmodel
 alembic
-pydantic
+pydantic>=2.12.5
 pydantic-settings
 python-dotenv
 loguru

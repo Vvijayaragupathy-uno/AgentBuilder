@@ -90,6 +90,20 @@ import random
 import re
 import threading
 
+
+class HTTPOnlyMount(Mount):
+    """``Mount`` matches both HTTP and WebSocket; ``StaticFiles`` only supports HTTP.
+
+    Stray WebSocket connections (e.g. ``wss://host/``) must not be routed into
+    ``StaticFiles`` or Starlette raises ``AssertionError``.
+    """
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        if scope.get("type") == "websocket":
+            return Match.NONE, {}
+        return super().matches(scope)
+
+
 # In-memory storage for unlock rate limiting (Google standard protection)
 # { ip: {"attempts": int, "locked_until": datetime} }
 FAILED_ATTEMPTS = {}
@@ -480,6 +494,21 @@ def _patch_langflow_auth():
 
 
 _patch_langflow_auth()
+
+
+class _HttpOnlyMount(Mount):
+    """
+    Standard Starlette Mount crashes if it receives a 'websocket' scope and 
+    delegates to StaticFiles (which only supports 'http').
+    
+    This guarded version only handles 'http' scopes, letting 'websocket'
+    calls fall through to Langflow's own WS handlers.
+    """
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            # Fall through to next routes
+            return await self.app(scope, receive, send)
+        await super().__call__(scope, receive, send)
 
 
 def create_aiccore_app():
@@ -2459,7 +2488,7 @@ def create_aiccore_app():
 
     if serve_bundled_frontend and static_files_dir is not None:
         app.router.routes.append(
-            Mount(
+            HTTPOnlyMount(
                 "/",
                 StaticFiles(directory=str(static_files_dir), html=True),
                 name="langflow-static",
