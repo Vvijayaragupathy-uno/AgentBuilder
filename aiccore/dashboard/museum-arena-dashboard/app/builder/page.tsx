@@ -793,7 +793,7 @@ export default function BuilderPage() {
                     </div>
                 ) : (
                     <iframe
-                        src={getLangflowUrl(session.id)}
+                        src={getLangflowUrl()}
                         className={cn("h-full w-full border-0 transition-opacity duration-300", !iframeLoaded && "opacity-0")}
                         onLoad={() => setIframeLoaded(true)}
                     />
