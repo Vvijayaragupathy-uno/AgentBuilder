@@ -295,19 +295,7 @@ def _latest_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, Any
     )
     if sub and sub.flow_snapshot:
         return sub.flow_snapshot if isinstance(sub.flow_snapshot, dict) else {}
-    ev = (
-        db.execute(
-            select(Event)
-            .where(Event.session_id == session_id, Event.event_type == "flow_saved")
-            .order_by(Event.sequence_number.desc())
-            .limit(1)
-        )
-        .scalars()
-        .first()
-    )
-    if ev and ev.payload:
-        return ev.payload.get("snapshot") or {}
-    return {}
+    return get_mosaic_snapshot_for_session(db, session_id)
 
 
 def snapshot_to_preview(snapshot: Dict[str, Any]) -> Dict[str, Any]:

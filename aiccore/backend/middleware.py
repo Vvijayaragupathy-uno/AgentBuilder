@@ -43,6 +43,42 @@ def _passthrough_raw_response(body_bytes: bytes, response: Response) -> Response
     )
 
 
+def _request_with_body(request: Request, body_bytes: bytes) -> Request:
+    """Clone the request with a replacement body so downstream handlers receive our edits."""
+    headers = []
+    content_length_set = False
+    for key, value in request.scope.get("headers", []):
+        if key.lower() == b"content-length":
+            headers.append((key, str(len(body_bytes)).encode("ascii")))
+            content_length_set = True
+        else:
+            headers.append((key, value))
+    if not content_length_set:
+        headers.append((b"content-length", str(len(body_bytes)).encode("ascii")))
+
+    scope = dict(request.scope)
+    scope["headers"] = headers
+
+    async def receive():
+        return {"type": "http.request", "body": body_bytes}
+
+    return Request(scope, receive=receive)
+
+
+def _inject_flow_folder_id(body: object, method: str, folder_id: str | None) -> object:
+    """Ensure flow saves land in the current seat folder."""
+    if not isinstance(body, dict) or not folder_id:
+        return body
+
+    updated = dict(body)
+    if method == "POST":
+        if not updated.get("folder_id"):
+            updated["folder_id"] = folder_id
+    elif method == "PATCH":
+        updated["folder_id"] = folder_id
+    return updated
+
+
 def _blank_langflow_list_payload(payload: object, path_rstrip: str) -> object:
     """Replace list bodies with empty data — same shape Langflow uses — when we must not leak rows."""
     if path_rstrip.endswith("/flows") or path_rstrip.endswith("/projects"):
@@ -154,9 +190,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         # We need to read the body safely if it's a POST/PATCH
         if request.method in ["POST", "PATCH"]:
             body_bytes = await request.body()
-            async def receive():
-                return {"type": "http.request", "body": body_bytes}
-            new_request = Request(request.scope, receive=receive)
+            new_request = _request_with_body(request, body_bytes)
             response = await call_next(new_request)
         else:
             response = await call_next(request)
@@ -175,12 +209,6 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
     async def _handle_flow_save(self, request: Request, call_next, session_id: UUID):
         # We must read the body without consuming it for the next handler
         body_bytes = await request.body()
-        
-        # Create a new request with the body bytes so the next handler can read it
-        async def receive():
-            return {"type": "http.request", "body": body_bytes}
-            
-        new_request = Request(request.scope, receive=receive)
         req_path = request.url.path
 
         try:
@@ -198,15 +226,13 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                     from .models import Session as AICSession
                     s = db_session.get(AICSession, session_id)
                     fid = str(s.langflow_workspace_folder_id) if s and s.langflow_workspace_folder_id else None
-                    if fid:
-                        if request.method == "POST" and not body.get("folder_id"):
-                            body["folder_id"] = fid
-                            body_bytes = json.dumps(body).encode("utf-8")
-                        elif request.method == "PATCH":
-                            body["folder_id"] = fid
-                            body_bytes = json.dumps(body).encode("utf-8")
+                    updated_body = _inject_flow_folder_id(body, request.method, fid)
+                    if updated_body != body:
+                        body = updated_body
+                        body_bytes = json.dumps(body).encode("utf-8")
             except Exception:
                 pass
+        new_request = _request_with_body(request, body_bytes)
 
         # Get user details for broadcast
         nickname = "Builder"
