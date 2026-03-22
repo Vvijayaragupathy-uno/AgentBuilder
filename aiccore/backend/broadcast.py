@@ -37,6 +37,8 @@ class BroadcastManager:
                 self._redis_url,
                 encoding="utf-8",
                 decode_responses=True,
+                # Avoid stale TCP connections after idle periods (common on hosted Redis).
+                health_check_interval=30,
             )
             await client.ping()
             self._redis = client
@@ -62,31 +64,40 @@ class BroadcastManager:
             self._redis = None
 
     async def _redis_listen_loop(self) -> None:
+        """Subscribe loop with reconnect — a single connection drop must not stop fan-out forever."""
         if self._redis is None:
             return
-        pubsub = self._redis.pubsub()
-        await pubsub.subscribe(self._channel)
-        try:
-            while True:
-                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
-                if msg is None or msg.get("type") != "message":
-                    continue
-                data = msg.get("data")
-                if isinstance(data, str):
-                    await self._local_fanout_raw(data)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            print(f"⚠️ AICCORE broadcast: Redis subscriber error ({e})")
-        finally:
+        backoff = 1.0
+        while self._redis is not None:
+            pubsub = self._redis.pubsub()
             try:
-                await pubsub.unsubscribe(self._channel)
-            except Exception:
-                pass
-            try:
-                await pubsub.aclose()
-            except Exception:
-                pass
+                await pubsub.subscribe(self._channel)
+                backoff = 1.0
+                while self._redis is not None:
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
+                    if msg is None or msg.get("type") != "message":
+                        continue
+                    data = msg.get("data")
+                    if isinstance(data, str):
+                        await self._local_fanout_raw(data)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(
+                    f"⚠️ AICCORE broadcast: Redis subscriber error ({e}); "
+                    f"reconnecting in {backoff:.0f}s"
+                )
+                await asyncio.sleep(min(backoff, 30.0))
+                backoff = min(backoff * 2.0, 30.0)
+            finally:
+                try:
+                    await pubsub.unsubscribe(self._channel)
+                except Exception:
+                    pass
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    pass
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()

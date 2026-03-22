@@ -86,7 +86,7 @@ class _HttpOnlyRootMount(Mount):
         return super().matches(scope)
 
 
-def _browser_origins_from_env_blob(blob: str | None) -> List[str]:
+def _browser_origins_from_env_blob(blob: Optional[str]) -> List[str]:
     """
     Parse browser origins for CORS / CSP frame-ancestors from env strings.
     Each entry may be a hostname (foo.up.railway.app) or a full URL (https://foo.../path).
