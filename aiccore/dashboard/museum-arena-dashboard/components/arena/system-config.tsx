@@ -28,7 +28,6 @@ import {
     Trophy,
     Download,
     FileText,
-    SkipForward,
     Image as ImageIcon
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -139,8 +138,6 @@ export function SystemConfig() {
     const [editingId, setEditingId] = useState<string | null>(null)
     const [isClearing, setIsClearing] = useState(false)
     const [clearResult, setClearResult] = useState<string | null>(null)
-    const [demoMsg, setDemoMsg] = useState<string | null>(null)
-
     // Broadcast State
     const [isBroadcastOpen, setIsBroadcastOpen] = useState(false)
     const [broadcastMessage, setBroadcastMessage] = useState("")
@@ -240,24 +237,6 @@ export function SystemConfig() {
         if (res.ok) {
             setArenaLocked(true)
             fetchData()
-        }
-    }
-
-    const handleDemoNext = async () => {
-        const apiBase = getApiBase()
-        const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/demo/next`, {
-            method: "POST",
-        })
-        if (res.ok) {
-            const j = await res.json()
-            setDemoMsg(j.status === "idle" ? "Demo playback idle (mosaic)" : "Advanced to next presenter")
-            setTimeout(() => setDemoMsg(null), 4000)
-        } else if (res.status === 403) {
-            setDemoMsg("Use Admin Access in the sidebar first")
-            setTimeout(() => setDemoMsg(null), 5000)
-        } else {
-            setDemoMsg("Could not advance demo")
-            setTimeout(() => setDemoMsg(null), 4000)
         }
     }
 
@@ -555,25 +534,6 @@ export function SystemConfig() {
                             <Button variant="outline" size="sm" className="gap-2 border-white/10 hover:bg-white/5" onClick={handleExport}>
                                 <Download className="h-3.5 w-3.5" /> Export CSV
                             </Button>
-                        </div>
-
-                        <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-violet-500/5 border border-violet-500/15">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-violet-300/90">TV demo queue</span>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full gap-2 bg-violet-500/10 border-violet-500/25 text-violet-200 hover:bg-violet-500/20"
-                                onClick={handleDemoNext}
-                            >
-                                <SkipForward className="h-3.5 w-3.5" /> Advance presenter on TV
-                            </Button>
-                            {demoMsg && (
-                                <p className="text-[10px] text-center text-violet-200/90 font-medium">{demoMsg}</p>
-                            )}
-                            <p className="text-[9px] text-muted-foreground/50 text-center leading-tight">
-                                Skips the current presenter slot (admin cookie). Slots also auto-advance when time runs out — length{" "}
-                                <span className="font-mono">AICCORE_DEMO_SEGMENT_SECONDS</span> (default 90s, not 5 min).
-                            </p>
                         </div>
 
                         {/* Clear Sessions */}

@@ -109,8 +109,6 @@ FAILED_ATTEMPTS = {}
 LOCKOUT_DURATION_SECONDS = 300 # 5 minutes
 MAX_ATTEMPTS = 5
 
-
-
 def _browser_origins_from_env_blob(blob: Optional[str]) -> List[str]:
     """
     Parse browser origins for CORS / CSP frame-ancestors from env strings.
@@ -1410,11 +1408,7 @@ def create_aiccore_app():
             expire_stale_builder_sessions_db(db_session)
             maybe_auto_finalize_challenge(db_session)
             mission_live_payload = maybe_auto_activate_due_challenges(db_session)
-            user_stmt = (
-                select(User)
-                .where(User.username != PRACTICE_KIOSK_USERNAME)
-                .order_by(User.created_at.desc())
-            )
+            user_stmt = select(User).order_by(User.created_at.desc())
             all_users = db_session.execute(user_stmt).scalars().all()
             
             if not all_users:
@@ -2012,11 +2006,7 @@ def create_aiccore_app():
         _require_admin_request(request)
         from sqlalchemy import select, func
         with Session(engine) as db_session:
-            stmt = (
-                select(User)
-                .where(User.username != PRACTICE_KIOSK_USERNAME)
-                .order_by(User.created_at.desc())
-            )
+            stmt = select(User).order_by(User.created_at.desc())
             users = db_session.execute(stmt).scalars().all()
             
             if not users:

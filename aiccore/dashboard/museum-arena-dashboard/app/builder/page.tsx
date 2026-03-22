@@ -58,13 +58,6 @@ export default function BuilderPage() {
     const [isBeforeStart, setIsBeforeStart] = useState(false)
     /** Server truth for scheduled missions — avoids disabled Submit when client clock ≠ UTC start instant. */
     const [serverBuildWindowOpen, setServerBuildWindowOpen] = useState<boolean | null>(null)
-    const [demoInfo, setDemoInfo] = useState<{
-        myPosition?: number
-        total: number
-        gateOpen: boolean
-    } | null>(null)
-    const [demoJoining, setDemoJoining] = useState(false)
-    const [demoQueueError, setDemoQueueError] = useState<string | null>(null)
     const [submitError, setSubmitError] = useState<string | null>(null)
     const autoSubmitFiredRef = useRef(false)
     const [langflowMisconfigured, setLangflowMisconfigured] = useState(false)
@@ -223,9 +216,6 @@ export default function BuilderPage() {
         setStats(null)
         setIframeLoaded(false)
         setIsSubmitted(false)
-        setDemoInfo(null)
-        setDemoQueueError(null)
-        setDemoJoining(false)
         setSubmitError(null)
         setServerBuildWindowOpen(null)
         setIsBeforeStart(false)
@@ -233,30 +223,6 @@ export default function BuilderPage() {
         setChallengeInfo(null)
         autoSubmitFiredRef.current = false
     }
-
-    // Poll for submission status
-    useEffect(() => {
-        if (!session || !isSubmitted) return
-        const loadDemo = async () => {
-            try {
-                const res = await fetch(
-                    `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${session.id}`,
-                    { credentials: "include" }
-                )
-                if (res.ok) {
-                    const d = await res.json()
-                    setDemoInfo({
-                        myPosition: d.my_position,
-                        total: d.queue_length ?? 0,
-                        gateOpen: !!d.gate_open,
-                    })
-                }
-            } catch { /* ignore */ }
-        }
-        loadDemo()
-        const id = setInterval(loadDemo, 5000)
-        return () => clearInterval(id)
-    }, [session, isSubmitted])
 
     useEffect(() => {
         if (!session || isSubmitted) return
@@ -349,28 +315,6 @@ export default function BuilderPage() {
                             setTimeout(() => setBroadcast(null), 12000)
                             refreshMissionRef.current()
                         }
-                        if (
-                            (msg.type === "DEMO_GATE_OPEN" ||
-                                msg.type === "DEMO_QUEUE_UPDATE" ||
-                                msg.type === "SUBMISSION_UPDATE") &&
-                            sessionRef.current
-                        ) {
-                            const sid = sessionRef.current.id
-                            void fetch(
-                                `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${sid}`,
-                                { credentials: "include" }
-                            )
-                                .then(r => (r.ok ? r.json() : null))
-                                .then(d => {
-                                    if (!d) return
-                                    setDemoInfo({
-                                        myPosition: d.my_position,
-                                        total: d.queue_length ?? 0,
-                                        gateOpen: !!d.gate_open,
-                                    })
-                                })
-                                .catch(() => { /* ignore */ })
-                        }
                     } catch (err) {
                         console.error("Poll message parse error:", err)
                     }
@@ -460,54 +404,6 @@ export default function BuilderPage() {
         autoSubmitFiredRef.current = false
     }, [challengeTickKey])
 
-    const handleJoinDemoQueue = useCallback(async () => {
-        if (!session) return
-        setDemoJoining(true)
-        setDemoQueueError(null)
-        try {
-            const res = await fetch(
-                `${getApiBase()}/api/v1/aiccore/session/${session.id}/demo-queue`,
-                {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "Content-Type": "application/json",
-                        ...sessionAuthHeaders(session),
-                    },
-                }
-            )
-            if (!res.ok) {
-                let msg = `Could not join (${res.status})`
-                try {
-                    const err = await res.json()
-                    const d = err?.detail
-                    msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((x: { msg?: string }) => x?.msg).filter(Boolean).join(" ") : msg
-                } catch {
-                    /* ignore */
-                }
-                setDemoQueueError(msg)
-                return
-            }
-            const st = await fetch(
-                `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${session.id}`,
-                { credentials: "include" }
-            )
-            if (st.ok) {
-                const d = await st.json()
-                setDemoInfo({
-                    myPosition: d.my_position,
-                    total: d.queue_length ?? 0,
-                    gateOpen: !!d.gate_open,
-                })
-            }
-        } catch (e) {
-            console.error("Demo queue join failed:", e)
-            setDemoQueueError("Network error — check connection and try again.")
-        } finally {
-            setDemoJoining(false)
-        }
-    }, [session])
-
     useEffect(() => {
         if (!challengeInfo) return
 
@@ -596,53 +492,6 @@ export default function BuilderPage() {
                             </div>
                         </div>
                     </div>
-
-                    {isSubmitted && (
-                        <div className="w-full flex flex-col gap-3 rounded-2xl bg-primary/5 p-5 ring-1 ring-primary/20 text-left">
-                            <div className="flex items-center gap-2">
-                                <Megaphone className="h-5 w-5 text-primary shrink-0" />
-                                <div>
-                                    <p className="text-sm font-semibold text-foreground">Present your flow?</p>
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                        Join the demo queue so the host can show your Langflow canvas on the main screen after the build phase ends.
-                                    </p>
-                                </div>
-                            </div>
-                            {demoInfo?.gateOpen && typeof demoInfo.myPosition === "number" && (
-                                <p className="text-xs font-medium text-amber-400">
-                                    Demos are running — watch the main display. You are #{demoInfo.myPosition} of {demoInfo.total}.
-                                </p>
-                            )}
-                            {demoInfo?.gateOpen && typeof demoInfo.myPosition !== "number" && (
-                                <p className="text-xs font-medium text-muted-foreground">
-                                    Build phase ended — tap Join demo queue if you have not yet.
-                                </p>
-                            )}
-                            {demoInfo && typeof demoInfo.myPosition === "number" && !demoInfo.gateOpen && (
-                                <p className="text-xs text-muted-foreground">
-                                    You are <strong className="text-foreground">#{demoInfo.myPosition}</strong> of{" "}
-                                    <strong className="text-foreground">{demoInfo.total}</strong> in the demo queue.
-                                </p>
-                            )}
-                            {typeof demoInfo?.myPosition !== "number" && (
-                                <>
-                                    {demoQueueError && (
-                                        <p className="text-xs font-medium text-rose-400 bg-rose-500/10 ring-1 ring-rose-500/20 rounded-lg px-3 py-2">
-                                            {demoQueueError}
-                                        </p>
-                                    )}
-                                    <button
-                                        type="button"
-                                        onClick={handleJoinDemoQueue}
-                                        disabled={demoJoining}
-                                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/15 font-semibold text-primary hover:bg-primary/25 transition-colors disabled:opacity-50"
-                                    >
-                                        {demoJoining ? "Joining…" : "Join demo queue"}
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    )}
 
                     <p className="text-xs text-muted-foreground text-left leading-relaxed max-w-md">
                         Your submission is stored for the host. Each successful unlock uses up that PIN.

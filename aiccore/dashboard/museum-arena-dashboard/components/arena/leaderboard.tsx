@@ -242,7 +242,7 @@ export function Leaderboard({
         <div className="glass flex items-center gap-3 rounded-lg px-3 py-2">
           <div
             className="flex items-center gap-1.5"
-            title="Builders who unlocked the station UI (PIN ok). Not the same as registered kiosk PCs on the Stations tab."
+            title="Builders who unlocked the station UI with a valid PIN."
           >
             <LogIn className="h-3 w-3 text-cyan-400 shrink-0" />
             <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">Checked in</span>

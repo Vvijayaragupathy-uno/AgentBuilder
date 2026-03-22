@@ -70,7 +70,7 @@ export type MosaicEmptyState = { title: string; subtitle?: string }
 const DEFAULT_MOSAIC_EMPTY: MosaicEmptyState = {
     title: "No live canvases here",
     subtitle:
-        "This grid only shows builders who are unlocked and have not submitted yet. Before unlock it stays empty; after everyone submits it stays empty on purpose — use the demo queue on the TV for full-screen walkthroughs.",
+        "This grid only shows builders who are unlocked and have not submitted yet. Before unlock it stays empty; after everyone submits it stays empty on purpose.",
 }
 
 export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState }) {
