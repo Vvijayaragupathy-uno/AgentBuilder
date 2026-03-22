@@ -180,6 +180,7 @@ def advance_demo_if_expired(db: Session) -> None:
     if row.demo_cursor + 1 >= len(q):
         row.demo_cursor = -1
         row.demo_segment_ends_at = None
+        row.demo_gate_open = False  # Auto-close gate when queue ends
     else:
         row.demo_cursor += 1
         row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
@@ -202,6 +203,7 @@ def admin_advance_demo(db: Session) -> dict:
     if row.demo_cursor + 1 >= len(q):
         row.demo_cursor = -1
         row.demo_segment_ends_at = None
+        row.demo_gate_open = False  # Auto-close gate when queue ends
     else:
         row.demo_cursor += 1
         row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
