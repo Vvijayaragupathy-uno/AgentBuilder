@@ -143,6 +143,16 @@ export function getLangflowUrl() {
 }
 
 /**
+ * Langflow iframe URL including `session_id` so AICCORE middleware can scope API calls when
+ * HttpOnly cookies are not sent (cross-origin embed without same-origin proxy).
+ */
+export function getLangflowUrlWithSession(sessionId: string) {
+  const base = getLangflowUrl().replace(/\/$/, '')
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}session_id=${encodeURIComponent(sessionId)}`
+}
+
+/**
  * True when the Langflow iframe would load the same origin as this Next app without a proxy —
  * that embeds the dashboard home inside the iframe. Point NEXT_PUBLIC_LANGFLOW_URL or
  * NEXT_PUBLIC_AICCORE_API_URL at the Python/Langflow service, or set NEXT_PUBLIC_AICCORE_PROXY_PREFIX.

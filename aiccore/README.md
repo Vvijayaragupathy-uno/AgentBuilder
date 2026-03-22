@@ -108,9 +108,11 @@ If an old `aiccore.db` still has `participant.unlock_code` **NOT NULL**, startup
 
 `GET /api/v1/aiccore/system/status` includes **`server_time`** (UTC ISO), **`active_challenge_id`**, **`mission_build_window_open`**, and **`mission_build_ends_at`** (UTC ISO end instant = mission `start_time` + `duration_minutes` when both are set). The **builder** and **TV live** countdown use that end instant when it matches the displayed mission so both stay aligned with the server. Only one challenge may be **`is_active`** at a time: activating one in the admin toggle deactivates the others; any duplicate actives are also trimmed when **`system/status`** runs.
 
-### Session-bound `POST /api/v1/aiccore/submit`
+### Session-bound `POST /api/v1/aiccore/session/{session_id}/submit`
 
-That route requires the **`aiccore_session_id` cookie** (set on unlock) **or** the **`X-AICCORE-Session-Id`** header matching the JSON **`session_id`**. The browser builder sends both. **Custom clients** (scripts, Postman, another service) must send the header with the same UUID they put in the body; otherwise they get **403**.
+That route requires a valid signed **`aiccore_session_token`** cookie (set on unlock) **or** the **`X-AICCORE-Session-Token`** header, and the path **`session_id`** must match. The browser builder sends headers plus cookies. **Custom clients** must send the token header for that session UUID; otherwise they get **403**.
+
+**Langflow iframe:** The builder loads Langflow with **`?session_id=<uuid>`** on the iframe URL so middleware can attach the seat even when the iframe request does not carry cookies. Prefer **`NEXT_PUBLIC_AICCORE_PROXY_PREFIX`** (same-origin proxy) when possible so cookies and API calls stay aligned.
 
 ### After you change code
 

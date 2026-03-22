@@ -9,7 +9,7 @@ import {
     applyServerTimeFromIso,
     cn,
     getApiBase,
-    getLangflowUrl,
+    getLangflowUrlWithSession,
     getOrCreateBuilderStationId,
     isLangflowIframeMisconfigured,
     skewedNow,
@@ -647,7 +647,7 @@ export default function BuilderPage() {
                     </div>
                 ) : (
                     <iframe
-                        src={getLangflowUrl()}
+                        src={getLangflowUrlWithSession(session.id)}
                         className={cn("h-full w-full border-0 transition-opacity duration-300", !iframeLoaded && "opacity-0")}
                         onLoad={() => setIframeLoaded(true)}
                     />

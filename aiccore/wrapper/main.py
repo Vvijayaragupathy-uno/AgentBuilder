@@ -1434,9 +1434,12 @@ def create_aiccore_app():
                 
             user_ids = [u.id for u in all_users]
             
-            # 1. Bulk active sessions
+            # 1. Bulk active sessions (newest session wins per user — two laptops = two sessions;
+            # without ordering, which row appeared on the leaderboard was database-undefined).
             active_sessions = db_session.execute(
-                select(AICSession).where(AICSession.user_id.in_(user_ids), AICSession.is_active == True)
+                select(AICSession)
+                .where(AICSession.user_id.in_(user_ids), AICSession.is_active == True)
+                .order_by(AICSession.start_time.desc())
             ).scalars().all()
             active_sess_by_user = {}
             for s in active_sessions:
