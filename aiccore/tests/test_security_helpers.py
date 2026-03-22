@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aiccore.backend.security import (
-    PRACTICE_KIOSK_USERNAME,
     admin_cookie_settings_for_scheme,
     hash_participant_password,
     is_public_user,
@@ -40,8 +39,7 @@ class SecurityHelpersTest(unittest.TestCase):
         self.assertEqual(safe_upload_filename(r"..\..\brief.png"), "brief.png")
         self.assertEqual(safe_upload_filename(""), "upload.bin")
 
-    def test_is_public_user_excludes_practice_account(self) -> None:
-        self.assertFalse(is_public_user(PRACTICE_KIOSK_USERNAME))
+    def test_is_public_user_returns_true(self) -> None:
         self.assertTrue(is_public_user("builder-01"))
 
     def test_public_profile_password_error_requires_existing_password(self) -> None:

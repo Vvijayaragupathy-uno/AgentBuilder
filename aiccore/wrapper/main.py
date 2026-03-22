@@ -67,8 +67,7 @@ from aiccore.backend.event_lock import event_sequence_write_lock, ensure_pg_advi
 from aiccore.backend.session_presence import expire_stale_sessions, touch_session_presence
 from aiccore.backend.registrations import ensure_requested_challenge_registration
 from aiccore.backend.security import (
-    AICCORE_STATION_ID,
-    settings_for_scheme,
+    admin_cookie_settings_for_scheme,
     admin_cookie_max_age_seconds,
     hash_participant_password,
     normalize_failed_attempt_state,
