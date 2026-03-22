@@ -7,10 +7,12 @@
 # Railway: do not set PYTHONPATH=. on the service — it overrides this image and can
 # break `import aiccore`. CMD below forces PYTHONPATH=/app at runtime.
 # ─────────────────────────────────────────────────────────────────────────────
-# Chainguard Node dev (Wolfi): Docker Scout/DX flags many highs on docker.io/library/node:*-alpine; this tag stays lean in the same scanner.
-FROM cgr.dev/chainguard/node:22.22.1-dev AS langflow_frontend_build
+# Official Node on Debian bookworm (docker.io). Chainguard versioned *-dev tags often need a paid org — avoid for public builds.
+FROM node:22-bookworm-slim AS langflow_frontend_build
 
-USER root
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /frontend
 
