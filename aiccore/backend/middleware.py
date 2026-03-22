@@ -43,6 +43,41 @@ def _passthrough_raw_response(body_bytes: bytes, response: Response) -> Response
     )
 
 
+def _blank_langflow_list_payload(payload: object, path_rstrip: str) -> object:
+    """Replace list bodies with empty data — same shape Langflow uses — when we must not leak rows."""
+    if path_rstrip.endswith("/flows") or path_rstrip.endswith("/projects"):
+        if isinstance(payload, list):
+            return []
+        if isinstance(payload, dict):
+            out = dict(payload)
+            if isinstance(out.get("items"), list):
+                out["items"] = []
+            return out
+        return []
+    return payload
+
+
+def _encode_filtered_list(
+    payload: object,
+    response: Response,
+    enc: str,
+) -> Response:
+    if enc == "gzip":
+        json_data = json.dumps(jsonable_encoder(payload)).encode("utf-8")
+        compressed = gzip.compress(json_data, compresslevel=6)
+        return Response(
+            content=compressed,
+            status_code=response.status_code,
+            media_type="application/json",
+            headers={
+                "Content-Encoding": "gzip",
+                "Vary": "Accept-Encoding",
+                "Content-Length": str(len(compressed)),
+            },
+        )
+    return JSONResponse(content=payload, status_code=response.status_code)
+
+
 class AICCoreEventMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # We only care about API calls to Langflow's flow and run endpoints
@@ -67,7 +102,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                     parsed = urllib.parse.urlparse(referer)
                     qs = urllib.parse.parse_qs(parsed.query)
                     session_id_str = qs.get("session_id", [None])[0]
-                except:
+                except Exception:
                     pass
             
         if not session_id_str:
@@ -298,11 +333,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         return response
 
     async def _filter_langflow_list_response(self, request: Request, call_next, session_id: UUID):
-        """When AICCORE has a per-seat arena folder, hide other seats' flows/projects in Langflow."""
-        response = await call_next(request)
-        if response.status_code != 200:
-            return response
-
+        """Per-seat arena folder: hide other seats' flows. Never pass through unfiltered Langflow rows."""
         from sqlalchemy.orm import Session as AICSessionORM
         from .database import engine as aic_engine
         from .models import Session as AICSession
@@ -310,12 +341,27 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         from langflow.services.deps import session_scope
         from langflow.services.database.models.folder.constants import DEFAULT_FOLDER_NAME
         from langflow.initial_setup.constants import STARTER_FOLDER_NAME
-        from .eraser import collect_folder_descendants
+        from .eraser import collect_folder_descendants, ensure_langflow_workspace_folder
 
         with AICSessionORM(aic_engine) as db:
             aic_sess = db.get(AICSession, session_id)
             root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
-        if not root_id:
+
+        # Create/link seat folder before Langflow list runs so root_id exists for filtering.
+        if aic_sess and not root_id:
+            try:
+                fid = await ensure_langflow_workspace_folder(session_id)
+                if fid:
+                    root_id = fid
+            except Exception:
+                pass
+            if not root_id:
+                with AICSessionORM(aic_engine) as db:
+                    aic_sess = db.get(AICSession, session_id)
+                    root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
+
+        response = await call_next(request)
+        if response.status_code != 200:
             return response
 
         body_bytes = await _read_starlette_response_body(response)
@@ -332,6 +378,13 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         except Exception:
             return _passthrough_raw_response(body_bytes, response)
 
+        path = request.url.path.rstrip("/")
+
+        # No AICCORE session row, or no seat folder after ensure: do not leak the global Langflow DB.
+        if not aic_sess or not root_id:
+            payload = _blank_langflow_list_payload(payload, path)
+            return _encode_filtered_list(payload, response, enc)
+
         try:
             async with session_scope() as lf:
                 allowed = await collect_folder_descendants(lf, root_id)
@@ -340,11 +393,10 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                     if row:
                         allowed.add(row.id)
         except Exception:
-            # Body was already drained — must not return the original streaming response.
-            return _passthrough_raw_response(body_bytes, response)
+            payload = _blank_langflow_list_payload(payload, path)
+            return _encode_filtered_list(payload, response, enc)
 
         allowed_str = {str(x) for x in allowed}
-        path = request.url.path.rstrip("/")
 
         def _filter_flow_items(items: list) -> list:
             return [
@@ -373,20 +425,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                 payload = dict(payload)
                 payload["items"] = _filter_project_items(payload["items"])
 
-        if enc == "gzip":
-            json_data = json.dumps(jsonable_encoder(payload)).encode("utf-8")
-            compressed = gzip.compress(json_data, compresslevel=6)
-            return Response(
-                content=compressed,
-                status_code=response.status_code,
-                media_type="application/json",
-                headers={
-                    "Content-Encoding": "gzip",
-                    "Vary": "Accept-Encoding",
-                    "Content-Length": str(len(compressed)),
-                },
-            )
-        return JSONResponse(content=payload, status_code=response.status_code)
+        return _encode_filtered_list(payload, response, enc)
 
     def _update_station_heartbeat(self, session_id: UUID):
         """Updates the station's last heartbeat and ensures status is consistent."""

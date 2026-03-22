@@ -105,6 +105,9 @@ async def capture_full_workspace_snapshot(session_id: UUID):
     """
     Captures workspace state for persistence. When the session has langflow_workspace_folder_id,
     only that folder subtree is captured (concurrent seats).
+
+    Without a seat folder we **do not** SELECT * from Langflow — that would merge every seat's
+    flows into one session's snapshot in a shared DB.
     """
     logger.info(f"📸 AICCORE: Capturing Full Workspace Snapshot for session {session_id}...")
     try:
@@ -112,13 +115,26 @@ async def capture_full_workspace_snapshot(session_id: UUID):
         from .database import engine as aic_engine
         from .models import Session as AICSession
 
-        async with session_scope() as session:
-            root_id: Optional[UUID] = None
-            with AICSessionORM(aic_engine) as db:
-                aic_sess = db.get(AICSession, session_id)
-                if aic_sess and aic_sess.langflow_workspace_folder_id:
-                    root_id = aic_sess.langflow_workspace_folder_id
+        root_id: Optional[UUID] = None
+        aic_sess = None
+        with AICSessionORM(aic_engine) as db:
+            aic_sess = db.get(AICSession, session_id)
+            if aic_sess and aic_sess.langflow_workspace_folder_id:
+                root_id = aic_sess.langflow_workspace_folder_id
 
+        if aic_sess and not root_id:
+            try:
+                nf = await ensure_langflow_workspace_folder(session_id)
+                if nf:
+                    root_id = nf
+            except Exception:
+                pass
+            if not root_id:
+                with AICSessionORM(aic_engine) as db:
+                    aic_sess = db.get(AICSession, session_id)
+                    root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
+
+        async with session_scope() as session:
             if root_id:
                 scope = await collect_folder_descendants(session, root_id)
                 folder_stmt = select(Folder).where(Folder.id.in_(scope))
@@ -127,12 +143,9 @@ async def capture_full_workspace_snapshot(session_id: UUID):
                 flows = (await session.execute(flow_stmt)).scalars().all()
                 variables = []
             else:
-                folder_stmt = select(Folder).where(Folder.name != "Starter Projects")
-                folders = (await session.execute(folder_stmt)).scalars().all()
-                flow_stmt = select(Flow)
-                flows = (await session.execute(flow_stmt)).scalars().all()
-                var_stmt = select(Variable)
-                variables = (await session.execute(var_stmt)).scalars().all()
+                folders = []
+                flows = []
+                variables = []
             
             # 4. Build Manifest
             manifest = {
@@ -348,7 +361,7 @@ async def submit_workspace_as_flow(session_id: UUID):
     Captures the most recent flow from the workspace and saves it as a Submission.
     If multiple flows exist, it tries to find the most recently updated non-component flow.
 
-    Langflow rows are only searched under this seat's arena folder (and global fallback).
+    Langflow rows are only queried under this seat's arena folder (never a global Flow pick).
     Flows edited under "Starter Project" often keep that folder_id — the UI lists them
     (middleware widens GET) but DB submit would miss them. In that case we fall back to
     the same flow_saved / workspace_snapshot canvas the mosaic uses.
@@ -360,10 +373,23 @@ async def submit_workspace_as_flow(session_id: UUID):
         from .models import Session as AICSession
 
         root_id: Optional[UUID] = None
+        aic_sess = None
         with AICSessionORM(aic_engine) as db:
             aic_sess = db.get(AICSession, session_id)
             if aic_sess and aic_sess.langflow_workspace_folder_id:
                 root_id = aic_sess.langflow_workspace_folder_id
+
+        if aic_sess and not root_id:
+            try:
+                nf = await ensure_langflow_workspace_folder(session_id)
+                if nf:
+                    root_id = nf
+            except Exception:
+                pass
+            if not root_id:
+                with AICSessionORM(aic_engine) as db:
+                    aic_sess = db.get(AICSession, session_id)
+                    root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
 
         main_flow = None
         async with session_scope() as session:
@@ -376,21 +402,17 @@ async def submit_workspace_as_flow(session_id: UUID):
                     .order_by(desc(Flow.updated_at))
                     .limit(1)
                 )
-            else:
-                flow_stmt = select(Flow).where(Flow.is_component == False).order_by(desc(Flow.updated_at)).limit(1)
-            main_flow = (await session.execute(flow_stmt)).scalar()
+                main_flow = (await session.execute(flow_stmt)).scalar()
 
-            if not main_flow:
-                if root_id:
+                if not main_flow:
                     flow_stmt = (
                         select(Flow)
                         .where(Flow.folder_id.in_(scope))
                         .order_by(desc(Flow.updated_at))
                         .limit(1)
                     )
-                else:
-                    flow_stmt = select(Flow).order_by(desc(Flow.updated_at)).limit(1)
-                main_flow = (await session.execute(flow_stmt)).scalar()
+                    main_flow = (await session.execute(flow_stmt)).scalar()
+            # No root_id: never pick an arbitrary global Flow row from another seat's folder.
 
         flow_snapshot: Optional[dict] = None
         if main_flow:
