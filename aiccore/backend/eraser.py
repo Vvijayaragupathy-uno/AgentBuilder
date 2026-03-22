@@ -347,6 +347,11 @@ async def submit_workspace_as_flow(session_id: UUID):
     """
     Captures the most recent flow from the workspace and saves it as a Submission.
     If multiple flows exist, it tries to find the most recently updated non-component flow.
+
+    Langflow rows are only searched under this seat's arena folder (and global fallback).
+    Flows edited under "Starter Project" often keep that folder_id — the UI lists them
+    (middleware widens GET) but DB submit would miss them. In that case we fall back to
+    the same flow_saved / workspace_snapshot canvas the mosaic uses.
     """
     logger.info(f"📤 AICCORE: Submitting workspace for session {session_id}...")
     try:
@@ -360,6 +365,7 @@ async def submit_workspace_as_flow(session_id: UUID):
             if aic_sess and aic_sess.langflow_workspace_folder_id:
                 root_id = aic_sess.langflow_workspace_folder_id
 
+        main_flow = None
         async with session_scope() as session:
             from sqlalchemy import desc
             if root_id:
@@ -385,74 +391,85 @@ async def submit_workspace_as_flow(session_id: UUID):
                 else:
                     flow_stmt = select(Flow).order_by(desc(Flow.updated_at)).limit(1)
                 main_flow = (await session.execute(flow_stmt)).scalar()
-            
-            if not main_flow:
-                raise Exception("No flows found in workspace to submit.")
 
-            # 2. Save to AICCORE Submission table
-            from .models import Submission, Event
-            from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
+        flow_snapshot: Optional[dict] = None
+        if main_flow:
+            flow_snapshot = main_flow.data if isinstance(main_flow.data, dict) else {}
+            if flow_snapshot is None:
+                flow_snapshot = {}
+        else:
+            from .demo_ceremony import get_mosaic_snapshot_for_session
 
-            with event_sequence_write_lock(session_id):
-                with AICSessionORM(aic_engine) as db:
-                    ensure_pg_advisory_xact_lock(db, session_id)
-                    aic_session_obj = db.get(AICSession, session_id)
-                    if not aic_session_obj:
-                        raise Exception("AICCORE Session not found.")
+            with AICSessionORM(aic_engine) as db:
+                snap = get_mosaic_snapshot_for_session(db, session_id)
+            if isinstance(snap, dict) and snap:
+                flow_snapshot = snap
 
-                    flow_snapshot = main_flow.data or {}
+        if main_flow is None and flow_snapshot is None:
+            raise Exception("No flows found in workspace to submit.")
 
-                    new_submission = Submission(
-                        session_id=session_id,
-                        flow_snapshot=flow_snapshot
-                    )
-                    db.add(new_submission)
-                    aic_session_obj.is_submitted = True
-                    db.flush()  # ensure new_submission.id before Event payload
+        # 2. Save to AICCORE Submission table (flow_snapshot from Langflow row or mosaic fallback)
+        from .models import Submission, Event
+        from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
 
-                    stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
-                    last_event = db.execute(stmt).scalars().first()
-                    seq = (last_event.sequence_number + 1) if last_event else 0
+        with event_sequence_write_lock(session_id):
+            with AICSessionORM(aic_engine) as db:
+                ensure_pg_advisory_xact_lock(db, session_id)
+                aic_session_obj = db.get(AICSession, session_id)
+                if not aic_session_obj:
+                    raise Exception("AICCORE Session not found.")
 
-                    sub_event = Event(
-                        session_id=session_id,
-                        sequence_number=seq,
-                        event_type="submitted",
-                        payload={
-                            "submission_id": str(new_submission.id),
-                            "nickname": aic_session_obj.nickname,
-                            "snapshot": flow_snapshot,
-                        }
-                    )
-                    db.add(sub_event)
-                    db.commit()
-                    submit_id = str(new_submission.id)
-                    submit_nick = aic_session_obj.nickname
-                    submit_station = aic_session_obj.station_id
+                new_submission = Submission(
+                    session_id=session_id,
+                    flow_snapshot=flow_snapshot
+                )
+                db.add(new_submission)
+                aic_session_obj.is_submitted = True
+                db.flush()  # ensure new_submission.id before Event payload
 
-                from .broadcast import broadcast_manager
+                stmt = select(Event).where(Event.session_id == session_id).order_by(Event.sequence_number.desc())
+                last_event = db.execute(stmt).scalars().first()
+                seq = (last_event.sequence_number + 1) if last_event else 0
 
-                # Await (not fire-and-forget) so mosaic/TV reliably receive before HTTP returns
-                await broadcast_manager.broadcast(
-                    {
-                        "session_id": str(session_id),
-                        "event_type": "submitted",
-                        "payload": {
-                            "submission_id": submit_id,
-                            "nickname": submit_nick,
-                            "station_id": submit_station,
-                            "snapshot": flow_snapshot,
-                        },
+                sub_event = Event(
+                    session_id=session_id,
+                    sequence_number=seq,
+                    event_type="submitted",
+                    payload={
+                        "submission_id": str(new_submission.id),
+                        "nickname": aic_session_obj.nickname,
+                        "snapshot": flow_snapshot,
                     }
                 )
-                await broadcast_manager.broadcast(
-                    {
-                        "type": "SUBMISSION_UPDATE",
-                        "data": {"session_id": str(session_id)},
-                    }
-                )
+                db.add(sub_event)
+                db.commit()
+                submit_id = str(new_submission.id)
+                submit_nick = aic_session_obj.nickname
+                submit_station = aic_session_obj.station_id
 
-                return submit_id
+        from .broadcast import broadcast_manager
+
+        # Await (not fire-and-forget) so mosaic/TV reliably receive before HTTP returns
+        await broadcast_manager.broadcast(
+            {
+                "session_id": str(session_id),
+                "event_type": "submitted",
+                "payload": {
+                    "submission_id": submit_id,
+                    "nickname": submit_nick,
+                    "station_id": submit_station,
+                    "snapshot": flow_snapshot,
+                },
+            }
+        )
+        await broadcast_manager.broadcast(
+            {
+                "type": "SUBMISSION_UPDATE",
+                "data": {"session_id": str(session_id)},
+            }
+        )
+
+        return submit_id
     except Exception as e:
         logger.error(f"❌ AICCORE: Failed to submit workspace: {e}")
         raise e
