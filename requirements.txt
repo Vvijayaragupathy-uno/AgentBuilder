@@ -1,5 +1,9 @@
 # Consolidating to essential dependencies for Reliable Railway Deployment
-# Relaxed versioning as requested to allow Railway to resolve best matches
+#
+# CRITICAL: Vendored langflow-base (Dockerfile) pins sqlmodel/pydantic/sqlalchemy.
+# This file is installed AFTER langflow-base; unpinned sqlalchemy/sqlmodel/pydantic here
+# will upgrade them and break Langflow ORM mappers (e.g. ApiKey primary key).
+# Keep these aligned with langflow/src/backend/base/pyproject.toml.
 
 # 1. Local Engine Components
 # (Installed via nixpacks.toml for reliability)
@@ -8,12 +12,12 @@
 fastapi
 uvicorn
 gunicorn
-sqlalchemy[postgresql_psycopg2binary]
+sqlalchemy[postgresql_psycopg2binary]>=2.0.38,<3.0.0
 psycopg2-binary
 psycopg[binary]
-sqlmodel
+sqlmodel==0.0.22
 alembic
-pydantic>=2.12.5
+pydantic>=2.11.0,<2.12.0
 pydantic-settings
 python-dotenv
 loguru
