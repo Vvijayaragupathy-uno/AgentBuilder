@@ -70,15 +70,7 @@ def _create_schema_if_needed():
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
         conn.commit()
 
-        # 3. Sentinel: if present, skip first-boot work (multi-worker safe)
-        result = conn.execute(text(
-            "SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'aiccore' AND tablename = 'deployment_lock'"
-        ))
-        if result.first():
-            print("🚀 AICCORE: deployment_lock present, skipping first-boot schema cleanup.")
-            return
-
-        # 4. Optional: legacy one-time wipe of public.* (DANGEROUS if Langflow lives in public)
+        # 3. Optional: legacy one-time wipe of public.* (DANGEROUS if Langflow lives in public)
         if os.getenv("AICCORE_NUCLEAR_RESET_PUBLIC") == "true":
             result = conn.execute(text(
                 "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
@@ -99,6 +91,14 @@ def _create_schema_if_needed():
                 "🚀 AICCORE: Skipping public schema DROP (default). "
                 "Set AICCORE_NUCLEAR_RESET_PUBLIC=true only for legacy single-DB cleanup."
             )
+
+        # 4. Sentinel: if present, skip first-boot work (multi-worker safe)
+        result = conn.execute(text(
+            "SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'aiccore' AND tablename = 'deployment_lock'"
+        ))
+        if result.first():
+            print("🚀 AICCORE: deployment_lock present, skipping first-boot schema cleanup.")
+            return
 
         conn.execute(text(
             "CREATE TABLE aiccore.deployment_lock (id SERIAL PRIMARY KEY, cleaned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
