@@ -269,11 +269,21 @@ def create_aiccore_app():
     Creates the AICCORE application by wrapping the Langflow setup_app.
     This serves as the V1 implementation point for AICCORE logic.
     """
-    # Initialize Langflow app
-    # AICCORE_BACKEND_ONLY=True avoids errors when frontend files are missing/not built
+    # Initialize Langflow app. When frontend assets are bundled into the same
+    # image, point Langflow at that build directory so one service can serve
+    # both the UI and the API.
     backend_only = os.getenv("AICCORE_BACKEND_ONLY", "false").lower() == "true"
-    print(f"🚀 Starting Langflow with backend_only={backend_only}")
-    app = setup_app(backend_only=backend_only)
+    frontend_dir_env = os.getenv("AICCORE_LANGFLOW_FRONTEND_DIR", "").strip()
+    static_files_dir = Path(frontend_dir_env) if frontend_dir_env else None
+    if static_files_dir and not static_files_dir.exists():
+        print(f"⚠️ Langflow frontend dir not found at {static_files_dir}; falling back to backend_only={backend_only}")
+        static_files_dir = None
+
+    print(
+        "🚀 Starting Langflow with "
+        f"backend_only={backend_only}, static_files_dir={static_files_dir}"
+    )
+    app = setup_app(static_files_dir=static_files_dir, backend_only=backend_only)
 
     # Dynamic origins for CORS
     allowed_origins = [
