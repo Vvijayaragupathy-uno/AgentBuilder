@@ -16,6 +16,7 @@ from fastapi import Request, Query, HTTPException, WebSocket, WebSocketDisconnec
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.routing import Match, Mount
 from pydantic import BaseModel
 import shutil
 from uuid import UUID, uuid4
@@ -62,6 +63,18 @@ import threading
 FAILED_ATTEMPTS = {}
 LOCKOUT_DURATION_SECONDS = 300 # 5 minutes
 MAX_ATTEMPTS = 5
+
+
+class _HttpOnlyRootMount(Mount):
+    """
+    Starlette matches Mount(path='/') for **websocket** scopes too, then forwards to StaticFiles,
+    which asserts scope['type'] == 'http' and crashes. WebSocket routes must match instead.
+    """
+
+    def matches(self, scope):  # type: ignore[override]
+        if scope.get("type") == "websocket":
+            return Match.NONE, {}
+        return super().matches(scope)
 
 
 def _browser_origins_from_env_blob(blob: str | None) -> List[str]:
@@ -2017,7 +2030,13 @@ def create_aiccore_app():
     )
 
     if serve_bundled_frontend and static_files_dir is not None:
-        app.mount("/", StaticFiles(directory=static_files_dir, html=True), name="langflow-static")
+        app.router.routes.append(
+            _HttpOnlyRootMount(
+                "/",
+                StaticFiles(directory=str(static_files_dir), html=True),
+                name="langflow-static",
+            )
+        )
 
         @app.exception_handler(404)
         async def bundled_frontend_404_handler(request: Request, exc):
