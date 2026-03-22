@@ -67,22 +67,9 @@ export default function BuilderPage() {
     const [demoQueueError, setDemoQueueError] = useState<string | null>(null)
     const [submitError, setSubmitError] = useState<string | null>(null)
     const autoSubmitFiredRef = useRef(false)
-    /** `null` until client reads `?practice=1` — avoids hydrating the wrong branch. */
-    const [practiceMode, setPracticeMode] = useState<boolean | null>(null)
-    const [practiceError, setPracticeError] = useState<string | null>(null)
+    const [langflowMisconfigured, setLangflowMisconfigured] = useState(false)
     /** After Start Over, server issues a new one-time PIN (old PIN was consumed at unlock). */
     const [lockScreenPrefillPin, setLockScreenPrefillPin] = useState<string | null>(null)
-    const practiceModeRef = useRef(false)
-    const [langflowMisconfigured, setLangflowMisconfigured] = useState(false)
-
-    useEffect(() => {
-        practiceModeRef.current = practiceMode === true
-    }, [practiceMode])
-
-    useEffect(() => {
-        const p = new URLSearchParams(window.location.search).get("practice") === "1"
-        setPracticeMode(p)
-    }, [])
 
     useEffect(() => {
         setLangflowMisconfigured(isLangflowIframeMisconfigured())
@@ -92,16 +79,6 @@ export default function BuilderPage() {
 
     const refreshMissionFromServer = useCallback(async () => {
         if (!session) return
-        if (practiceMode === true) {
-            setHasActiveChallenge(false)
-            setChallengeInfo(null)
-            setServerBuildWindowOpen(null)
-            setIsBeforeStart(false)
-            setTimeLeft(null)
-            setInstructionText(null)
-            setInstructionFrameUrl(null)
-            return
-        }
         try {
             const apiBase = getApiBase()
             await fetch(
@@ -179,7 +156,7 @@ export default function BuilderPage() {
         } catch {
             /* ignore */
         }
-    }, [session, practiceMode])
+    }, [session])
 
     const refreshMissionRef = useRef(refreshMissionFromServer)
     const sessionRef = useRef<{ id: string; nickname: string; token: string } | null>(null)
@@ -202,7 +179,6 @@ export default function BuilderPage() {
         setSession({ id: sessionId, nickname, token: sessionToken })
         localStorage.setItem("aiccore_session_id", sessionId)
         localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, sessionToken)
-        // Per-seat build window (used when mission has duration but no mission-level start_time)
         localStorage.setItem(SESSION_BUILD_START_MS_KEY, String(skewedNow()))
         localStorage.setItem("aiccore_nickname", nickname)
 
@@ -294,17 +270,13 @@ export default function BuilderPage() {
                 })
 
                 if (response.status === 403) {
-                    console.warn("Session token missing or stale. Resetting...")
                     handleReset()
                     return
                 }
-
                 if (response.status === 404) {
-                    console.warn("Session expired or purged. Resetting...")
                     handleReset()
                     return
                 }
-
                 if (!response.ok) return
 
                 const data = await response.json()
@@ -320,9 +292,8 @@ export default function BuilderPage() {
         return () => clearInterval(interval)
     }, [session, isSubmitted])
 
-    // Load session from storage if it exists (skip when /builder?practice=1 — that flow uses admin bootstrap)
+    // Load session from storage if it exists
     useEffect(() => {
-        if (practiceMode !== false) return // null: undecided; true: admin bootstrap
         const savedId = localStorage.getItem("aiccore_session_id")
         const savedToken = localStorage.getItem(SESSION_TOKEN_STORAGE_KEY)
         const savedName = localStorage.getItem("aiccore_nickname")
@@ -339,64 +310,10 @@ export default function BuilderPage() {
             localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
             localStorage.removeItem("aiccore_nickname")
         }
-    }, [practiceMode])
-
-    // Admin Practice: POST /auth/practice-session (requires aiccore_admin; cross-origin needs SameSite=None cookie from admin-login)
-    useEffect(() => {
-        if (practiceMode !== true || session) return
-        let cancelled = false
-        setPracticeError(null)
-        ;(async () => {
-            try {
-                const apiBase = getApiBase()
-                const res = await fetch(`${apiBase}/api/v1/aiccore/auth/practice-session`, {
-                    method: "POST",
-                    credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ station_id: getOrCreateBuilderStationId() }),
-                })
-                if (cancelled) return
-                if (!res.ok) {
-                    let msg = res.status === 403 ? "Admin login required — use Admin Access on the dashboard, then open Practice again." : `Could not start practice (${res.status})`
-                    try {
-                        const err = await res.json()
-                        const d = err?.detail
-                        if (typeof d === "string") msg = d
-                    } catch {
-                        /* ignore */
-                    }
-                    setPracticeError(msg)
-                    return
-                }
-                const data = await res.json()
-                const sid = data.session_id as string
-                const token = data.session_token as string
-                const nick = (data.nickname as string) || "Practice"
-                setSession({ id: sid, nickname: nick, token })
-                localStorage.setItem("aiccore_session_id", sid)
-                localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token)
-                localStorage.setItem("aiccore_nickname", nick)
-                const st = data.stats as { flows_count?: number; achievements_count?: number } | undefined
-                if (st) {
-                    setStats({
-                        flows: st.flows_count ?? 0,
-                        achievements: st.achievements_count ?? 0,
-                    })
-                    localStorage.setItem("aiccore_flows_count", String(st.flows_count ?? 0))
-                    localStorage.setItem("aiccore_achievements_count", String(st.achievements_count ?? 0))
-                }
-            } catch {
-                if (!cancelled) setPracticeError("Network error — check connection and try again.")
-            }
-        })()
-        return () => {
-            cancelled = true
-        }
-    }, [practiceMode, session])
+    }, [])
 
     const [lastEventId, setLastEventId] = useState(0)
 
-    // HTTPS Event Polling — replacement for Broadcasts & Ceremony WebSocket
     useEffect(() => {
         let destroyed = false
         let timeoutId: ReturnType<typeof setTimeout>
@@ -423,7 +340,7 @@ export default function BuilderPage() {
                             setBroadcast(msg.message)
                             setTimeout(() => setBroadcast(null), 10000)
                         }
-                        if (msg.type === "SYSTEM_FINALIZE" && !practiceModeRef.current) {
+                        if (msg.type === "SYSTEM_FINALIZE") {
                             setIsSystemLocked(true)
                         }
                         if (msg.type === "MISSION_LIVE" && msg.data?.title) {
@@ -488,7 +405,6 @@ export default function BuilderPage() {
         return () => clearInterval(interval)
     }, [session, refreshMissionFromServer])
 
-    // Pick up mission_build_window_open soon after scheduled start (don't wait only on 10s poll).
     useEffect(() => {
         if (!session || isSubmitted || !isBeforeStart) return
         const id = setInterval(() => void refreshMissionFromServer(), 2000)
@@ -592,9 +508,8 @@ export default function BuilderPage() {
         }
     }, [session])
 
-    // Timer: at 0s calls submit once (each browser). Mission mode = shared deadline; per_seat = from unlock.
     useEffect(() => {
-        if (!challengeInfo || practiceMode === true) return
+        if (!challengeInfo) return
 
         const timer = setInterval(() => {
             const start = new Date(challengeInfo.start_time).getTime()
@@ -627,44 +542,12 @@ export default function BuilderPage() {
         }, 1000)
 
         return () => clearInterval(timer)
-    }, [challengeInfo, isSubmitted, isSystemLocked, handleSubmit, serverBuildWindowOpen, practiceMode])
+    }, [challengeInfo, isSubmitted, isSystemLocked, handleSubmit, serverBuildWindowOpen])
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60)
         const secs = seconds % 60
         return `${mins}:${secs.toString().padStart(2, '0')}`
-    }
-
-    if (practiceMode === null) {
-        return (
-            <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c]">
-                <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-            </div>
-        )
-    }
-
-    if (practiceMode === true && !session) {
-        if (practiceError) {
-            return (
-                <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] p-8 text-center gap-4">
-                    <p className="text-sm text-muted-foreground max-w-md leading-relaxed">{practiceError}</p>
-                    <a
-                        href="/"
-                        target="_top"
-                        rel="noopener noreferrer"
-                        className="text-sm font-semibold text-primary hover:underline"
-                    >
-                        Back to dashboard
-                    </a>
-                </div>
-            )
-        }
-        return (
-            <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] gap-3">
-                <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                <p className="text-xs text-muted-foreground">Opening practice builder…</p>
-            </div>
-        )
     }
 
     if (!session) {
@@ -679,7 +562,7 @@ export default function BuilderPage() {
 
     const isChallengeFinalized = challengeInfo?.isFinalized === true
 
-    if ((isSubmitted || isSystemLocked || isChallengeFinalized) && practiceMode !== true) {
+    if ((isSubmitted || isSystemLocked || isChallengeFinalized)) {
         return (
             <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] overflow-hidden">
                 <div className="absolute inset-0 bg-primary/5 [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]" />
@@ -721,7 +604,7 @@ export default function BuilderPage() {
                                 <div>
                                     <p className="text-sm font-semibold text-foreground">Present your flow?</p>
                                     <p className="text-xs text-muted-foreground mt-0.5">
-                                        Join the demo queue so the host can show your Langflow canvas on the main screen after the build phase ends (or when everyone building has submitted).
+                                        Join the demo queue so the host can show your Langflow canvas on the main screen after the build phase ends.
                                     </p>
                                 </div>
                             </div>
@@ -732,7 +615,7 @@ export default function BuilderPage() {
                             )}
                             {demoInfo?.gateOpen && typeof demoInfo.myPosition !== "number" && (
                                 <p className="text-xs font-medium text-muted-foreground">
-                                    Build phase ended — the TV may be in demo or queue mode. Tap Join demo queue if you have not yet (you need a queue spot to be shown full screen).
+                                    Build phase ended — tap Join demo queue if you have not yet.
                                 </p>
                             )}
                             {demoInfo && typeof demoInfo.myPosition === "number" && !demoInfo.gateOpen && (
@@ -762,10 +645,7 @@ export default function BuilderPage() {
                     )}
 
                     <p className="text-xs text-muted-foreground text-left leading-relaxed max-w-md">
-                        Your submission is stored for the host (Review in the dashboard). Each successful unlock uses up
-                        that PIN — <strong className="text-foreground">Start Over</strong> ends this session and the next
-                        screen shows a <strong className="text-foreground">new PIN</strong> so you can open the builder again.
-                        Or use <strong className="text-foreground">Sign in</strong> on the lock screen anytime to get a fresh PIN.
+                        Your submission is stored for the host. Each successful unlock uses up that PIN.
                     </p>
 
                     <button
@@ -781,7 +661,6 @@ export default function BuilderPage() {
 
     return (
         <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
-            {/* Announcement Banner */}
             {broadcast && (
                 <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] w-full max-w-lg animate-in fade-in slide-in-from-top-4 duration-300">
                     <div className="bg-sky-500 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-white/20">
@@ -794,9 +673,7 @@ export default function BuilderPage() {
                 </div>
             )}
 
-            {/* Header */}
             <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4 shrink-0">
-                {/* Left: brand + participant name */}
                 <div className="flex items-center gap-3 min-w-0">
                     <AiccoreLogo size={22} className="ring-1 ring-border shrink-0" />
                     <span className="text-[11px] font-bold tracking-wide text-foreground truncate min-w-0">
@@ -804,37 +681,22 @@ export default function BuilderPage() {
                     </span>
                     <span className="text-muted-foreground/40 shrink-0">·</span>
                     <span className="text-sm text-muted-foreground truncate">{session.nickname}</span>
-                    {practiceMode === true && (
-                        <span className="shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                            Practice
-                        </span>
-                    )}
                 </div>
 
-                {/* Right: tutorial · timer · instructions (if any) · submit · exit */}
                 <div className="flex items-center gap-2">
                     <a
                         href={LANGFLOW_TEACH_WATCH_URL}
                         target="_blank"
                         rel="noopener noreferrer"
-                        title="Same 5-part Langflow walkthrough as the main screen — open on your phone while you build"
                         className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
                     >
                         <PlayCircle className="h-3 w-3 shrink-0" />
                         <span className="hidden sm:inline">Langflow tutorial</span>
                         <span className="sm:hidden">Video</span>
                     </a>
-                    {/* Timer — hidden in admin Practice (no scored mission) */}
-                    {practiceMode !== true && (
-                        <>
+
                     {timeLeft !== null ? (
-                        <div
-                            title={
-                                challengeInfo?.mode === "per_seat"
-                                    ? "Your build time started when you unlocked this station. At 0:00 your flow auto-submits."
-                                    : "Shared mission end (mission start + duration). At 0:00 your flow auto-submits."
-                            }
-                            className={cn(
+                        <div className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border",
                             timeLeft < 300
                                 ? "bg-rose-500/10 text-rose-400 border-rose-500/20 animate-pulse"
@@ -842,9 +704,6 @@ export default function BuilderPage() {
                         )}>
                             <Clock className="h-3 w-3" />
                             <span>{formatTime(timeLeft)}</span>
-                            {challengeInfo?.mode === "per_seat" && (
-                                <span className="hidden sm:inline text-[9px] uppercase text-muted-foreground font-bold">your slot</span>
-                            )}
                         </div>
                     ) : isBeforeStart ? (
                         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-400 text-xs font-medium">
@@ -852,32 +711,21 @@ export default function BuilderPage() {
                             <span>Not started yet</span>
                         </div>
                     ) : null}
-                        </>
-                    )}
 
-                    {hasChallengeInstructions && practiceMode !== true && (
+                    {hasChallengeInstructions && (
                         <button
                             type="button"
                             onClick={() => setChallengeInstructionsOpen(true)}
-                            title="Open instructions in a side panel next to the builder (or use Open in new tab inside)"
                             className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors shrink-0"
                         >
                             <FileText className="h-3 w-3 shrink-0" />
                             <span className="hidden sm:inline">Challenge instructions</span>
-                            <span className="sm:hidden">Guide</span>
                         </button>
                     )}
 
-                    {/* Submit — the primary action (not shown in sandbox Practice) */}
-                    {practiceMode !== true && (
                     <button
                         onClick={handleSubmit}
                         disabled={isSubmitting || isSubmitted || isSystemLocked || isBeforeStart || !hasActiveChallenge}
-                        title={
-                            isBeforeStart ? "The challenge hasn't started yet" :
-                            !hasActiveChallenge ? "No active challenge" :
-                            isSystemLocked ? "The challenge has ended" : "Submit your work"
-                        }
                         className={cn(
                             "flex items-center gap-2 rounded-lg px-5 py-1.5 text-sm font-semibold transition-all active:scale-95",
                             (isSubmitting || isBeforeStart || !hasActiveChallenge || isSystemLocked)
@@ -888,12 +736,9 @@ export default function BuilderPage() {
                         <Rocket className={cn("h-3.5 w-3.5", isSubmitting && "animate-spin")} />
                         {isSubmitting ? "Submitting…" : "Submit"}
                     </button>
-                    )}
 
-                    {/* Exit */}
                     <button
                         onClick={handleReset}
-                        title="Exit"
                         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                     >
                         <LogOut className="h-3.5 w-3.5" />
@@ -904,36 +749,24 @@ export default function BuilderPage() {
             {submitError && (
                 <div className="flex shrink-0 items-center justify-between gap-3 border-b border-rose-500/25 bg-rose-500/10 px-4 py-2 text-xs font-medium text-rose-300">
                     <span className="min-w-0">{submitError}</span>
-                    <button
-                        type="button"
-                        onClick={() => setSubmitError(null)}
-                        className="shrink-0 rounded-md px-2 py-0.5 text-[10px] uppercase tracking-wide text-rose-200 hover:bg-rose-500/20"
-                    >
+                    <button type="button" onClick={() => setSubmitError(null)} className="shrink-0 rounded-md px-2 py-0.5 text-[10px] uppercase tracking-wide text-rose-200 hover:bg-rose-500/20">
                         Dismiss
                     </button>
                 </div>
             )}
 
-            {hasChallengeInstructions && practiceMode !== true && (
+            {hasChallengeInstructions && (
                 <Sheet open={challengeInstructionsOpen} onOpenChange={setChallengeInstructionsOpen}>
-                    <SheetContent
-                        side="right"
-                        className="flex h-full w-[min(100vw-0.5rem,24rem)] flex-col gap-0 overflow-hidden border-l border-border p-0 shadow-2xl sm:max-w-xl md:max-w-2xl rounded-l-2xl"
-                    >
+                    <SheetContent side="right" className="flex h-full w-[min(100vw-0.5rem,24rem)] flex-col gap-0 overflow-hidden border-l border-border p-0 shadow-2xl sm:max-w-xl md:max-w-2xl rounded-l-2xl">
                         <SheetHeader className="space-y-2 border-b border-border bg-card/95 px-4 py-4 pr-12 text-left">
                             <SheetTitle className="text-base">Challenge instructions</SheetTitle>
-                            <SheetDescription className="text-xs leading-relaxed">
-                                Preview here while you keep building. If the document stays blank, it may block embedding — use the link below.
+                            <SheetDescription className="text-xs">
+                                Preview handout while you keep building.
                             </SheetDescription>
                             {instructionFrameUrl && (
-                                <a
-                                    href={instructionFrameUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-secondary/80 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary"
-                                >
+                                <a href={instructionFrameUrl} target="_blank" rel="noopener noreferrer" className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-secondary/80 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary">
                                     <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                                    Open handout in new tab
+                                    Open in new tab
                                 </a>
                             )}
                         </SheetHeader>
@@ -943,62 +776,33 @@ export default function BuilderPage() {
                                     {instructionText.trim()}
                                 </div>
                             )}
-                            {instructionFrameUrl ? (
-                                <iframe
-                                    src={instructionFrameUrl}
-                                    title="Challenge instructions handout"
-                                    className="min-h-[45vh] flex-1 w-full border-0"
-                                />
-                            ) : (
-                                <div className="flex flex-1 items-center justify-center px-4 py-8 text-center text-xs text-muted-foreground">
-                                    Text-only briefing — use the mission description on the TV if you need more context.
-                                </div>
+                            {instructionFrameUrl && (
+                                <iframe src={instructionFrameUrl} title="Challenge handout" className="flex-1 w-full border-0" />
                             )}
                         </div>
                     </SheetContent>
                 </Sheet>
             )}
 
-            {/* Builder iframe */}
             <main className="relative flex-1">
                 {langflowMisconfigured ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background p-8 text-center">
-                        <p className="text-sm font-semibold text-amber-400">Langflow URL points at this dashboard</p>
-                        <p className="text-xs text-muted-foreground max-w-md leading-relaxed">
-                            The embedded builder tried to load the same host as the Next.js app, so you see the dashboard inside the iframe.
-                            Set <code className="rounded bg-secondary px-1">NEXT_PUBLIC_LANGFLOW_URL</code> and{" "}
-                            <code className="rounded bg-secondary px-1">NEXT_PUBLIC_AICCORE_API_URL</code> to your{" "}
-                            <strong className="text-foreground">AgentBuilder / Langflow</strong> Railway URL, or enable the same-origin proxy with{" "}
-                            <code className="rounded bg-secondary px-1">NEXT_PUBLIC_AICCORE_PROXY_PREFIX</code> and{" "}
-                            <code className="rounded bg-secondary px-1">AICCORE_UPSTREAM_URL</code> (see <code className="rounded bg-secondary px-1">aiccore/README.md</code>).
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-8 text-center">
+                        <p className="max-w-md text-sm text-muted-foreground">
+                            Langflow connection error. Please refresh or notify technical staff.
                         </p>
-                        <a
-                            href="/"
-                            target="_top"
-                            rel="noopener noreferrer"
-                            className="text-sm font-medium text-primary hover:underline"
-                        >
-                            Back to dashboard
-                        </a>
                     </div>
                 ) : (
-                    <>
-                        {!iframeLoaded && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background">
-                                <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                                <p className="text-xs text-muted-foreground">Loading…</p>
-                            </div>
-                        )}
-                        <iframe
-                            src={`${getLangflowUrl()}/?session_id=${session.id}`}
-                            className={cn(
-                                "h-full w-full border-0 transition-opacity duration-700",
-                                iframeLoaded ? "opacity-100" : "opacity-0"
-                            )}
-                            onLoad={() => setIframeLoaded(true)}
-                            title={AICCORE_MAKERSPACE}
-                        />
-                    </>
+                    <iframe
+                        src={getLangflowUrl(session.id)}
+                        className={cn("h-full w-full border-0 transition-opacity duration-300", !iframeLoaded && "opacity-0")}
+                        onLoad={() => setIframeLoaded(true)}
+                    />
+                )}
+                {!iframeLoaded && !langflowMisconfigured && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-background gap-3">
+                        <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                        <p className="text-xs text-muted-foreground animate-pulse font-medium">Connecting to Langflow…</p>
+                    </div>
                 )}
             </main>
         </div>

@@ -308,7 +308,7 @@ async def capture_full_workspace_snapshot(session_id: UUID):
 
         async with session_scope() as session:
             # BROAD SEARCH: If we have a seat folder, only snapshot that. 
-            # If not (admin/practice), snapshot everything except starters.
+            # If not admin, snapshot everything except starters.
             if root_id:
                 scope = await collect_folder_descendants(session, root_id)
                 folder_stmt = select(Folder).where(Folder.id.in_(scope))

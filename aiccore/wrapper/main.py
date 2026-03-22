@@ -67,8 +67,8 @@ from aiccore.backend.event_lock import event_sequence_write_lock, ensure_pg_advi
 from aiccore.backend.session_presence import expire_stale_sessions, touch_session_presence
 from aiccore.backend.registrations import ensure_requested_challenge_registration
 from aiccore.backend.security import (
-    PRACTICE_KIOSK_USERNAME,
-    admin_cookie_settings_for_scheme,
+    AICCORE_STATION_ID,
+    settings_for_scheme,
     admin_cookie_max_age_seconds,
     hash_participant_password,
     normalize_failed_attempt_state,
@@ -176,7 +176,7 @@ def _collect_aiccore_browser_origins() -> List[str]:
 
 
 def _aiccore_session_auth_ok(request: Request, session_id: UUID) -> bool:
-    """Session routes require the signed token issued at unlock/practice-session time."""
+    """Session routes require the signed token issued at unlock/sign-in time."""
     token = (request.headers.get("x-aiccore-session-token") or "").strip()
     if not token:
         token = request.cookies.get("aiccore_session_token") or ""
@@ -322,7 +322,7 @@ def sanitize_string(s: str, length: int = 50) -> str:
 def _admin_cookie_kwargs(request: Request) -> dict:
     """
     Cross-origin dashboard (Next on host A, API on host B) sends credentialed POSTs
-    (e.g. practice-session). SameSite=Lax cookies are not included on those requests;
+    (e.g. unlock). SameSite=Lax cookies are not included on those requests;
     SameSite=None + Secure on HTTPS fixes it. Local HTTP keeps Lax (Secure=False).
     """
     proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
@@ -420,10 +420,6 @@ class UnlockRequest(BaseModel):
     station_id: Optional[str] = None
     # Optional: bind session to this challenge if user is registered (avoids "latest registration wins")
     challenge_id: Optional[str] = None
-
-class PracticeSessionRequest(BaseModel):
-    """Admin-only: open Langflow without a participant PIN (museum practice / facilitator)."""
-    station_id: Optional[str] = None
 
 class ChallengeRequest(BaseModel):
     title: str
@@ -906,148 +902,6 @@ def create_aiccore_app():
             )
             return res
 
-    @app.post("/api/v1/aiccore/auth/practice-session")
-    async def practice_session(req: PracticeSessionRequest, request: Request):
-        """
-        Admin cookie only: start a sandbox Langflow session without consuming a 4-digit OTP.
-        Does not broadcast leaderboard/mosaic updates (keeps live board clean).
-        Ignores arena lock so staff can test when the floor is closed.
-        """
-        _require_admin_request(request)
-
-        station_id = (req.station_id or "").strip() or "STATION_LOCAL"
-
-        with Session(engine) as db_session:
-            user = db_session.execute(
-                select(User).where(User.username == PRACTICE_KIOSK_USERNAME)
-            ).scalars().first()
-            if not user:
-                user = User(
-                    username=PRACTICE_KIOSK_USERNAME,
-                    nickname="Practice",
-                    password=None,
-                    unlock_code=None,
-                    unlock_code_generated_at=None,
-                    honors={},
-                )
-                db_session.add(user)
-                db_session.commit()
-                db_session.refresh(user)
-
-            db_session.execute(
-                update(AICSession)
-                .where(AICSession.station_id == station_id, AICSession.is_active == True)
-                .values(is_active=False, end_time=datetime.now(timezone.utc))
-            )
-
-            new_session = AICSession(
-                user_id=user.id,
-                nickname="Practice",
-                station_id=station_id,
-                challenge_id=None,
-            )
-            db_session.add(new_session)
-            db_session.flush()
-            session_token = issue_session_token(new_session.id)
-
-            start_event = Event(
-                session_id=new_session.id,
-                sequence_number=0,
-                event_type="session_started",
-                payload={"station_id": station_id, "nickname": "Practice", "practice": True},
-            )
-            db_session.add(start_event)
-
-            sub_count_stmt = select(func.count(Submission.id)).join(AICSession).where(AICSession.user_id == user.id)
-            flows_count = db_session.execute(sub_count_stmt).scalar() or 0
-            ach_count = len(user.honors) if user.honors else 0
-            
-            # MANDATORY: Clear old folder ID to ensure fresh start
-            new_session.langflow_workspace_folder_id = None
-            db_session.flush()
-
-            db_session.commit()
-            db_session.refresh(new_session)
-
-        try:
-            with Session(engine) as cnt_sess:
-                active_n = (
-                    cnt_sess.execute(
-                        select(func.count(AICSession.id)).where(AICSession.is_active == True)
-                    ).scalar()
-                    or 0
-                )
-            seat_folder_id = await ensure_langflow_workspace_folder(new_session.id)
-            if seat_folder_id:
-                await purge_langflow_workspace_scoped(seat_folder_id)
-                print(
-                    f"ℹ️ AICCORE practice: scoped Langflow purge {seat_folder_id} "
-                    f"(active_aiccore_sessions={active_n})."
-                )
-            else:
-                if active_n > 1:
-                    print(
-                        f"ℹ️ AICCORE practice: active_aiccore_sessions={active_n} — "
-                        "no arena folder; skipping global purge."
-                    )
-                else:
-                    await purge_langflow_workspace()
-
-            if user.username and user.username != "testuser":
-                with Session(engine) as db_session:
-                    event_stmt = (
-                        select(Event)
-                        .join(AICSession)
-                        .where(AICSession.user_id == user.id, Event.event_type == "workspace_snapshot")
-                        .order_by(Event.timestamp.desc())
-                    )
-                    latest_event = db_session.execute(event_stmt).scalars().first()
-                    if latest_event:
-                        await restore_user_workspace(latest_event.payload, default_flow_folder_id=seat_folder_id)
-                    else:
-                        sub_stmt = (
-                            select(Submission)
-                            .join(AICSession)
-                            .where(AICSession.user_id == user.id)
-                            .order_by(Submission.submitted_at.desc())
-                        )
-                        latest_sub = db_session.execute(sub_stmt).scalars().first()
-                        if latest_sub:
-                            legacy_manifest = {
-                                "folders": [],
-                                "flows": [
-                                    {
-                                        "id": str(uuid4()),
-                                        "name": "Restored Flow",
-                                        "data": latest_sub.flow_snapshot,
-                                        "folder_id": None,
-                                    }
-                                ],
-                            }
-                            await restore_user_workspace(legacy_manifest, default_flow_folder_id=seat_folder_id)
-        except Exception as e:
-            print(f"❌ Failed to manage workspace on practice session: {e}")
-
-        response = {
-            "session_id": str(new_session.id),
-            "session_token": session_token,
-            "nickname": "Practice",
-            "user_id": str(user.id),
-            "station_id": new_session.station_id,
-            "stats": {
-                "flows_count": flows_count,
-                "achievements_count": ach_count,
-            },
-        }
-        res = JSONResponse(content=response)
-        _set_session_cookies(
-            res,
-            request,
-            session_id=str(new_session.id),
-            session_token=session_token,
-        )
-        return res
-
     @app.get("/api/v1/aiccore/session/{session_id}/status")
     async def get_session_status(session_id: UUID, request: Request):
         if not _aiccore_session_auth_ok(request, session_id):
@@ -1188,7 +1042,7 @@ def create_aiccore_app():
 
         Successful unlock consumes the one-time PIN; without issuing a new code, users could not
         unlock again after Start Over. We regenerate a fresh PIN for the same participant (except
-        the shared admin Practice kiosk user).
+        registered participant profiles.
         """
         if not _aiccore_session_auth_ok(request, session_id):
             raise HTTPException(
@@ -1204,7 +1058,7 @@ def create_aiccore_app():
                 return res
             if session_obj.user_id:
                 u = db_session.get(User, session_obj.user_id)
-                if u and u.username != PRACTICE_KIOSK_USERNAME:
+                if u:
                     user_id_for_regen = session_obj.user_id
             session_obj.is_active = False
             session_obj.end_time = datetime.now(timezone.utc)
@@ -1267,21 +1121,12 @@ def create_aiccore_app():
                 .order_by(Challenge.created_at.asc())
                 .limit(1)
             ).scalars().first()
-            practice_user_id = db_session.execute(
-                select(User.id)
-                .where(User.username == PRACTICE_KIOSK_USERNAME)
-                .limit(1)
-            ).scalar()
 
             # Get all active sessions
             stmt = select(AICSession).where(
                 AICSession.is_active == True,
                 AICSession.is_submitted == False,
             )
-            if practice_user_id is not None:
-                stmt = stmt.where(
-                    or_(AICSession.user_id.is_(None), AICSession.user_id != practice_user_id)
-                )
             if active_challenge is not None:
                 stmt = stmt.where(AICSession.challenge_id == active_challenge.id)
             active_sessions = db_session.execute(stmt).scalars().all()
@@ -2283,7 +2128,7 @@ def create_aiccore_app():
         
         if not clean_username:
             raise HTTPException(status_code=400, detail="Invalid handle content")
-        if clean_username == PRACTICE_KIOSK_USERNAME:
+        if clean_username == "":
             raise HTTPException(status_code=400, detail="Reserved handle")
 
         async def get_user_stats(db_session, user_id):

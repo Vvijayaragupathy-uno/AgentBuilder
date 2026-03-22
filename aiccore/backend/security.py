@@ -15,7 +15,6 @@ DEFAULT_AUTH_TTL_SECONDS = 86400
 PARTICIPANT_PASSWORD_SCHEME = "pbkdf2_sha256"
 PARTICIPANT_PASSWORD_ITERATIONS = 600_000
 PARTICIPANT_PASSWORD_SALT_BYTES = 16
-PRACTICE_KIOSK_USERNAME = "__aiccore_practice_kiosk__"
 _RUNTIME_FALLBACK_SECRET = secrets.token_hex(32)
 
 
@@ -191,7 +190,7 @@ def safe_upload_filename(filename: str | None, *, fallback: str = "upload.bin") 
 
 
 def is_public_user(username: str | None) -> bool:
-    return (username or "").strip() != PRACTICE_KIOSK_USERNAME
+    return True
 
 
 def public_profile_password_error(
@@ -201,8 +200,6 @@ def public_profile_password_error(
     stored_password: Optional[str],
 ) -> Optional[str]:
     """Return the public login error code for an existing participant profile, or ``None``."""
-    if not is_public_user(username):
-        return None
     if stored_password is None:
         return "PASSWORD_RESET_REQUIRED"
     if not supplied_password:

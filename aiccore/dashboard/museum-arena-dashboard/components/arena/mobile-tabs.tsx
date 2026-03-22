@@ -11,6 +11,7 @@ import {
   Settings,
   Monitor,
   Sparkles,
+  FileText, // Added FileText
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -27,7 +28,7 @@ const publicTabs = [
 
 const adminTabs = [
   { id: "mosaic", label: "Display", icon: Trophy },
-  { id: "practice", label: "Practice", icon: Sparkles },
+  { id: "submissions", label: "Submissions", icon: FileText },
   { id: "contestants", label: "Registry", icon: Users },
   { id: "review", label: "Review", icon: ClipboardCheck },
   { id: "stations", label: "Stations", icon: Cpu },
