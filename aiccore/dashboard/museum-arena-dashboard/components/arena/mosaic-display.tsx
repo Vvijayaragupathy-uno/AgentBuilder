@@ -91,155 +91,160 @@ export function MosaicDisplay({ emptyState }: { emptyState?: MosaicEmptyState })
         }
     }, [])
 
+    const handleMessage = useCallback((data: any) => {
+        if (!data) return
+
+        if (data.type === "SESSIONS_CLEARED") {
+            setSessions({})
+            setActiveIds([])
+            return
+        }
+
+        if (
+            data.type === "DEMO_QUEUE_UPDATE" ||
+            data.type === "DEMO_GATE_OPEN" ||
+            data.type === "SUBMISSION_UPDATE"
+        ) {
+            void syncFromServer()
+            return
+        }
+
+        if (!data.event_type) return
+
+        if (data.event_type === "flow_saved" || data.event_type === "submitted") {
+            const payload = data.payload
+            const snapshot = payload.snapshot || {}
+            const isSubmission = data.event_type === "submitted"
+
+            const mappedNodes = (snapshot.nodes || []).map((n: any) => {
+                const x = n.position?.x || (n.x ?? 0)
+                const y = n.position?.y || (n.y ?? 0)
+                let type: any = "process"
+                const componentName = n.data?.node?.display_name?.toLowerCase() || ""
+                if (componentName.includes("input") || componentName.includes("chat")) type = "input"
+                else if (componentName.includes("llm") || componentName.includes("openai")) type = "llm"
+                else if (componentName.includes("output")) type = "output"
+
+                return {
+                    id: n.id,
+                    label: n.data?.node?.display_name || n.label || "Component",
+                    type: type,
+                    x: x,
+                    y: y
+                }
+            })
+
+            const mappedEdges = (snapshot.edges || []).map((e: any) => ({
+                from: e.source || e.from,
+                to: e.target || e.to
+            }))
+
+            setSessions(prev => {
+                const existing = prev[data.session_id]
+                return {
+                    ...prev,
+                    [data.session_id]: {
+                        id: data.session_id,
+                        nickname: payload.nickname || existing?.nickname || "Anonymous",
+                        station: payload.station_id || existing?.station || "0",
+                        nodes: mappedNodes.length > 0 ? mappedNodes : (existing?.nodes || []),
+                        edges: mappedEdges.length > 0 ? mappedEdges : (existing?.edges || []),
+                        runningNodes: isSubmission ? [] : (existing?.runningNodes || []),
+                        status: isSubmission ? "submitted" : (existing?.status || "idle"),
+                        lastUpdate: Date.now()
+                    }
+                }
+            })
+
+            if (isSubmission) {
+                setActiveIds(prev => prev.filter(id => id !== data.session_id))
+            } else {
+                setActiveIds(prev => prev.includes(data.session_id) ? prev : [...prev, data.session_id])
+            }
+        }
+
+        if (
+            typeof data.event_type === "string" &&
+            (data.event_type.endsWith("_started") || data.event_type.endsWith("_completed"))
+        ) {
+            const payload = data.payload
+            const isStarted = data.event_type.endsWith("_started")
+            const isVertex = data.event_type.includes("vertex")
+
+            setSessions(prev => {
+                const existing = prev[data.session_id]
+                if (!existing) return prev
+
+                let newRunningNodes = [...existing.runningNodes]
+                if (isVertex && payload.vertex_id) {
+                    if (isStarted) {
+                        if (!newRunningNodes.includes(payload.vertex_id)) newRunningNodes.push(payload.vertex_id)
+                    } else {
+                        newRunningNodes = newRunningNodes.filter(id => id !== payload.vertex_id)
+                    }
+                }
+
+                return {
+                    ...prev,
+                    [data.session_id]: {
+                        ...existing,
+                        status: isStarted ? "running" : (payload.status === "error" ? "error" : "idle"),
+                        runningNodes: newRunningNodes,
+                        lastUpdate: Date.now()
+                    }
+                }
+            })
+        }
+    }, [syncFromServer])
+
+    const [lastEventId, setLastEventId] = useState(0)
+
     useEffect(() => {
         void syncFromServer()
+        const regularPoll = window.setInterval(() => void syncFromServer(), 10000)
 
-        // Poll — fixes stuck tiles if a WebSocket "submitted" was missed or no WS clients were connected
-        const poll = window.setInterval(() => void syncFromServer(), 5000)
-
-        // 2. Connect to WebSocket with auto-reconnect
-        let ws: WebSocket | null = null
-        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-        let retryDelay = 1000
         let destroyed = false
+        let timeoutId: ReturnType<typeof setTimeout>
 
-        const handleMessage = (data: any) => {
-            if (!data) return
+        const pollEvents = async () => {
+            if (destroyed) return
+            try {
+                const url = `${getApiBase()}/api/v1/aiccore/events/poll?last_id=${lastEventId}&timeout=15`
+                const res = await fetch(url)
+                if (!res.ok) throw new Error("Poll failed")
+                const data = await res.json()
+                
+                if (destroyed) return
 
-            if (data.type === "SESSIONS_CLEARED") {
-                setSessions({})
-                setActiveIds([])
-                return
-            }
+                const events = data.events || []
+                let newLastId = lastEventId
 
-            if (
-                data.type === "DEMO_QUEUE_UPDATE" ||
-                data.type === "DEMO_GATE_OPEN" ||
-                data.type === "SUBMISSION_UPDATE"
-            ) {
-                void syncFromServer()
-                return
-            }
-
-            if (!data.event_type) return
-
-            if (data.event_type === "flow_saved" || data.event_type === "submitted") {
-                const payload = data.payload
-                const snapshot = payload.snapshot || {}
-                const isSubmission = data.event_type === "submitted"
-
-                const mappedNodes = (snapshot.nodes || []).map((n: any) => {
-                    const x = n.position?.x || (n.x ?? 0)
-                    const y = n.position?.y || (n.y ?? 0)
-                    let type: any = "process"
-                    const componentName = n.data?.node?.display_name?.toLowerCase() || ""
-                    if (componentName.includes("input") || componentName.includes("chat")) type = "input"
-                    else if (componentName.includes("llm") || componentName.includes("openai")) type = "llm"
-                    else if (componentName.includes("output")) type = "output"
-
-                    return {
-                        id: n.id,
-                        label: n.data?.node?.display_name || n.label || "Component",
-                        type: type,
-                        x: x,
-                        y: y
-                    }
+                events.forEach((eventWrapper: any) => {
+                    const msg = eventWrapper.data
+                    newLastId = Math.max(newLastId, eventWrapper.id)
+                    handleMessage(msg)
                 })
 
-                const mappedEdges = (snapshot.edges || []).map((e: any) => ({
-                    from: e.source || e.from,
-                    to: e.target || e.to
-                }))
-
-                setSessions(prev => {
-                    const existing = prev[data.session_id]
-                    return {
-                        ...prev,
-                        [data.session_id]: {
-                            id: data.session_id,
-                            nickname: payload.nickname || existing?.nickname || "Anonymous",
-                            station: payload.station_id || existing?.station || "0",
-                            nodes: mappedNodes.length > 0 ? mappedNodes : (existing?.nodes || []),
-                            edges: mappedEdges.length > 0 ? mappedEdges : (existing?.edges || []),
-                            runningNodes: isSubmission ? [] : (existing?.runningNodes || []),
-                            status: isSubmission ? "submitted" : (existing?.status || "idle"),
-                            lastUpdate: Date.now()
-                        }
-                    }
-                })
-
-                if (isSubmission) {
-                    setActiveIds(prev => prev.filter(id => id !== data.session_id))
+                if (newLastId > lastEventId) {
+                    setLastEventId(newLastId)
                 } else {
-                    setActiveIds(prev => prev.includes(data.session_id) ? prev : [...prev, data.session_id])
+                    pollEvents() // Immediately re-poll if no events returned (long-polling handled by server)
+                }
+            } catch (err) {
+                if (!destroyed) {
+                    timeoutId = setTimeout(pollEvents, 5000)
                 }
             }
-
-            if (
-                typeof data.event_type === "string" &&
-                (data.event_type.endsWith("_started") || data.event_type.endsWith("_completed"))
-            ) {
-                const payload = data.payload
-                const isStarted = data.event_type.endsWith("_started")
-                const isVertex = data.event_type.includes("vertex")
-
-                setSessions(prev => {
-                    const existing = prev[data.session_id]
-                    if (!existing) return prev
-
-                    let newRunningNodes = [...existing.runningNodes]
-                    if (isVertex && payload.vertex_id) {
-                        if (isStarted) {
-                            if (!newRunningNodes.includes(payload.vertex_id)) newRunningNodes.push(payload.vertex_id)
-                        } else {
-                            newRunningNodes = newRunningNodes.filter(id => id !== payload.vertex_id)
-                        }
-                    }
-
-                    return {
-                        ...prev,
-                        [data.session_id]: {
-                            ...existing,
-                            status: isStarted ? "running" : (payload.status === "error" ? "error" : "idle"),
-                            runningNodes: newRunningNodes,
-                            lastUpdate: Date.now()
-                        }
-                    }
-                })
-            }
         }
 
-        const connectWs = () => {
-            if (destroyed) return
-            const apiBase = getApiBase()
-            const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws"
-            ws = new WebSocket(wsUrl)
-
-            ws.onmessage = (event) => {
-                try {
-                    handleMessage(JSON.parse(event.data))
-                } catch { /* ignore malformed messages */ }
-            }
-
-            ws.onopen = () => { retryDelay = 1000 }
-
-            ws.onclose = () => {
-                if (destroyed) return
-                reconnectTimer = setTimeout(() => {
-                    retryDelay = Math.min(retryDelay * 2, 30_000)
-                    connectWs()
-                }, retryDelay)
-            }
-        }
-        connectWs()
+        pollEvents()
 
         return () => {
             destroyed = true
-            clearInterval(poll)
-            if (reconnectTimer) clearTimeout(reconnectTimer)
-            ws?.close()
+            clearInterval(regularPoll)
+            if (timeoutId) clearTimeout(timeoutId)
         }
-    }, [syncFromServer])
+    }, [syncFromServer, handleMessage, lastEventId])
 
     // Dynamic grid: all active sessions (scroll if many — no silent cap at 9)
     const count = activeIds.length

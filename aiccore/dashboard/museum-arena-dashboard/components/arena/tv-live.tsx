@@ -238,7 +238,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
 
   useEffect(() => {
     loadDemo()
-    const id = setInterval(loadDemo, 2000)
+    const id = setInterval(loadDemo, 3000)
     return () => clearInterval(id)
   }, [loadDemo])
 
@@ -249,18 +249,29 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
     return () => clearTimeout(id)
   }, [congrats])
 
-  useEffect(() => {
-    let ws: WebSocket | null = null
-    let t: ReturnType<typeof setTimeout> | null = null
-    let destroyed = false
+  const [lastEventId, setLastEventId] = useState(0)
 
-    const connect = () => {
+  useEffect(() => {
+    let destroyed = false
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    const poll = async () => {
       if (destroyed) return
-      ws = new WebSocket(getApiBase().replace(/^http/, "ws") + "/api/v1/aiccore/ws")
-      ws.onopen = () => { wsRetryRef.current = 1000 }
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
+      try {
+        const url = `${getApiBase()}/api/v1/aiccore/events/poll?last_id=${lastEventId}&timeout=15`
+        const res = await fetch(url)
+        if (!res.ok) throw new Error("Poll failed")
+        const data = await res.json()
+        
+        if (destroyed) return
+
+        const events = data.events || []
+        let newLastId = lastEventId
+
+        events.forEach((eventWrapper: any) => {
+          const msg = eventWrapper.data
+          newLastId = Math.max(newLastId, eventWrapper.id)
+
           if (msg.event_type === "submitted") {
             const nick = msg.payload?.nickname || "A builder"
             setCongrats({ nickname: nick, until: skewedNow() + 5500 })
@@ -272,23 +283,27 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
           ) {
             void loadDemo()
           }
-        } catch { /* ignore */ }
-      }
-      ws.onclose = () => {
-        if (destroyed) return
-        t = setTimeout(() => {
-          wsRetryRef.current = Math.min(wsRetryRef.current * 2, 30_000)
-          connect()
-        }, wsRetryRef.current)
+        })
+
+        if (newLastId > lastEventId) {
+          setLastEventId(newLastId)
+        } else {
+          poll()
+        }
+      } catch (err) {
+        if (!destroyed) {
+          timeoutId = setTimeout(poll, 3000)
+        }
       }
     }
-    connect()
+
+    poll()
+
     return () => {
       destroyed = true
-      if (t) clearTimeout(t)
-      ws?.close()
+      if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [loadDemo])
+  }, [loadDemo, lastEventId])
 
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
   const presenting = demo?.gate_open && demo.presenting

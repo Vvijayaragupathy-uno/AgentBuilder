@@ -361,20 +361,29 @@ function TVDisplayInner() {
     return () => clearInterval(id)
   }, [mode, forcedMode, fetchLeaderboard])
 
-  // WebSocket — real-time toasts with auto-reconnect
+  // HTTPS Event Polling — real-time toasts with auto-reconnect logic replacement
+  const [lastEventId, setLastEventId] = useState(0)
+
   useEffect(() => {
-    let ws: WebSocket | null = null
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let retryDelay = 1000
     let destroyed = false
+    let timeoutId: ReturnType<typeof setTimeout>
 
-    const connect = () => {
+    const poll = async () => {
       if (destroyed) return
-      ws = new WebSocket(getApiBase().replace(/^http/, "ws") + "/api/v1/aiccore/ws")
+      try {
+        const url = `${getApiBase()}/api/v1/aiccore/events/poll?last_id=${lastEventId}&timeout=15`
+        const res = await fetch(url)
+        if (!res.ok) throw new Error("Poll failed")
+        const data = await res.json()
+        
+        if (destroyed) return
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
+        const events = data.events || []
+        let newLastId = lastEventId
+
+        events.forEach((eventWrapper: any) => {
+          const msg = eventWrapper.data
+          newLastId = Math.max(newLastId, eventWrapper.id)
 
           if (msg.event_type === "submitted") {
             const nick = msg.payload?.nickname || "A builder"
@@ -406,28 +415,29 @@ function TVDisplayInner() {
           ) {
             void pollChallengesRef.current()
           }
-        } catch { /* ignore malformed messages */ }
-      }
+        })
 
-      ws.onopen = () => { retryDelay = 1000 }
-
-      ws.onclose = () => {
-        if (destroyed) return
-        reconnectTimer = setTimeout(() => {
-          retryDelay = Math.min(retryDelay * 2, 30_000)
-          connect()
-        }, retryDelay)
+        if (newLastId > lastEventId) {
+          setLastEventId(newLastId)
+        } else {
+          // If no new events, just restart poll
+          poll()
+        }
+      } catch (err) {
+        if (!destroyed) {
+          // Backoff on error
+          timeoutId = setTimeout(poll, 3000)
+        }
       }
     }
 
-    connect()
+    poll()
 
     return () => {
       destroyed = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      ws?.close()
+      if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [addToast])
+  }, [addToast, lastEventId])
 
   const current = forcedMode ?? mode
 

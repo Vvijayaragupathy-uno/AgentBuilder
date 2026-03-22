@@ -1,5 +1,7 @@
 import os
 import sys
+import asyncio
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import anyio
@@ -12,7 +14,7 @@ print(f"🚀 AICCORE Wrapper starting — root: {project_root}")
 
 # Import Langflow's app creator
 from langflow.main import setup_app
-from fastapi import Request, Query, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
+from fastapi import Request, Query, HTTPException, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -87,16 +89,6 @@ FAILED_ATTEMPTS = {}
 LOCKOUT_DURATION_SECONDS = 300 # 5 minutes
 MAX_ATTEMPTS = 5
 
-class _HttpOnlyRootMount(Mount):
-    """
-    Starlette matches Mount(path='/') for **websocket** scopes too, then forwards to StaticFiles,
-    which asserts scope['type'] == 'http' and crashes. WebSocket routes must match instead.
-    """
-
-    def matches(self, scope: Scope) -> tuple[Match, Scope]:
-        if scope.get("type") == "websocket":
-            return Match.NONE, {}
-        return super().matches(scope)
 
 
 def _browser_origins_from_env_blob(blob: Optional[str]) -> List[str]:
@@ -525,17 +517,24 @@ def create_aiccore_app():
             shutil.copyfileobj(file.file, buffer)
         return {"url": f"/static/uploads/{file_path.name}"}
 
-    @app.websocket("/api/v1/aiccore/ws")
-    async def websocket_endpoint(websocket: WebSocket):
+
+    @app.get("/api/v1/aiccore/events/poll")
+    async def poll_events(last_id: int = 0, timeout: int = 15):
+        """
+        HTTPS Polling/Pooling replacement for WebSockets.
+        Returns new events since last_id. If no events, waits up to 'timeout' seconds.
+        """
         from aiccore.backend.broadcast import broadcast_manager
-        await broadcast_manager.connect(websocket)
-        try:
-            while True:
-                # Keep connection alive, though we mostly push data
-                data = await websocket.receive_text()
-                # We could handle commands from dashboard here if needed
-        except WebSocketDisconnect:
-            broadcast_manager.disconnect(websocket)
+        
+        # Long-polling implementation
+        start_time = time.time()
+        while time.time() - start_time < min(timeout, 30):
+            events = broadcast_manager.get_pooled_messages(since_id=last_id)
+            if events:
+                return {"events": events}
+            await asyncio.sleep(0.5)
+            
+        return {"events": []}
 
     @app.post("/api/v1/aiccore/auth/unlock")
     async def unlock_station(req: UnlockRequest, request: Request):
@@ -2443,7 +2442,7 @@ def create_aiccore_app():
 
     if serve_bundled_frontend and static_files_dir is not None:
         app.router.routes.append(
-            _HttpOnlyRootMount(
+            Mount(
                 "/",
                 StaticFiles(directory=str(static_files_dir), html=True),
                 name="langflow-static",

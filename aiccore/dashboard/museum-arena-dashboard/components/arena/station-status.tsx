@@ -57,52 +57,65 @@ export function StationStatus() {
         }
     }
 
+    const [lastEventId, setLastEventId] = useState(0)
+
     useEffect(() => {
         fetchStations()
-        // Poll as a fallback every 30s (WebSocket handles real-time below)
         const interval = setInterval(fetchStations, 30000)
 
-        // WebSocket: re-fetch immediately when any station event arrives, with auto-reconnect
-        let ws: WebSocket | null = null
-        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-        let retryDelay = 1000
         let destroyed = false
+        let timeoutId: ReturnType<typeof setTimeout>
 
-        const connectWs = () => {
+        const pollEvents = async () => {
             if (destroyed) return
-            const apiBase = getApiBase()
-            const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws"
-            ws = new WebSocket(wsUrl)
-            ws.onmessage = (event) => {
-                try {
-                    const msg = JSON.parse(event.data)
+            try {
+                const url = `${getApiBase()}/api/v1/aiccore/events/poll?last_id=${lastEventId}&timeout=15`
+                const res = await fetch(url)
+                if (!res.ok) throw new Error("Poll failed")
+                const data = await res.json()
+                
+                if (destroyed) return
+
+                const events = data.events || []
+                let newLastId = lastEventId
+                let shouldRefresh = false
+
+                events.forEach((eventWrapper: any) => {
+                    const msg = eventWrapper.data
+                    newLastId = Math.max(newLastId, eventWrapper.id)
                     if (
                         msg.type === "STATION_UPDATE" ||
                         msg.type === "LEADERBOARD_UPDATE" ||
                         msg.type === "SESSION_UPDATE"
                     ) {
-                        fetchStations()
+                        shouldRefresh = true
                     }
-                } catch (_) {}
-            }
-            ws.onopen = () => { retryDelay = 1000 }
-            ws.onclose = () => {
-                if (destroyed) return
-                reconnectTimer = setTimeout(() => {
-                    retryDelay = Math.min(retryDelay * 2, 30_000)
-                    connectWs()
-                }, retryDelay)
+                })
+
+                if (shouldRefresh) {
+                   fetchStations()
+                }
+
+                if (newLastId > lastEventId) {
+                    setLastEventId(newLastId)
+                } else {
+                    pollEvents()
+                }
+            } catch (err) {
+                if (!destroyed) {
+                    timeoutId = setTimeout(pollEvents, 5000)
+                }
             }
         }
-        connectWs()
+
+        pollEvents()
 
         return () => {
             destroyed = true
             clearInterval(interval)
-            if (reconnectTimer) clearTimeout(reconnectTimer)
-            ws?.close()
+            if (timeoutId) clearTimeout(timeoutId)
         }
-    }, [])
+    }, [lastEventId])
 
     const onlineCount = stations.filter(s => s.status !== "maintenance" && s.status !== "offline").length
     const totalCount = stations.length

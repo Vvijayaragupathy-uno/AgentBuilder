@@ -394,80 +394,90 @@ export default function BuilderPage() {
         }
     }, [practiceMode, session])
 
-    // WebSocket Listener for Broadcasts & Ceremony (with auto-reconnect)
+    const [lastEventId, setLastEventId] = useState(0)
+
+    // HTTPS Event Polling — replacement for Broadcasts & Ceremony WebSocket
     useEffect(() => {
-        let ws: WebSocket | null = null
-        let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-        let retryDelay = 1000
         let destroyed = false
+        let timeoutId: ReturnType<typeof setTimeout>
 
-        const connect = () => {
+        const poll = async () => {
             if (destroyed) return
-            const apiBase = getApiBase()
-            ws = new WebSocket(`${apiBase.replace(/^http/, "ws")}/api/v1/aiccore/ws`)
-
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data)
-                    if (data.type === "ADMIN_BROADCAST") {
-                        setBroadcast(data.message)
-                        setTimeout(() => setBroadcast(null), 10000)
-                    }
-                    if (data.type === "SYSTEM_FINALIZE" && !practiceModeRef.current) {
-                        setIsSystemLocked(true)
-                    }
-                    if (data.type === "MISSION_LIVE" && data.data?.title) {
-                        const t = data.data.title as string
-                        setBroadcast(`Mission live: ${t} — your build timer starts now (if scheduled).`)
-                        setTimeout(() => setBroadcast(null), 12000)
-                        refreshMissionRef.current()
-                    }
-                    if (
-                        (data.type === "DEMO_GATE_OPEN" ||
-                            data.type === "DEMO_QUEUE_UPDATE" ||
-                            data.type === "SUBMISSION_UPDATE") &&
-                        sessionRef.current
-                    ) {
-                        const sid = sessionRef.current.id
-                        void fetch(
-                            `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${sid}`,
-                            { credentials: "include" }
-                        )
-                            .then(r => (r.ok ? r.json() : null))
-                            .then(d => {
-                                if (!d) return
-                                setDemoInfo({
-                                    myPosition: d.my_position,
-                                    total: d.queue_length ?? 0,
-                                    gateOpen: !!d.gate_open,
-                                })
-                            })
-                            .catch(() => { /* ignore */ })
-                    }
-                } catch (err) {
-                    console.error("WS parse error:", err)
-                }
-            }
-
-            ws.onopen = () => { retryDelay = 1000 }
-
-            ws.onclose = () => {
+            try {
+                const url = `${getApiBase()}/api/v1/aiccore/events/poll?last_id=${lastEventId}&timeout=15`
+                const res = await fetch(url)
+                if (!res.ok) throw new Error("Poll failed")
+                const data = await res.json()
+                
                 if (destroyed) return
-                reconnectTimer = setTimeout(() => {
-                    retryDelay = Math.min(retryDelay * 2, 30_000)
-                    connect()
-                }, retryDelay)
+
+                const events = data.events || []
+                let newLastId = lastEventId
+
+                events.forEach((eventWrapper: any) => {
+                    const msg = eventWrapper.data
+                    newLastId = Math.max(newLastId, eventWrapper.id)
+
+                    try {
+                        if (msg.type === "ADMIN_BROADCAST") {
+                            setBroadcast(msg.message)
+                            setTimeout(() => setBroadcast(null), 10000)
+                        }
+                        if (msg.type === "SYSTEM_FINALIZE" && !practiceModeRef.current) {
+                            setIsSystemLocked(true)
+                        }
+                        if (msg.type === "MISSION_LIVE" && msg.data?.title) {
+                            const t = msg.data.title as string
+                            setBroadcast(`Mission live: ${t} — your build timer starts now (if scheduled).`)
+                            setTimeout(() => setBroadcast(null), 12000)
+                            refreshMissionRef.current()
+                        }
+                        if (
+                            (msg.type === "DEMO_GATE_OPEN" ||
+                                msg.type === "DEMO_QUEUE_UPDATE" ||
+                                msg.type === "SUBMISSION_UPDATE") &&
+                            sessionRef.current
+                        ) {
+                            const sid = sessionRef.current.id
+                            void fetch(
+                                `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${sid}`,
+                                { credentials: "include" }
+                            )
+                                .then(r => (r.ok ? r.json() : null))
+                                .then(d => {
+                                    if (!d) return
+                                    setDemoInfo({
+                                        myPosition: d.my_position,
+                                        total: d.queue_length ?? 0,
+                                        gateOpen: !!d.gate_open,
+                                    })
+                                })
+                                .catch(() => { /* ignore */ })
+                        }
+                    } catch (err) {
+                        console.error("Poll message parse error:", err)
+                    }
+                })
+
+                if (newLastId > lastEventId) {
+                    setLastEventId(newLastId)
+                } else {
+                    poll()
+                }
+            } catch (err) {
+                if (!destroyed) {
+                    timeoutId = setTimeout(poll, 3000)
+                }
             }
         }
 
-        connect()
+        poll()
 
         return () => {
             destroyed = true
-            if (reconnectTimer) clearTimeout(reconnectTimer)
-            ws?.close()
+            if (timeoutId) clearTimeout(timeoutId)
         }
-    }, [])
+    }, [lastEventId])
 
     useEffect(() => {
         if (!session) return

@@ -19,7 +19,6 @@ python-dotenv
 loguru
 structlog
 httpx[http2]
-redis>=5
 python-multipart
 passlib
 bcrypt

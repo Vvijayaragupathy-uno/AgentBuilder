@@ -158,28 +158,68 @@ export function Leaderboard({
     }
   }, [onDataUpdate])
 
+  const [lastEventId, setLastEventId] = useState(0)
+
   useEffect(() => {
     fetchLeaderboard()
-    const interval = setInterval(fetchLeaderboard, 5000)
+    const interval = setInterval(fetchLeaderboard, 10000)
 
-    const apiBase = getApiBase()
-    const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/aiccore/ws"
-    const ws = new WebSocket(wsUrl)
-    ws.onmessage = (event) => {
+    let destroyed = false
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    const pollEvents = async () => {
+      if (destroyed) return
       try {
-        const data = JSON.parse(event.data)
-        if (data.type === "SYSTEM_FINALIZE") {
-          setIsFinalized(true)
-          setTimeout(() => setIsFinalized(false), 20000)
+        const url = `${getApiBase()}/api/v1/aiccore/events/poll?last_id=${lastEventId}&timeout=15`
+        const res = await fetch(url)
+        if (!res.ok) throw new Error("Poll failed")
+        const data = await res.json()
+        
+        if (destroyed) return
+
+        const events = data.events || []
+        let newLastId = lastEventId
+        let shouldRefresh = false
+
+        events.forEach((eventWrapper: any) => {
+          const msg = eventWrapper.data
+          newLastId = Math.max(newLastId, eventWrapper.id)
+
+          if (msg.type === "SYSTEM_FINALIZE") {
+            setIsFinalized(true)
+            setTimeout(() => setIsFinalized(false), 20000)
+            shouldRefresh = true
+          }
+          
+          if (msg.event_type === "submitted") {
+             shouldRefresh = true
+          }
+        })
+
+        if (shouldRefresh) {
+          fetchLeaderboard()
         }
-      } catch (e) { }
+
+        if (newLastId > lastEventId) {
+          setLastEventId(newLastId)
+        } else {
+          pollEvents()
+        }
+      } catch (err) {
+        if (!destroyed) {
+          timeoutId = setTimeout(pollEvents, 5000)
+        }
+      }
     }
+
+    pollEvents()
 
     return () => {
+      destroyed = true
       clearInterval(interval)
-      ws.close()
+      if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [fetchLeaderboard])
+  }, [fetchLeaderboard, lastEventId])
 
   useEffect(() => {
     if (refreshKey !== undefined) {
