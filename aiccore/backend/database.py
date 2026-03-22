@@ -85,11 +85,12 @@ def _create_schema_if_needed():
                 pass
             conn.commit()
             print("  ✨ Public schema is now fresh.")
-            
-            # MANDATORY: When the public schema is wiped, Langflow needs to re-run migrations.
-            # Langflow's internal check will fail with "mismatch" unless fix_migration is True.
-            os.environ["LANGFLOW_FIX_MIGRATION"] = "true"
-            print("  🔧 Auto-enabled LANGFLOW_FIX_MIGRATION for this boot.")
+
+            # Langflow runs `alembic upgrade head` on boot; `alembic check` compares autogenerate
+            # to SQLModel metadata. This repo's Langflow fork may omit ORM models that migrations
+            # still create — skip that check after a full public wipe (see DatabaseService).
+            os.environ["LANGFLOW_SKIP_AUTOGENERATE_CHECK"] = "true"
+            print("  🔧 Auto-enabled LANGFLOW_SKIP_AUTOGENERATE_CHECK for this boot.")
         else:
             print(
                 "🚀 AICCORE: Skipping public schema DROP (default). "

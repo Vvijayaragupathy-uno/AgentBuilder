@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import sqlite3
 import sys
@@ -343,6 +344,16 @@ class DatabaseService(Service):
         # alembic_cfg.attributes["connection"].commit()
         command.upgrade(alembic_cfg, "head")
 
+    @staticmethod
+    def _skip_autogenerate_check() -> bool:
+        """When True, run upgrade to head but skip `alembic check` (autogenerate vs metadata).
+
+        This fork may ship a slimmer SQLModel surface than the Alembic revision chain
+        creates; autogenerate would always report drift. Set LANGFLOW_SKIP_AUTOGENERATE_CHECK=1.
+        """
+        v = os.environ.get("LANGFLOW_SKIP_AUTOGENERATE_CHECK", "").strip().lower()
+        return v in ("1", "true", "yes")
+
     def _run_migrations(self, should_initialize_alembic, fix) -> None:
         # First we need to check if alembic has been initialized
         # If not, we need to initialize it
@@ -371,6 +382,15 @@ class DatabaseService(Service):
                     raise RuntimeError(msg) from exc
             else:
                 logger.debug("Alembic initialized")
+
+            if self._skip_autogenerate_check():
+                logger.info(
+                    "Skipping alembic autogenerate check (LANGFLOW_SKIP_AUTOGENERATE_CHECK). "
+                    "Ensuring database is at revision head."
+                )
+                if not should_initialize_alembic:
+                    command.upgrade(alembic_cfg, "head")
+                return
 
             try:
                 buffer.write(f"{datetime.now(tz=timezone.utc).astimezone().isoformat()}: Checking migrations\n")
