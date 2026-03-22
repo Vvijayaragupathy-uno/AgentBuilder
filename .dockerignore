@@ -25,10 +25,27 @@ node_modules/
 .idea/
 
 # ─────────────────────────────────────────────
-# Exclude the ENTIRE langflow monorepo (3.9GB)
-# langflow-base is now installed from PyPI — no local files needed
+# Langflow: Dockerfile installs backend from langflow/src/backend/base + src/lfx
+# (your patches). Frontend from langflow/src/frontend. Exclude heavy unused trees.
 # ─────────────────────────────────────────────
-langflow/
+langflow/node_modules/
+langflow/**/node_modules/
+langflow/src/backend/tests/
+langflow/src/backend/langflow/
+langflow/src/backend/src/
+langflow/docs/
+langflow/docker/
+langflow/docker_example/
+langflow/.devcontainer/
+langflow/.github/
+langflow/scripts/
+langflow/deploy/
+langflow/.venv/
+langflow/src/frontend/tests/
+langflow/src/frontend/.storybook/
+langflow/src/frontend/build/
+langflow/src/frontend/playwright-report/
+langflow/src/frontend/test-results/
 
 # Misc
 *.log

@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.routing import Match, Mount
+from starlette.types import Scope
 from pydantic import BaseModel
 import shutil
 from uuid import UUID, uuid4
@@ -71,7 +72,7 @@ class _HttpOnlyRootMount(Mount):
     which asserts scope['type'] == 'http' and crashes. WebSocket routes must match instead.
     """
 
-    def matches(self, scope):  # type: ignore[override]
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
         if scope.get("type") == "websocket":
             return Match.NONE, {}
         return super().matches(scope)
