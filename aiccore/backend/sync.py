@@ -30,13 +30,42 @@ async def get_arena_state():
                 active_sessions.append(s)
                 seen_stations.add(norm_station)
         
+        active_ids = [s.id for s in active_sessions]
+        
+        event_counts = {}
+        last_run_by_sess = {}
+        subs_by_sess = {}
+        
+        if active_ids:
+            counts_res = db_session.execute(
+                select(Event.session_id, func.count(Event.id))
+                .where(Event.session_id.in_(active_ids))
+                .group_by(Event.session_id)
+            ).all()
+            event_counts = {row[0]: int(row[1]) for row in counts_res}
+
+            runs_db = db_session.execute(
+                select(Event)
+                .where(Event.session_id.in_(active_ids), Event.event_type == "flow_run_completed")
+                .order_by(Event.timestamp.desc())
+            ).scalars().all()
+            for r in runs_db:
+                if r.session_id not in last_run_by_sess:
+                    last_run_by_sess[r.session_id] = r
+
+            subs_db = db_session.execute(
+                select(Submission)
+                .where(Submission.session_id.in_(active_ids))
+                .order_by(Submission.submitted_at.desc())
+            ).scalars().all()
+            for sub in subs_db:
+                if sub.session_id not in subs_by_sess:
+                    subs_by_sess[sub.session_id] = sub
+
         leaderboard = []
         for s in active_sessions:
-            event_stmt = select(func.count(Event.id)).where(Event.session_id == s.id)
-            event_count = db_session.execute(event_stmt).scalar() or 0
-            
-            run_stmt = select(Event).where(Event.session_id == s.id, Event.event_type == "flow_run_completed").order_by(Event.timestamp.desc())
-            last_run = db_session.execute(run_stmt).scalars().first()
+            event_count = event_counts.get(s.id, 0)
+            last_run = last_run_by_sess.get(s.id)
             
             status = "BUILDING"
             if event_count > 10: status = "PROTOTYPING"
@@ -47,8 +76,7 @@ async def get_arena_state():
             progress = min(event_count * 5, 99)
             if s.is_submitted: progress = 100
             
-            sub_stmt = select(Submission).where(Submission.session_id == s.id).order_by(Submission.submitted_at.desc())
-            submission = db_session.execute(sub_stmt).scalars().first()
+            submission = subs_by_sess.get(s.id)
             
             leaderboard.append({
                 "id": str(s.id),

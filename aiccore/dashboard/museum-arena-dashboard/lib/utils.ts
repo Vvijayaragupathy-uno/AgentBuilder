@@ -5,6 +5,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function fetchWithCredentials(input: RequestInfo | URL, init?: RequestInit) {
+  return fetch(input, { ...(init ?? {}), credentials: "include" })
+}
+
 /** Same-origin proxy path (set with AICCORE_UPSTREAM_URL in next.config rewrites). Fixes cookies / session for embedded Langflow. */
 const PROXY_PREFIX = process.env.NEXT_PUBLIC_AICCORE_PROXY_PREFIX || ''
 

@@ -24,7 +24,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, fetchWithCredentials, getApiBase } from "@/lib/utils"
 
 interface Achievement {
   id: string
@@ -104,7 +104,7 @@ function SubmissionCard({
     }
     try {
       const apiBase = getApiBase()
-      const res = await fetch(`${apiBase}/api/v1/aiccore/session/${sub.session_id}/events`)
+      const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/session/${sub.session_id}/events`)
       const events = await res.json()
       const snapshots = events.filter((e: any) => (e.event_type === "flow_saved" || e.event_type === "submitted") && e.payload?.snapshot)
       setHistory(snapshots)
@@ -265,7 +265,7 @@ function SubmissionCard({
             setScoreSaving(true)
             try {
               const apiBase = getApiBase()
-              const res = await fetch(`${apiBase}/api/v1/aiccore/submissions/${sub.id}/score`, {
+              const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/submissions/${sub.id}/score`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ score: v }),
@@ -391,8 +391,8 @@ export function ReviewPanel() {
     try {
       const apiBase = getApiBase()
       const [sRes, aRes] = await Promise.all([
-        fetch(`${apiBase}/api/v1/aiccore/submissions`),
-        fetch(`${apiBase}/api/v1/aiccore/achievements`)
+        fetchWithCredentials(`${apiBase}/api/v1/aiccore/submissions`),
+        fetchWithCredentials(`${apiBase}/api/v1/aiccore/achievements`)
       ])
 
       if (sRes.ok) {
@@ -445,7 +445,7 @@ export function ReviewPanel() {
   async function handleApprove(id: string) {
     try {
       const apiBase = getApiBase()
-      const res = await fetch(`${apiBase}/api/v1/aiccore/submissions/${id}/approve`, { method: "POST" })
+      const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/submissions/${id}/approve`, { method: "POST" })
       if (res.ok) await fetchData()
     } catch (error) {
       console.error("Failed to approve submission:", error)
@@ -455,7 +455,7 @@ export function ReviewPanel() {
   async function handlePublishWinner(id: string) {
     try {
       const apiBase = getApiBase()
-      const res = await fetch(`${apiBase}/api/v1/aiccore/submissions/${id}/winner`, {
+      const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/submissions/${id}/winner`, {
         method: "POST"
       })
       if (res.ok) {
@@ -469,7 +469,7 @@ export function ReviewPanel() {
   async function handleAwardHonor(userId: string, achievementId: string) {
     try {
       const apiBase = getApiBase()
-      const res = await fetch(`${apiBase}/api/v1/aiccore/users/${userId}/award/${achievementId}`, {
+      const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/users/${userId}/award/${achievementId}`, {
         method: "POST"
       })
       if (res.ok) {

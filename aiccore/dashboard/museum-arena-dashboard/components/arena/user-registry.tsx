@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { getApiBase } from "@/lib/utils"
+import { fetchWithCredentials, getApiBase } from "@/lib/utils"
 import {
     Table,
     TableBody,
@@ -46,7 +46,7 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
         setIsLoading(true)
         try {
             const apiBase = getApiBase()
-            const response = await fetch(`${apiBase}/api/v1/aiccore/users`)
+            const response = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/users`)
             if (response.ok) {
                 const data = await response.json()
                 setUsers(data)
@@ -73,7 +73,7 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
         setIsRegenerating(userId)
         try {
             const apiBase = getApiBase()
-            const response = await fetch(`${apiBase}/api/v1/aiccore/users/${userId}/regenerate`, {
+            const response = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/users/${userId}/regenerate`, {
                 method: "POST",
             })
             if (response.ok) {
@@ -91,7 +91,7 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
 
         try {
             const apiBase = getApiBase()
-            const response = await fetch(`${apiBase}/api/v1/aiccore/users`, {
+            const response = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/users`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ username: newUsername, nickname: newNickname }),
@@ -111,7 +111,7 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
         if (!confirm("Are you sure you want to remove this contestant? This will also end their active sessions.")) return
         try {
             const apiBase = getApiBase()
-            const response = await fetch(`${apiBase}/api/v1/aiccore/users/${userId}`, {
+            const response = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/users/${userId}`, {
                 method: "DELETE",
             })
             if (response.ok) {

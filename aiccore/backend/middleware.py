@@ -15,6 +15,7 @@ from .database import engine
 from .models import Event
 from .broadcast import broadcast_manager
 from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
+from .session_presence import touch_session_presence
 
 
 async def _read_starlette_response_body(response: Response) -> bytes:
@@ -303,6 +304,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
     def _auto_award(self, db_session, user, badge_name, badge_desc):
         # Professional standard: Prevent duplicate awards and auto-create missing badges
         from .models import Achievement
+        from sqlalchemy.exc import IntegrityError
         
         # Check if user already has it
         if any(h.get("name") == badge_name for h in (user.honors or {}).values()):
@@ -312,9 +314,16 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         stmt = select(Achievement).where(Achievement.name == badge_name)
         ach = db_session.execute(stmt).scalars().first()
         if not ach:
-            ach = Achievement(name=badge_name, description=badge_desc)
-            db_session.add(ach)
-            db_session.flush()
+            try:
+                # Savepoint/nested tx for safety against concurrent creators
+                with db_session.begin_nested():
+                    ach = Achievement(name=badge_name, description=badge_desc)
+                    db_session.add(ach)
+                    db_session.flush()
+            except IntegrityError:
+                ach = db_session.execute(stmt).scalars().first()
+                if not ach:
+                    return
             
         # Award it
         curr_honors = dict(user.honors or {})
@@ -379,18 +388,15 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             aic_sess = db.get(AICSession, session_id)
             root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
 
-        # Create/link seat folder before Langflow list runs so root_id exists for filtering.
-        if aic_sess and not root_id:
+        # Validate or recreate the seat folder before Langflow list runs so filtering never trusts
+        # a stale folder ID left behind by older code or manual cleanup.
+        if aic_sess:
             try:
                 fid = await ensure_langflow_workspace_folder(session_id)
                 if fid:
                     root_id = fid
             except Exception:
-                pass
-            if not root_id:
-                with AICSessionORM(aic_engine) as db:
-                    aic_sess = db.get(AICSession, session_id)
-                    root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
+                root_id = aic_sess.langflow_workspace_folder_id
 
         response = await call_next(request)
         if response.status_code != 200:
@@ -460,22 +466,11 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         return _encode_filtered_list(payload, response, enc)
 
     def _update_station_heartbeat(self, session_id: UUID):
-        """Updates the station's last heartbeat and ensures status is consistent."""
+        """Refresh session liveness and mirror it onto a Station row when one exists."""
         try:
             with Session(engine) as db_session:
-                from .models import Session as AICSession, Station
-                # Find the session and its station
-                stmt = select(AICSession).where(AICSession.id == session_id)
-                session_obj = db_session.execute(stmt).scalars().first()
-                if session_obj and session_obj.station_id:
-                    # Update station telemetry
-                    station = db_session.get(Station, session_obj.station_id)
-                    if station:
-                        station.last_heartbeat = datetime.now(timezone.utc)
-                        # If station was offline/available, it's definitely occupied now
-                        if station.status in ["available", "offline"]:
-                            station.status = "occupied"
-                        db_session.commit()
+                if touch_session_presence(db_session, session_id, now=datetime.now(timezone.utc)):
+                    db_session.commit()
         except Exception as e:
             print(f"⚠️ Heartbeat Update Error: {e}")
 

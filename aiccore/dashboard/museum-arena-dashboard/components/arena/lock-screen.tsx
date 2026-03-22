@@ -17,7 +17,7 @@ interface Challenge {
 }
 
 interface LockScreenProps {
-    onUnlock: (sessionId: string, nickname: string, stats?: any) => void
+    onUnlock: (sessionId: string, sessionToken: string, nickname: string, stats?: any) => void
     /** After Start Over, server returns a fresh one-time PIN — prefill the keypad. */
     prefillPin?: string
     onPrefillConsumed?: () => void
@@ -103,7 +103,7 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
                 throw new Error(detail)
             }
             const data = await res.json()
-            onUnlock(data.session_id, data.nickname, data.stats)
+            onUnlock(data.session_id, data.session_token, data.nickname, data.stats)
         } catch (err: any) {
             setError(err?.message || "Unlock failed.")
             setCode("")

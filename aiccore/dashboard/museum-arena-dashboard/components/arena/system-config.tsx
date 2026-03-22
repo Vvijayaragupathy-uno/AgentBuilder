@@ -54,7 +54,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { cn, getApiBase, localDatetimeLocalToUtcIso } from "@/lib/utils"
+import { cn, fetchWithCredentials, getApiBase, localDatetimeLocalToUtcIso } from "@/lib/utils"
 import { ChallengeDetail } from "./challenge-detail"
 
 interface Challenge {
@@ -172,10 +172,10 @@ export function SystemConfig() {
         try {
             const apiBase = getApiBase()
             const [cRes, aRes, sRes, uRes] = await Promise.all([
-                fetch(`${apiBase}/api/v1/aiccore/challenges`),
-                fetch(`${apiBase}/api/v1/aiccore/achievements`),
-                fetch(`${apiBase}/api/v1/aiccore/system/status`),
-                fetch(`${apiBase}/api/v1/aiccore/users`)
+                fetchWithCredentials(`${apiBase}/api/v1/aiccore/challenges`),
+                fetchWithCredentials(`${apiBase}/api/v1/aiccore/achievements`),
+                fetchWithCredentials(`${apiBase}/api/v1/aiccore/system/status`),
+                fetchWithCredentials(`${apiBase}/api/v1/aiccore/users`)
             ])
             if (cRes.ok) setChallenges(await cRes.json())
             if (aRes.ok) setAchievements(await aRes.json())
@@ -195,7 +195,7 @@ export function SystemConfig() {
 
     const handleToggleLock = async () => {
         const apiBase = getApiBase()
-        const res = await fetch(`${apiBase}/api/v1/aiccore/system/lock`, { method: "POST" })
+        const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/system/lock`, { method: "POST" })
         if (res.ok) {
             const data = await res.json()
             setArenaLocked(data.locked)
@@ -205,7 +205,7 @@ export function SystemConfig() {
     const handleBroadcast = async () => {
         if (!broadcastMessage) return
         const apiBase = getApiBase()
-        const res = await fetch(`${apiBase}/api/v1/aiccore/broadcast`, {
+        const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/broadcast`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: broadcastMessage })
@@ -222,7 +222,7 @@ export function SystemConfig() {
         setClearResult(null)
         try {
             const apiBase = getApiBase()
-            const res = await fetch(`${apiBase}/api/v1/aiccore/sessions/clear`, { method: "POST" })
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/sessions/clear`, { method: "POST" })
             if (res.ok) {
                 const data = await res.json()
                 setClearResult(`Cleared ${data.sessions_cleared} session${data.sessions_cleared !== 1 ? "s" : ""}`)
@@ -236,7 +236,7 @@ export function SystemConfig() {
     const handleFinalize = async () => {
         if (!confirm("This will lock all stations and trigger the Award Ceremony! Proceed?")) return
         const apiBase = getApiBase()
-        const res = await fetch(`${apiBase}/api/v1/aiccore/system/finalize`, { method: "POST" })
+        const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/system/finalize`, { method: "POST" })
         if (res.ok) {
             setArenaLocked(true)
             fetchData()
@@ -245,9 +245,8 @@ export function SystemConfig() {
 
     const handleDemoNext = async () => {
         const apiBase = getApiBase()
-        const res = await fetch(`${apiBase}/api/v1/aiccore/demo/next`, {
+        const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/demo/next`, {
             method: "POST",
-            credentials: "include",
         })
         if (res.ok) {
             const j = await res.json()
@@ -336,6 +335,7 @@ export function SystemConfig() {
                 : `${apiBase}/api/v1/aiccore/challenges`
 
             const res = await fetch(url, {
+                credentials: "include",
                 method: editingId ? "PATCH" : "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -372,7 +372,7 @@ export function SystemConfig() {
 
         try {
             const apiBase = getApiBase()
-            const res = await fetch(`${apiBase}/api/v1/aiccore/upload`, {
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/upload`, {
                 method: "POST",
                 body: formData
             })
@@ -394,7 +394,7 @@ export function SystemConfig() {
 
         try {
             const apiBase = getApiBase()
-            const res = await fetch(`${apiBase}/api/v1/aiccore/upload`, {
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/upload`, {
                 method: "POST",
                 body: formData
             })
@@ -416,7 +416,7 @@ export function SystemConfig() {
 
         try {
             const apiBase = getApiBase()
-            const res = await fetch(`${apiBase}/api/v1/aiccore/upload`, {
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/upload`, {
                 method: "POST",
                 body: formData
             })
@@ -491,7 +491,7 @@ export function SystemConfig() {
     const handleToggleChallenge = async (id: string) => {
         try {
             const apiBase = getApiBase()
-            const res = await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle`, { method: "POST" })
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle`, { method: "POST" })
             if (res.ok) fetchData()
         } catch (err) {
             console.error("Failed to toggle challenge", err)
@@ -501,7 +501,7 @@ export function SystemConfig() {
     const handleToggleRegistration = async (id: string) => {
         try {
             const apiBase = getApiBase()
-            const res = await fetch(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle-registration`, { method: "POST" })
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/challenges/${id}/toggle-registration`, { method: "POST" })
             if (res.ok) fetchData()
         } catch (err) {
             console.error("Failed to toggle registration", err)

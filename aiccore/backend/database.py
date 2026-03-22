@@ -129,6 +129,8 @@ def _ensure_schema_migrations():
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_text TEXT",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_document_url VARCHAR",
             "ALTER TABLE aiccore.session ADD COLUMN IF NOT EXISTS langflow_workspace_folder_id UUID",
+            "ALTER TABLE aiccore.session ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
+            "UPDATE aiccore.session SET last_seen_at = COALESCE(last_seen_at, start_time) WHERE last_seen_at IS NULL",
         ):
             try:
                 with engine.begin() as conn:
@@ -180,6 +182,14 @@ def _ensure_schema_migrations():
             try:
                 with engine.connect() as conn:
                     conn.execute(text("ALTER TABLE session ADD COLUMN langflow_workspace_folder_id TEXT"))
+                    conn.commit()
+            except Exception:
+                pass
+        if sess_cols and "last_seen_at" not in sess_cols:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE session ADD COLUMN last_seen_at TEXT"))
+                    conn.execute(text("UPDATE session SET last_seen_at = COALESCE(last_seen_at, start_time)"))
                     conn.commit()
             except Exception:
                 pass

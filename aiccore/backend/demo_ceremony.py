@@ -21,6 +21,7 @@ from .models import (
     Submission,
     Event,
 )
+from .session_rules import can_join_demo_queue
 
 def _demo_segment_seconds() -> int:
     raw = os.getenv("AICCORE_DEMO_SEGMENT_SECONDS", "90")
@@ -345,7 +346,9 @@ def join_demo_queue(db: Session, session_id: UUID) -> dict:
     sess = db.get(AICSession, session_id)
     if not sess:
         raise ValueError("session_not_found")
-    if not sess.is_submitted:
+    if not can_join_demo_queue(is_active=sess.is_active, is_submitted=sess.is_submitted):
+        if not sess.is_active:
+            raise ValueError("session_inactive")
         raise ValueError("must_submit_first")
     existing = (
         db.execute(

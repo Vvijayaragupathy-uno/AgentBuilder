@@ -15,7 +15,7 @@ import { LoginPage } from "./login-page"
 import { LiveChallenges } from "./live-challenges"
 import { ChallengesCatalog } from "./challenges-catalog"
 import { ChallengeDetail } from "./challenge-detail"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, fetchWithCredentials, getApiBase } from "@/lib/utils"
 import { AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 
 const TAB_LABELS: Record<string, string> = {
@@ -55,13 +55,21 @@ function BuilderDashboardInner() {
   const [showAdminLogin, setShowAdminLogin] = useState(false)
 
   useEffect(() => {
-    const cookies = Object.fromEntries(
-      document.cookie.split("; ").filter(Boolean).map(pair => {
-        const idx = pair.indexOf("=")
-        return [pair.slice(0, idx), pair.slice(idx + 1)]
-      })
-    )
-    setIsAuthenticated(cookies["aiccore_admin"] === "true")
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const res = await fetchWithCredentials(`${getApiBase()}/api/v1/aiccore/auth/admin-status`)
+        const data = res.ok ? await res.json() : { authenticated: false }
+        if (!cancelled) setIsAuthenticated(Boolean(data.authenticated))
+      } catch {
+        if (!cancelled) setIsAuthenticated(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   /** Display, Registry, Review, Stations, Settings require admin cookie (also blocks ?tab= deep links). */
@@ -117,14 +125,15 @@ function BuilderDashboardInner() {
   }, [isAuthenticated])
 
   const handleLogin = async (password: string) => {
-    const res = await fetch(`${getApiBase()}/api/v1/aiccore/auth/admin-login`, {
+    const res = await fetchWithCredentials(`${getApiBase()}/api/v1/aiccore/auth/admin-login`, {
       method: "POST",
-      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     })
     if (res.ok) {
-      setIsAuthenticated(true)
+      const statusRes = await fetchWithCredentials(`${getApiBase()}/api/v1/aiccore/auth/admin-status`)
+      const status = statusRes.ok ? await statusRes.json() : { authenticated: false }
+      setIsAuthenticated(Boolean(status.authenticated))
       setShowAdminLogin(false)
       setActiveTab("contestants") // land on first admin tab
     } else {
@@ -133,10 +142,18 @@ function BuilderDashboardInner() {
     }
   }
 
-  const handleLogout = () => {
-    document.cookie = "aiccore_admin=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/"
-    setIsAuthenticated(false)
-    setActiveTab("live")
+  const handleLogout = async () => {
+    try {
+      await fetchWithCredentials(`${getApiBase()}/api/v1/aiccore/auth/admin-logout`, {
+        method: "POST",
+      })
+    } catch {
+      /* ignore */
+    } finally {
+      setIsAuthenticated(false)
+      setShowAdminLogin(false)
+      setActiveTab("live")
+    }
   }
 
   const handleAdminButtonClick = () => {

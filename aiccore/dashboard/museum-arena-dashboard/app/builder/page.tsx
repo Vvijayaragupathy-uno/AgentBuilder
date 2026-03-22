@@ -24,9 +24,18 @@ import {
 
 /** When the mission has no scheduled start, each builder's countdown starts at unlock (this seat). */
 const SESSION_BUILD_START_MS_KEY = "aiccore_session_build_start_ms"
+const SESSION_TOKEN_STORAGE_KEY = "aiccore_session_token"
+
+function sessionAuthHeaders(session: { id: string; token: string } | null): HeadersInit {
+    if (!session) return {}
+    return {
+        "X-AICCORE-Session-Id": session.id,
+        "X-AICCORE-Session-Token": session.token,
+    }
+}
 
 export default function BuilderPage() {
-    const [session, setSession] = useState<{ id: string; nickname: string } | null>(null)
+    const [session, setSession] = useState<{ id: string; nickname: string; token: string } | null>(null)
     const [stats, setStats] = useState<{ flows: number; achievements: number } | null>(null)
     const [iframeLoaded, setIframeLoaded] = useState(false)
     const [isSubmitted, setIsSubmitted] = useState(false)
@@ -99,7 +108,7 @@ export default function BuilderPage() {
                 {
                     method: "POST",
                     credentials: "include",
-                    headers: { "X-AICCORE-Session-Id": session.id },
+                    headers: sessionAuthHeaders(session),
                 }
             ).catch(() => { /* non-fatal */ })
             const res = await fetch(`${apiBase}/api/v1/aiccore/system/status`)
@@ -171,7 +180,7 @@ export default function BuilderPage() {
     }, [session, practiceMode])
 
     const refreshMissionRef = useRef(refreshMissionFromServer)
-    const sessionRef = useRef<{ id: string; nickname: string } | null>(null)
+    const sessionRef = useRef<{ id: string; nickname: string; token: string } | null>(null)
     useEffect(() => {
         refreshMissionRef.current = refreshMissionFromServer
     }, [refreshMissionFromServer])
@@ -187,9 +196,10 @@ export default function BuilderPage() {
     }, [hasChallengeInstructions])
 
     // Handle unlock from LockScreen
-    const handleUnlock = (sessionId: string, nickname: string, userStats?: any) => {
-        setSession({ id: sessionId, nickname })
+    const handleUnlock = (sessionId: string, sessionToken: string, nickname: string, userStats?: any) => {
+        setSession({ id: sessionId, nickname, token: sessionToken })
         localStorage.setItem("aiccore_session_id", sessionId)
+        localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, sessionToken)
         // Per-seat build window (used when mission has duration but no mission-level start_time)
         localStorage.setItem(SESSION_BUILD_START_MS_KEY, String(skewedNow()))
         localStorage.setItem("aiccore_nickname", nickname)
@@ -212,7 +222,7 @@ export default function BuilderPage() {
                 const res = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/deactivate`, {
                     method: "POST",
                     credentials: "include",
-                    headers: { "X-AICCORE-Session-Id": session.id },
+                    headers: sessionAuthHeaders(session),
                 })
                 if (res.ok) {
                     const j = await res.json().catch(() => ({}))
@@ -227,6 +237,7 @@ export default function BuilderPage() {
         }
         setLockScreenPrefillPin(newUnlockFromServer)
         localStorage.removeItem("aiccore_session_id")
+        localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
         localStorage.removeItem(SESSION_BUILD_START_MS_KEY)
         localStorage.removeItem("aiccore_nickname")
         localStorage.removeItem("aiccore_flows_count")
@@ -278,8 +289,15 @@ export default function BuilderPage() {
             try {
                 const apiBase = getApiBase()
                 const response = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/status`, {
-                    credentials: "include"
+                    credentials: "include",
+                    headers: sessionAuthHeaders(session),
                 })
+
+                if (response.status === 403) {
+                    console.warn("Session token missing or stale. Resetting...")
+                    handleReset()
+                    return
+                }
 
                 if (response.status === 404) {
                     console.warn("Session expired or purged. Resetting...")
@@ -306,15 +324,20 @@ export default function BuilderPage() {
     useEffect(() => {
         if (practiceMode !== false) return // null: undecided; true: admin bootstrap
         const savedId = localStorage.getItem("aiccore_session_id")
+        const savedToken = localStorage.getItem(SESSION_TOKEN_STORAGE_KEY)
         const savedName = localStorage.getItem("aiccore_nickname")
         const savedFlows = localStorage.getItem("aiccore_flows_count")
         const savedAchs = localStorage.getItem("aiccore_achievements_count")
 
-        if (savedId && savedName) {
-            setSession({ id: savedId, nickname: savedName })
+        if (savedId && savedName && savedToken) {
+            setSession({ id: savedId, nickname: savedName, token: savedToken })
             if (savedFlows !== null && savedAchs !== null) {
                 setStats({ flows: Number(savedFlows), achievements: Number(savedAchs) })
             }
+        } else if (savedId || savedName || savedToken) {
+            localStorage.removeItem("aiccore_session_id")
+            localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY)
+            localStorage.removeItem("aiccore_nickname")
         }
     }, [practiceMode])
 
@@ -347,9 +370,11 @@ export default function BuilderPage() {
                 }
                 const data = await res.json()
                 const sid = data.session_id as string
+                const token = data.session_token as string
                 const nick = (data.nickname as string) || "Practice"
-                setSession({ id: sid, nickname: nick })
+                setSession({ id: sid, nickname: nick, token })
                 localStorage.setItem("aiccore_session_id", sid)
+                localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, token)
                 localStorage.setItem("aiccore_nickname", nick)
                 const st = data.stats as { flows_count?: number; achievements_count?: number } | undefined
                 if (st) {
@@ -478,9 +503,7 @@ export default function BuilderPage() {
             const res = await fetch(`${apiBase}/api/v1/aiccore/session/${session.id}/submit`, {
                 method: "POST",
                 credentials: "include",
-                headers: {
-                    "X-AICCORE-Session-Id": session.id,
-                },
+                headers: sessionAuthHeaders(session),
             })
             if (res.ok) {
                 setIsSubmitted(true)
@@ -523,7 +546,7 @@ export default function BuilderPage() {
                     credentials: "include",
                     headers: {
                         "Content-Type": "application/json",
-                        "X-AICCORE-Session-Id": session.id,
+                        ...sessionAuthHeaders(session),
                     },
                 }
             )

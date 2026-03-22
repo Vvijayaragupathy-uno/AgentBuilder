@@ -11,7 +11,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { cn, getApiBase } from "@/lib/utils"
+import { cn, fetchWithCredentials, getApiBase } from "@/lib/utils"
 
 interface Station {
     id: string
@@ -39,8 +39,8 @@ export function StationStatus() {
         try {
             const apiBase = getApiBase()
             const [stationsRes, sessionsRes] = await Promise.all([
-                fetch(`${apiBase}/api/v1/aiccore/stations`),
-                fetch(`${apiBase}/api/v1/aiccore/sessions/active`),
+                fetchWithCredentials(`${apiBase}/api/v1/aiccore/stations`),
+                fetchWithCredentials(`${apiBase}/api/v1/aiccore/sessions/active`),
             ])
             if (stationsRes.ok) {
                 const data = await stationsRes.json()

@@ -69,6 +69,10 @@ class Session(Base):
         ForeignKey(f"{AICCORE_SCHEMA}.challenge.id"), nullable=True
     )
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # Browser seats do not always have a registered Station row, so we track liveness per session too.
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=lambda: datetime.now(timezone.utc)
+    )
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_submitted: Mapped[bool] = mapped_column(Boolean, default=False)

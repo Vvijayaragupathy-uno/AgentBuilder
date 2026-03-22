@@ -8,6 +8,7 @@ scripts/railway/dashboard.env
 
 # Python
 .venv/
+.venv-audit/
 __pycache__/
 *.py[cod]
 *$py.class
