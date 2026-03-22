@@ -111,6 +111,34 @@ def ensure_demo_playback_if_gate_open_idle(db: Session) -> bool:
     return True
 
 
+def maybe_auto_finalize_challenge(db: Session) -> Optional[dict]:
+    """
+    Automatic end-of-mission build phase:
+    If a challenge is active, not finalized, 
+    and (start_time + duration) < now UTC,
+    mark as is_finalized=True and open the demo gate.
+    """
+    now_utc = datetime.now(timezone.utc)
+    ch = db.execute(
+        select(Challenge)
+        .where(Challenge.is_active == True, Challenge.is_finalized == False)
+        .order_by(Challenge.created_at.asc())
+    ).scalars().first()
+    
+    if not ch or not ch.start_time:
+        return None
+
+    st_utc = _to_utc_aware(ch.start_time)
+    expires_at = st_utc + timedelta(minutes=int(ch.duration_minutes or 0))
+    if now_utc >= expires_at:
+        ch.is_finalized = True
+        # Open the demo gate automatically!
+        force_open_demo_gate(db)
+        db.commit()
+        return {"challenge_id": str(ch.id), "status": "finalized"}
+    return None
+
+
 def try_open_demo_gate(db: Session) -> bool:
     """Open when arena finalized OR no remaining builders still working on the active challenge.
 
@@ -426,6 +454,7 @@ def _repair_demo_cursor_if_needed(db: Session) -> None:
 
 
 def get_demo_status(db: Session) -> Dict[str, Any]:
+    maybe_auto_finalize_challenge(db)
     advance_demo_if_expired(db)
     _repair_demo_cursor_if_needed(db)
     row = get_or_create_arena_row(db)

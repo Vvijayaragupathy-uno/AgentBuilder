@@ -289,6 +289,9 @@ def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
     return None
 
 
+    return None
+
+
 def heal_duplicate_active_challenges(db_session: Session) -> int:
     """
     If a race or legacy data left >1 row with is_active=True, keep the oldest by
@@ -1557,7 +1560,9 @@ def create_aiccore_app():
         mission_live_payload = None
         leaderboard = []
         with Session(engine) as db_session:
+            from ..backend.demo_ceremony import maybe_auto_finalize_challenge
             expire_stale_builder_sessions_db(db_session)
+            maybe_auto_finalize_challenge(db_session)
             mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             user_stmt = (
                 select(User)
@@ -1974,7 +1979,9 @@ def create_aiccore_app():
     async def get_system_status():
         mission_live_payload = None
         with Session(engine) as db_session:
+            from ..backend.demo_ceremony import maybe_auto_finalize_challenge
             expire_stale_builder_sessions_db(db_session)
+            maybe_auto_finalize_challenge(db_session)
             mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             locked = is_arena_locked_db(db_session)
             # Read-only: if >1 active (race), report the canonical mission (oldest by created_at).
