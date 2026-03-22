@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import anyio
 
 # /app/aiccore/wrapper/main.py → parent×3 = /app (project root in container)
 project_root = Path(__file__).resolve().parent.parent.parent
@@ -12,7 +13,7 @@ print(f"🚀 AICCORE Wrapper starting — root: {project_root}")
 # Import Langflow's app creator
 from langflow.main import setup_app
 from fastapi import Request, Query, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -279,11 +280,17 @@ def create_aiccore_app():
         print(f"⚠️ Langflow frontend dir not found at {static_files_dir}; falling back to backend_only={backend_only}")
         static_files_dir = None
 
+    # When serving bundled frontend assets from this wrapper, build Langflow in
+    # backend-only mode first so its catch-all "/" static mount does not shadow
+    # the AICCORE routes we add below. We mount the SPA ourselves at the end.
+    serve_bundled_frontend = (not backend_only) and (static_files_dir is not None)
+    langflow_backend_only = backend_only or serve_bundled_frontend
+
     print(
         "🚀 Starting Langflow with "
-        f"backend_only={backend_only}, static_files_dir={static_files_dir}"
+        f"backend_only={langflow_backend_only}, static_files_dir={static_files_dir}"
     )
-    app = setup_app(static_files_dir=static_files_dir, backend_only=backend_only)
+    app = setup_app(backend_only=langflow_backend_only)
 
     # Dynamic origins for CORS
     allowed_origins = [
@@ -1958,6 +1965,23 @@ def create_aiccore_app():
     # Attach AICCORE Telemetry Middleware
     app.add_middleware(AICCoreEventMiddleware)
     
+    if serve_bundled_frontend and static_files_dir is not None:
+        app.mount("/", StaticFiles(directory=static_files_dir, html=True), name="langflow-static")
+
+        @app.exception_handler(404)
+        async def bundled_frontend_404_handler(request: Request, exc):
+            if request.url.path.startswith("/api"):
+                detail = exc.detail if isinstance(exc, HTTPException) else "Not Found"
+                return JSONResponse(
+                    status_code=404,
+                    content=detail if isinstance(detail, dict) else {"detail": detail},
+                )
+
+            index_path = anyio.Path(static_files_dir) / "index.html"
+            if not await index_path.exists():
+                raise RuntimeError(f"File at path {index_path} does not exist.")
+            return FileResponse(index_path)
+
     return app
 
 app = create_aiccore_app()
