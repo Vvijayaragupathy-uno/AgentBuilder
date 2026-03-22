@@ -359,7 +359,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
           return {
             title: scheduledEnd ? "Build time ended" : "Demo phase",
             subtitle:
-              "Demo queue is open. On your station, tap Join demo queue — the TV switches to full canvas when someone is in the queue.",
+              "Demo queue is open. When presenters are queued, full-screen playback runs here automatically (facilitator can manage the queue from the dashboard).",
           }
         }
         return {
@@ -371,14 +371,14 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
         return {
           title: "Build time ended",
           subtitle:
-            "All builders have finished or left the mosaic. Facilitator can open the demo queue from the dashboard, or builders can join the queue after submit.",
+            "All builders have finished or left the mosaic. The facilitator can run the demo queue from the dashboard when everyone has submitted.",
         }
       }
     }
     return {
       title: "No live canvases on the mosaic",
       subtitle:
-        "This grid only shows builders who are still active and have not submitted. After submit, your preview disappears here — use Join demo queue on your station to appear on the big screen when demos start.",
+        "This grid only shows builders who are still active and have not submitted. After submit, previews leave this grid — full-screen demos use the queue managed by the facilitator.",
     }
   }, [timer, challenge.id, challenge.start_time, demo?.gate_open, demo?.queue_length])
 

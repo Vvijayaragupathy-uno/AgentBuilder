@@ -48,6 +48,10 @@ def _create_schema_if_needed():
     **Public schema wipe is opt-in** (`AICCORE_NUCLEAR_RESET_PUBLIC=true`). Without it, we never
     DROP tables in `public`, so Langflow can safely share the same Postgres host when it uses
     `public` and AICCORE uses schema `aiccore`. Optional: set `AICCORE_DATABASE_URL` to the same URL explicitly.
+
+    When `AICCORE_NUCLEAR_RESET_PUBLIC` is set, we also drop schema `aiccore` (same as
+    `AICCORE_RESET_DB=true`). Otherwise Langflow is wiped while participants/sessions in `aiccore`
+    survive — a common source of confusion.
     """
     if not DATABASE_URL.startswith(("postgresql", "postgres")):
         return
@@ -59,19 +63,33 @@ def _create_schema_if_needed():
             "Optionally set AICCORE_DATABASE_URL to the same URL. See aiccore/README.md."
         )
 
+    # 0. Check Environment Variables (Case-Insensitive)
+    do_nuclear_reset = str(os.getenv("AICCORE_NUCLEAR_RESET_PUBLIC", "false")).lower() == "true"
+    do_aiccore_reset = str(os.getenv("AICCORE_RESET_DB", "false")).lower() == "true"
+    if do_nuclear_reset:
+        # Single-DB "nuclear" must clear both stacks; arena data is not in `public`.
+        do_aiccore_reset = True
+
+    if do_aiccore_reset or do_nuclear_reset:
+        print(
+            f"🔧 AICCORE Reset Debug: AICCORE_RESET_DB={do_aiccore_reset}, "
+            f"AICCORE_NUCLEAR_RESET_PUBLIC={do_nuclear_reset}"
+        )
+
     with engine.connect() as conn:
         # 1. Force Reset if requested (fixes stale constraints/indexes)
-        if os.getenv("AICCORE_RESET_DB") == "true":
+        if do_aiccore_reset:
             print("☢️  AICCORE Force Reset: Dropping 'aiccore' schema...")
             conn.execute(text("DROP SCHEMA IF EXISTS aiccore CASCADE"))
             conn.commit()
+            print("  ✨ 'aiccore' schema dropped and committed.")
 
         # 2. Ensure aiccore schema exists
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
         conn.commit()
 
         # 3. Optional: legacy one-time wipe of public.* (DANGEROUS if Langflow lives in public)
-        if os.getenv("AICCORE_NUCLEAR_RESET_PUBLIC") == "true":
+        if do_nuclear_reset:
             print("☢️  AICCORE: AICCORE_NUCLEAR_RESET_PUBLIC — dropping and recreating public schema...")
             # Dropping everything in public (tables, types, sequences) ensures a clean slate.
             conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
@@ -91,6 +109,10 @@ def _create_schema_if_needed():
             # still create — skip that check after a full public wipe (see DatabaseService).
             os.environ["LANGFLOW_SKIP_AUTOGENERATE_CHECK"] = "true"
             print("  🔧 Auto-enabled LANGFLOW_SKIP_AUTOGENERATE_CHECK for this boot.")
+            print(
+                "  ⚠️  Turn off AICCORE_NUCLEAR_RESET_PUBLIC after this deploy — "
+                "it wipes `public` and `aiccore` on every boot."
+            )
         else:
             print(
                 "🚀 AICCORE: Skipping public schema DROP (default). "
@@ -102,7 +124,10 @@ def _create_schema_if_needed():
             "SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'aiccore' AND tablename = 'deployment_lock'"
         ))
         if result.first():
-            print("🚀 AICCORE: deployment_lock present, skipping first-boot schema cleanup.")
+            print(
+                "🚀 AICCORE: deployment_lock present — skipping duplicate sentinel creation "
+                "(multi-worker safe)."
+            )
             return
 
         conn.execute(text(

@@ -135,6 +135,7 @@ export default function BuilderPage() {
                         start_time: new Date(Number(stored)).toISOString(),
                         duration: status.duration_minutes,
                         mode: "per_seat",
+                        isFinalized: !!status.is_finalized,
                         missionBuildEndsAt: null,
                     })
                     setIsBeforeStart(false)
@@ -248,6 +249,9 @@ export default function BuilderPage() {
                 const data = await response.json()
                 if (data.is_submitted) {
                     setIsSubmitted(true)
+                }
+                if (typeof data.disable_auto_submit === "boolean") {
+                    localStorage.setItem("aiccore_disable_auto_submit", String(data.disable_auto_submit));
                 }
             } catch (err) {
                 console.log("Status poll failed:", err)
@@ -432,6 +436,11 @@ export default function BuilderPage() {
             setTimeLeft(remaining)
 
             if (remaining === 0 && !isSubmitted && !isSystemLocked) {
+                const disableAuto = localStorage.getItem("aiccore_disable_auto_submit") === "true";
+                if (disableAuto) {
+                    console.log("🚫 Auto-submit disabled by config.");
+                    return;
+                }
                 if (autoSubmitFiredRef.current) return
                 autoSubmitFiredRef.current = true
                 void handleSubmit().then((ok) => {
@@ -462,6 +471,13 @@ export default function BuilderPage() {
     }
 
     const isChallengeFinalized = challengeInfo?.isFinalized === true
+    /** Mission / round is over on the server — "Start over" is misleading; offer sign-out only. */
+    const missionRoundEnded =
+        isChallengeFinalized ||
+        isSystemLocked ||
+        (isSubmitted && !hasActiveChallenge)
+    /** Submitted while others may still be building — station may reset for an early exit. */
+    const showProminentStartOver = isSubmitted && hasActiveChallenge && !isChallengeFinalized && !isSystemLocked
 
     if ((isSubmitted || isSystemLocked || isChallengeFinalized)) {
         return (
@@ -473,14 +489,22 @@ export default function BuilderPage() {
 
                     <div className="space-y-2">
                         <h1 className="text-3xl font-bold text-foreground">
-                            {isChallengeFinalized ? "Challenge Finalized" : isSystemLocked ? "Time's Up" : "All Done!"}
+                            {isChallengeFinalized
+                                ? "Challenge Finalized"
+                                : isSystemLocked
+                                  ? "Time's Up"
+                                  : missionRoundEnded
+                                    ? "Mission complete"
+                                    : "All Done!"}
                         </h1>
                         <p className="text-muted-foreground leading-relaxed">
-                            {isChallengeFinalized 
+                            {isChallengeFinalized
                                 ? "The host has finalized this challenge. No more submissions are accepted."
                                 : isSystemLocked
-                                ? "The challenge has ended. Your work has been saved."
-                                : "Your work has been submitted successfully. Great job!"}
+                                  ? "The challenge has ended. Your work has been saved."
+                                  : missionRoundEnded
+                                    ? "This round is over. Your submission is saved — you can close this window or sign out so the next guest can use this station."
+                                    : "Your work has been submitted successfully. Great job!"}
                         </p>
                     </div>
 
@@ -498,16 +522,38 @@ export default function BuilderPage() {
                         </div>
                     </div>
 
-                    <p className="text-xs text-muted-foreground text-left leading-relaxed max-w-md">
-                        Your submission is stored for the host. Each successful unlock uses up that PIN.
-                    </p>
+                    {showProminentStartOver ? (
+                        <>
+                            <p className="text-xs text-muted-foreground text-left leading-relaxed max-w-md">
+                                Your submission is stored for the host. Use Start over only if you need to leave this
+                                station before the round ends (for example, so someone else can unlock).
+                            </p>
 
-                    <button
-                        onClick={handleReset}
-                        className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.98] shadow-lg shadow-primary/20"
-                    >
-                        Start Over
-                    </button>
+                            <button
+                                type="button"
+                                onClick={handleReset}
+                                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary font-semibold text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.98] shadow-lg shadow-primary/20"
+                            >
+                                Start Over
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <p className="text-xs text-muted-foreground text-left leading-relaxed max-w-md">
+                                {missionRoundEnded
+                                    ? "No need to “start” anything — the challenge is finished."
+                                    : "Your submission is stored for the host."}
+                            </p>
+
+                            <button
+                                type="button"
+                                onClick={handleReset}
+                                className="text-sm font-medium text-muted-foreground underline-offset-4 hover:underline hover:text-foreground"
+                            >
+                                Sign out (release station for next guest)
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
         )

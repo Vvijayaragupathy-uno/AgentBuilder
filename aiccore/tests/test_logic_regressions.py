@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import ForeignKey, String, Uuid, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
-from aiccore.backend.demo_ceremony import _latest_snapshot_for_session
+from aiccore.backend.demo_ceremony import _latest_snapshot_for_session, maybe_auto_finalize_challenge
 from aiccore.backend.eraser import (
     _prepare_manifest_for_restore,
     _submission_lookup_requires_folder_scope,
@@ -314,6 +314,59 @@ def test_requested_challenge_registration_creates_row_once():
     assert resolved_id == challenge_id
     assert created is True
     assert created_again is False
+
+
+def test_maybe_auto_finalize_deactivates_and_skips_zero_duration():
+    engine = _test_engine()
+    Base.metadata.create_all(engine)
+
+    challenge_id = uuid4()
+    past_start = datetime.now(timezone.utc) - timedelta(hours=2)
+    with Session(engine) as db:
+        db.add(
+            Challenge(
+                id=challenge_id,
+                title="Timed",
+                description="d",
+                is_active=True,
+                is_finalized=False,
+                is_registration_open=False,
+                start_time=past_start,
+                duration_minutes=30,
+            )
+        )
+        db.commit()
+
+    with Session(engine) as db:
+        out = maybe_auto_finalize_challenge(db)
+        row = db.get(Challenge, challenge_id)
+
+    assert out is not None
+    assert out["challenge_id"] == str(challenge_id)
+    assert row is not None
+    assert row.is_finalized is True
+    assert row.is_active is False
+
+    zero_dur = uuid4()
+    with Session(engine) as db:
+        db.add(
+            Challenge(
+                id=zero_dur,
+                title="No timer",
+                description="d",
+                is_active=True,
+                is_finalized=False,
+                start_time=past_start,
+                duration_minutes=0,
+            )
+        )
+        db.commit()
+
+    with Session(engine) as db:
+        assert maybe_auto_finalize_challenge(db) is None
+        z = db.get(Challenge, zero_dur)
+    assert z.is_active is True
+    assert z.is_finalized is False
 
 
 def test_requested_challenge_registration_rejects_closed_or_full_challenge():

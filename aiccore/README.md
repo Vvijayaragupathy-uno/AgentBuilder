@@ -56,7 +56,7 @@ AICCORE uses schema **`aiccore`**; Langflow’s Alembic migrations target **`pub
 3. **Optional:** set **`LANGFLOW_DATABASE_URL`** and **`AICCORE_DATABASE_URL`** to references of that same **`DATABASE_URL`**. If **`LANGFLOW_DATABASE_URL`** is unset, the wrapper copies **`DATABASE_URL`** at startup.
 4. AICCORE reads **`AICCORE_DATABASE_URL`**, then **`DATABASE_URL`**, then SQLite locally.
 
-**Safety:** AICCORE **does not** drop `public` unless **`AICCORE_NUCLEAR_RESET_PUBLIC=true`**. Leave that unset in production.
+**Safety:** AICCORE **does not** drop `public` unless **`AICCORE_NUCLEAR_RESET_PUBLIC=true`**. That flag also drops schema **`aiccore`** (participants, sessions, challenges). Leave it **unset/false** in production after a one-time cleanup — otherwise **every deploy wipes** Langflow and arena data.
 
 **Two separate Postgres services** are still supported if you want instance-level isolation — use different URLs for **`LANGFLOW_DATABASE_URL`** and **`AICCORE_DATABASE_URL`**.
 

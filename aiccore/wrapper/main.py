@@ -220,13 +220,21 @@ def challenge_start_time_utc(c: Challenge) -> Optional[datetime]:
     return st.astimezone(timezone.utc)
 
 
+def _optional_dt_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def challenge_is_live_build_window(c: Challenge, now: datetime) -> bool:
     """
     True when this mission counts as "live build" for leaderboard status:
-    challenge must be active AND (no start_time OR now >= start_time in UTC).
+    challenge must be active, not finalized, AND (no start_time OR now >= start_time in UTC).
     Matches builder page: before start_time → waiting, not "building" in the arena sense.
     """
-    if not c.is_active:
+    if not c.is_active or bool(c.is_finalized):
         return False
     st_utc = challenge_start_time_utc(c)
     if st_utc is None:
@@ -305,6 +313,33 @@ def heal_duplicate_active_challenges(db_session: Session) -> int:
         stale.is_active = False
     db_session.commit()
     return len(rows) - 1
+
+
+def _ensure_session_mission_allows_submit(db_session: Session, session_obj: AICSession) -> None:
+    """Reject API submits when the mission is finalized, inactive, or missing."""
+    if session_obj.challenge_id is not None:
+        ch = db_session.get(Challenge, session_obj.challenge_id)
+        if not ch:
+            raise HTTPException(
+                status_code=409,
+                detail="Mission not found for this session",
+            )
+        if ch.is_finalized or not ch.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail="This mission has ended; submissions are closed",
+            )
+        return
+    live = db_session.execute(
+        select(Challenge)
+        .where(Challenge.is_active == True, Challenge.is_finalized == False)
+        .order_by(Challenge.created_at.asc())
+    ).scalars().first()
+    if live is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No live mission to submit to",
+        )
 
 
 def sanitize_string(s: str, length: int = 50) -> str:
@@ -932,7 +967,10 @@ def create_aiccore_app():
             if not session.is_active and not session.is_submitted:
                 raise HTTPException(status_code=404, detail="Session expired")
             db_session.commit()
-            return {"is_submitted": session.is_submitted}
+            return {
+                "is_submitted": session.is_submitted,
+                "disable_auto_submit": os.getenv("AICCORE_DISABLE_AUTO_SUBMIT", "false").lower() == "true",
+            }
 
     @app.post("/api/v1/aiccore/session/{session_id}/attach-to-live-mission")
     async def attach_session_to_live_mission(session_id: UUID, request: Request):
@@ -1214,6 +1252,7 @@ def create_aiccore_app():
                     is_submitted=session_obj.is_submitted,
                 ):
                     raise HTTPException(status_code=409, detail="Session is no longer active")
+                _ensure_session_mission_allows_submit(db_session, session_obj)
 
                 new_submission = Submission(
                     session_id=req.session_id,
@@ -1286,6 +1325,7 @@ def create_aiccore_app():
                 is_submitted=session_obj.is_submitted,
             ):
                 raise HTTPException(status_code=409, detail="Session is no longer active")
+            _ensure_session_mission_allows_submit(db_session, session_obj)
 
         from aiccore.backend.eraser import submit_workspace_as_flow
         try:
@@ -1420,11 +1460,12 @@ def create_aiccore_app():
     async def get_leaderboard():
         from aiccore.backend.models import ChallengeRegistration
         mission_live_payload = None
+        mission_end_payload = None
         leaderboard = []
         with Session(engine) as db_session:
             from ..backend.demo_ceremony import maybe_auto_finalize_challenge
             expire_stale_builder_sessions_db(db_session)
-            maybe_auto_finalize_challenge(db_session)
+            mission_end_payload = maybe_auto_finalize_challenge(db_session)
             mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             user_stmt = select(User).order_by(User.created_at.desc())
             all_users = db_session.execute(user_stmt).scalars().all()
@@ -1549,11 +1590,21 @@ def create_aiccore_app():
             status_rank = {"SUBMITTED": 4, "PARTICIPATING": 3, "CHECKED_IN": 2, "REGISTERED": 1}
             leaderboard.sort(key=lambda x: (x["is_winner"], x["score"], status_rank.get(x["status"], 0)), reverse=True)
 
+        if mission_end_payload:
+            await broadcast_manager.broadcast({
+                "type": "MISSION_ENDED",
+                "data": {
+                    "challenge_id": mission_end_payload["challenge_id"],
+                    "title": mission_end_payload.get("title", ""),
+                },
+            })
         if mission_live_payload:
             await broadcast_manager.broadcast({
                 "type": "MISSION_LIVE",
                 "data": mission_live_payload,
             })
+            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
+        elif mission_end_payload:
             await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
 
         return leaderboard
@@ -1619,6 +1670,7 @@ def create_aiccore_app():
                     .values(is_active=False)
                 )
                 c.is_registration_open = False
+                c.is_finalized = False
             mission_title = c.title
             mission_cid = str(c.id)
             mission_start_iso = c.start_time.isoformat() if c.start_time else None
@@ -1692,9 +1744,21 @@ def create_aiccore_app():
                 c.complexity_level = req.complexity_level
             if req.max_participants is not None:
                 c.max_participants = req.max_participants
-            if req.duration_minutes is not None:
-                c.duration_minutes = req.duration_minutes
-            c.start_time = req.start_time
+            if not c.is_active:
+                if req.duration_minutes is not None:
+                    c.duration_minutes = req.duration_minutes
+                c.start_time = req.start_time
+            else:
+                if req.duration_minutes is not None and req.duration_minutes != c.duration_minutes:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Cannot change duration while the mission is live",
+                    )
+                if _optional_dt_utc(c.start_time) != _optional_dt_utc(req.start_time):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Cannot change start time while the mission is live",
+                    )
             if req.location is not None:
                 c.location = req.location
             if req.is_registration_open is not None:
@@ -1839,10 +1903,11 @@ def create_aiccore_app():
     @app.get("/api/v1/aiccore/system/status")
     async def get_system_status():
         mission_live_payload = None
+        mission_end_payload = None
         with Session(engine) as db_session:
             from ..backend.demo_ceremony import maybe_auto_finalize_challenge
             expire_stale_builder_sessions_db(db_session)
-            maybe_auto_finalize_challenge(db_session)
+            mission_end_payload = maybe_auto_finalize_challenge(db_session)
             mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             locked = is_arena_locked_db(db_session)
             # Read-only: if >1 active (race), report the canonical mission (oldest by created_at).
@@ -1887,11 +1952,21 @@ def create_aiccore_app():
                 "server_time": now_utc.isoformat(),
             }
 
+        if mission_end_payload:
+            await broadcast_manager.broadcast({
+                "type": "MISSION_ENDED",
+                "data": {
+                    "challenge_id": mission_end_payload["challenge_id"],
+                    "title": mission_end_payload.get("title", ""),
+                },
+            })
         if mission_live_payload:
             await broadcast_manager.broadcast({
                 "type": "MISSION_LIVE",
                 "data": mission_live_payload,
             })
+            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
+        elif mission_end_payload:
             await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
 
         return result

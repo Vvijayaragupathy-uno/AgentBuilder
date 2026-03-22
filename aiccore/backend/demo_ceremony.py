@@ -114,9 +114,10 @@ def ensure_demo_playback_if_gate_open_idle(db: Session) -> bool:
 def maybe_auto_finalize_challenge(db: Session) -> Optional[dict]:
     """
     Automatic end-of-mission build phase:
-    If a challenge is active, not finalized, 
-    and (start_time + duration) < now UTC,
-    mark as is_finalized=True and open the demo gate.
+    If a challenge is active, not finalized, has start_time, and duration_minutes > 0,
+    and (start_time + duration) <= now UTC, deactivate it (is_active=False), set
+    is_finalized=True, open the demo gate — matching manual finalize semantics so the
+    next scheduled mission can auto-activate.
     """
     now_utc = datetime.now(timezone.utc)
     ch = db.execute(
@@ -124,18 +125,27 @@ def maybe_auto_finalize_challenge(db: Session) -> Optional[dict]:
         .where(Challenge.is_active == True, Challenge.is_finalized == False)
         .order_by(Challenge.created_at.asc())
     ).scalars().first()
-    
+
     if not ch or not ch.start_time:
         return None
 
+    dur = int(ch.duration_minutes or 0)
+    if dur <= 0:
+        return None
+
     st_utc = _to_utc_aware(ch.start_time)
-    expires_at = st_utc + timedelta(minutes=int(ch.duration_minutes or 0))
+    expires_at = st_utc + timedelta(minutes=dur)
     if now_utc >= expires_at:
+        ch.is_active = False
         ch.is_finalized = True
-        # Open the demo gate automatically!
         force_open_demo_gate(db)
         db.commit()
-        return {"challenge_id": str(ch.id), "status": "finalized"}
+        return {
+            "challenge_id": str(ch.id),
+            "title": ch.title,
+            "status": "finalized",
+            "auto_ended": True,
+        }
     return None
 
 

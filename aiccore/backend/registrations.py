@@ -50,7 +50,13 @@ def ensure_requested_challenge_registration(
     if existing:
         return challenge_id, False
 
-    if challenge.max_participants:
+    cap = challenge.max_participants
+    if cap is not None and cap <= 0:
+        raise HTTPException(
+            status_code=403,
+            detail="Registration is closed for this challenge",
+        )
+    if cap is not None and cap > 0:
         current_count = (
             db_session.execute(
                 select(func.count(ChallengeRegistration.id)).where(
@@ -59,7 +65,7 @@ def ensure_requested_challenge_registration(
             ).scalar()
             or 0
         )
-        if current_count >= challenge.max_participants:
+        if current_count >= cap:
             raise HTTPException(
                 status_code=409,
                 detail="Challenge is full - maximum participants reached",

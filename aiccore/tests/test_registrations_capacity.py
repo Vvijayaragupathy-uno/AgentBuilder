@@ -51,3 +51,36 @@ def test_ensure_requested_challenge_registration_handles_capacity():
         except HTTPException as e:
             assert e.status_code == 409
             assert "maximum participants reached" in e.detail
+
+
+def test_ensure_requested_challenge_registration_rejects_zero_capacity():
+    engine = _test_engine()
+    Base.metadata.create_all(engine)
+
+    challenge_id = uuid4()
+    user_id = uuid4()
+    with Session(engine) as db:
+        db.add(Participant(id=user_id, username="solo", nickname="S"))
+        db.add(
+            Challenge(
+                id=challenge_id,
+                title="Zero cap",
+                description="Test",
+                max_participants=0,
+                is_active=False,
+                is_registration_open=True,
+            )
+        )
+        db.commit()
+
+    with Session(engine) as db:
+        from fastapi import HTTPException
+
+        try:
+            ensure_requested_challenge_registration(
+                db, user_id=user_id, challenge_id_raw=str(challenge_id)
+            )
+            assert False, "expected 403 for max_participants=0"
+        except HTTPException as e:
+            assert e.status_code == 403
+            assert "closed" in str(e.detail).lower()
