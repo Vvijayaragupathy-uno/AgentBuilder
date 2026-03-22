@@ -748,15 +748,17 @@ def create_aiccore_app():
                 reg = db_session.execute(reg_stmt).scalars().first()
                 active_challenge_id = reg.challenge_id if reg else None
 
-            # Stale registration: "latest reg" may point at a mission that already ended (inactive).
+            # Stale registration: "latest reg" may point at a mission that already ended (inactive or finalized).
             # Without this, the seat stays CHECKED_IN off the live mission until manual DB fix.
             if active_challenge_id is not None:
                 ch_row = db_session.get(Challenge, active_challenge_id)
-                if ch_row is None or not ch_row.is_active:
+                # Hard block if finalized OR inactive
+                if ch_row is None or not ch_row.is_active or ch_row.is_finalized:
                     if unlock_explicit_challenge:
+                        reason = "finalized" if (ch_row and ch_row.is_finalized) else "not live"
                         raise HTTPException(
                             status_code=403,
-                            detail="That mission is not live. Use the link for the current challenge or open /builder without challenge_id.",
+                            detail=f"That mission is {reason}. Use the link for the current challenge or open /builder without challenge_id.",
                         )
                     active_challenge_id = None
 
@@ -2013,6 +2015,7 @@ def create_aiccore_app():
                 "locked": locked,
                 "active_challenge": active_challenge.title if active_challenge else None,
                 "active_challenge_id": str(active_challenge.id) if active_challenge else None,
+                "is_finalized": bool(active_challenge.is_finalized) if active_challenge else False,
                 "starter_assets_url": active_challenge.starter_assets_url if active_challenge else None,
                 "instructions_text": active_challenge.instructions_text if active_challenge else None,
                 "instructions_document_url": active_challenge.instructions_document_url

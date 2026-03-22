@@ -49,6 +49,7 @@ export default function BuilderPage() {
         start_time: string
         duration: number
         mode: "mission" | "per_seat"
+        isFinalized?: boolean
         /** Server UTC instant for mission end — aligns countdown with mission_build_window_open. */
         missionBuildEndsAt?: string | null
     } | null>(null)
@@ -139,6 +140,7 @@ export default function BuilderPage() {
                         start_time: status.start_time,
                         duration: status.duration_minutes,
                         mode: "mission",
+                        isFinalized: !!status.is_finalized,
                         missionBuildEndsAt:
                             typeof status.mission_build_ends_at === "string"
                                 ? status.mission_build_ends_at
@@ -675,7 +677,9 @@ export default function BuilderPage() {
         )
     }
 
-    if ((isSubmitted || isSystemLocked) && practiceMode !== true) {
+    const isChallengeFinalized = challengeInfo?.isFinalized === true
+
+    if ((isSubmitted || isSystemLocked || isChallengeFinalized) && practiceMode !== true) {
         return (
             <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f111c] overflow-hidden">
                 <div className="absolute inset-0 bg-primary/5 [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)]" />
@@ -685,10 +689,12 @@ export default function BuilderPage() {
 
                     <div className="space-y-2">
                         <h1 className="text-3xl font-bold text-foreground">
-                            {isSystemLocked ? "Time's Up" : "All Done!"}
+                            {isChallengeFinalized ? "Challenge Finalized" : isSystemLocked ? "Time's Up" : "All Done!"}
                         </h1>
                         <p className="text-muted-foreground leading-relaxed">
-                            {isSystemLocked
+                            {isChallengeFinalized 
+                                ? "The host has finalized this challenge. No more submissions are accepted."
+                                : isSystemLocked
                                 ? "The challenge has ended. Your work has been saved."
                                 : "Your work has been submitted successfully. Great job!"}
                         </p>

@@ -18,6 +18,8 @@ interface Challenge {
     start_time: string | null
     location: string
     is_registration_open: boolean
+    is_active: boolean
+    is_finalized: boolean
     registration_count: number
     banner_image_url?: string
 }
@@ -173,13 +175,15 @@ export function ChallengeDetail({ challengeId, onBack }: ChallengeDetailProps) {
                             >
                                 {challenge.is_registration_open ? "Join Challenge" : "Registration Closed"}
                             </Button>
-                            <button
+                            <Button
                                 type="button"
+                                variant="ghost"
                                 onClick={() => router.push(`/builder?challenge_id=${challenge.id}`)}
-                                className="mt-3 w-full text-center text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
+                                disabled={challenge.is_finalized || (!challenge.is_active && !challenge.is_registration_open)}
+                                className="mt-3 w-full h-8 text-[10px] font-bold uppercase tracking-widest text-primary hover:text-primary/80 hover:bg-primary/5 disabled:opacity-50"
                             >
-                                Already registered? Open builder for this challenge
-                            </button>
+                                Already registered? Open builder
+                            </Button>
                             <p className="text-[9px] text-center mt-3 text-muted-foreground/60">
                                 Limited to {challenge.max_participants} builders per session
                             </p>
