@@ -85,6 +85,11 @@ def _create_schema_if_needed():
                 pass
             conn.commit()
             print("  ✨ Public schema is now fresh.")
+            
+            # MANDATORY: When the public schema is wiped, Langflow needs to re-run migrations.
+            # Langflow's internal check will fail with "mismatch" unless fix_migration is True.
+            os.environ["LANGFLOW_FIX_MIGRATION"] = "true"
+            print("  🔧 Auto-enabled LANGFLOW_FIX_MIGRATION for this boot.")
         else:
             print(
                 "🚀 AICCORE: Skipping public schema DROP (default). "
