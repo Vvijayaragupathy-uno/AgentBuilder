@@ -5,7 +5,15 @@ import { LockScreen } from "@/components/arena/lock-screen"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut, PlayCircle, ExternalLink } from "lucide-react"
 import { LANGFLOW_TEACH_WATCH_URL } from "@/lib/langflow-teach"
-import { applyServerTimeFromIso, cn, getApiBase, getLangflowUrl, getOrCreateBuilderStationId, skewedNow } from "@/lib/utils"
+import {
+    applyServerTimeFromIso,
+    cn,
+    getApiBase,
+    getLangflowUrl,
+    getOrCreateBuilderStationId,
+    isLangflowIframeMisconfigured,
+    skewedNow,
+} from "@/lib/utils"
 import {
     Sheet,
     SheetContent,
@@ -55,6 +63,7 @@ export default function BuilderPage() {
     /** After Start Over, server issues a new one-time PIN (old PIN was consumed at unlock). */
     const [lockScreenPrefillPin, setLockScreenPrefillPin] = useState<string | null>(null)
     const practiceModeRef = useRef(false)
+    const [langflowMisconfigured, setLangflowMisconfigured] = useState(false)
 
     useEffect(() => {
         practiceModeRef.current = practiceMode === true
@@ -63,6 +72,10 @@ export default function BuilderPage() {
     useEffect(() => {
         const p = new URLSearchParams(window.location.search).get("practice") === "1"
         setPracticeMode(p)
+    }, [])
+
+    useEffect(() => {
+        setLangflowMisconfigured(isLangflowIframeMisconfigured())
     }, [])
 
     const clearLockScreenPrefill = useCallback(() => setLockScreenPrefillPin(null), [])
@@ -604,6 +617,8 @@ export default function BuilderPage() {
                     <p className="text-sm text-muted-foreground max-w-md leading-relaxed">{practiceError}</p>
                     <a
                         href="/"
+                        target="_top"
+                        rel="noopener noreferrer"
                         className="text-sm font-semibold text-primary hover:underline"
                     >
                         Back to dashboard
@@ -909,21 +924,45 @@ export default function BuilderPage() {
 
             {/* Builder iframe */}
             <main className="relative flex-1">
-                {!iframeLoaded && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background">
-                        <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                        <p className="text-xs text-muted-foreground">Loading…</p>
+                {langflowMisconfigured ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background p-8 text-center">
+                        <p className="text-sm font-semibold text-amber-400">Langflow URL points at this dashboard</p>
+                        <p className="text-xs text-muted-foreground max-w-md leading-relaxed">
+                            The embedded builder tried to load the same host as the Next.js app, so you see the dashboard inside the iframe.
+                            Set <code className="rounded bg-secondary px-1">NEXT_PUBLIC_LANGFLOW_URL</code> and{" "}
+                            <code className="rounded bg-secondary px-1">NEXT_PUBLIC_AICCORE_API_URL</code> to your{" "}
+                            <strong className="text-foreground">AgentBuilder / Langflow</strong> Railway URL, or enable the same-origin proxy with{" "}
+                            <code className="rounded bg-secondary px-1">NEXT_PUBLIC_AICCORE_PROXY_PREFIX</code> and{" "}
+                            <code className="rounded bg-secondary px-1">AICCORE_UPSTREAM_URL</code> (see <code className="rounded bg-secondary px-1">aiccore/README.md</code>).
+                        </p>
+                        <a
+                            href="/"
+                            target="_top"
+                            rel="noopener noreferrer"
+                            className="text-sm font-medium text-primary hover:underline"
+                        >
+                            Back to dashboard
+                        </a>
                     </div>
+                ) : (
+                    <>
+                        {!iframeLoaded && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background">
+                                <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                                <p className="text-xs text-muted-foreground">Loading…</p>
+                            </div>
+                        )}
+                        <iframe
+                            src={`${getLangflowUrl()}/?session_id=${session.id}`}
+                            className={cn(
+                                "h-full w-full border-0 transition-opacity duration-700",
+                                iframeLoaded ? "opacity-100" : "opacity-0"
+                            )}
+                            onLoad={() => setIframeLoaded(true)}
+                            title={AICCORE_MAKERSPACE}
+                        />
+                    </>
                 )}
-                <iframe
-                    src={`${getLangflowUrl()}/?session_id=${session.id}`}
-                    className={cn(
-                        "h-full w-full border-0 transition-opacity duration-700",
-                        iframeLoaded ? "opacity-100" : "opacity-0"
-                    )}
-                    onLoad={() => setIframeLoaded(true)}
-                    title={AICCORE_MAKERSPACE}
-                />
             </main>
         </div>
     )

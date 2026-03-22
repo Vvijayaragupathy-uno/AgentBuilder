@@ -137,3 +137,17 @@ export function getLangflowUrl() {
 
   return 'http://localhost:7860'
 }
+
+/**
+ * True when the Langflow iframe would load the same origin as this Next app without a proxy —
+ * that embeds the dashboard home inside the iframe. Point NEXT_PUBLIC_LANGFLOW_URL or
+ * NEXT_PUBLIC_AICCORE_API_URL at the Python/Langflow service, or set NEXT_PUBLIC_AICCORE_PROXY_PREFIX.
+ */
+export function isLangflowIframeMisconfigured(): boolean {
+  if (typeof window === 'undefined') return false
+  if (PROXY_PREFIX) return false
+  const hostname = window.location.hostname
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return false
+  const lf = getLangflowUrl().replace(/\/$/, '')
+  return lf === window.location.origin
+}

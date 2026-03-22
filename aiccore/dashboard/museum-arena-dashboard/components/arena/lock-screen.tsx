@@ -11,6 +11,9 @@ interface Challenge {
     title: string
     description: string
     complexity_level: string
+    is_active?: boolean
+    is_registration_open?: boolean
+    is_finalized?: boolean
 }
 
 interface LockScreenProps {
@@ -32,8 +35,21 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
     const [error, setError] = useState<string | null>(null)
     const [successCode, setSuccessCode] = useState<string | null>(null)
     const [isMounted, setIsMounted] = useState(false)
+    const [arenaClosed, setArenaClosed] = useState<boolean | null>(null)
 
     useEffect(() => { setIsMounted(true) }, [])
+
+    useEffect(() => {
+        const base = getApiBase()
+        if (!base) return
+        fetch(`${base}/api/v1/aiccore/system/status`)
+            .then(r => (r.ok ? r.json() : null))
+            .then((j: { locked?: boolean } | null) => {
+                if (j && typeof j.locked === "boolean") setArenaClosed(!!j.locked)
+                else setArenaClosed(false)
+            })
+            .catch(() => setArenaClosed(false))
+    }, [])
 
     useEffect(() => {
         if (!prefillPin || prefillPin.length !== 4) return
@@ -142,9 +158,23 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
 
     const inputClass = "h-11 w-full rounded-lg bg-secondary/60 px-4 text-sm border border-border focus:border-primary focus:outline-none transition-colors"
 
+    const challengesForRegister =
+        arenaClosed === true
+            ? challenges.filter(c => !c.is_active && c.is_finalized !== true)
+            : challenges
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background p-4">
-            <div className="w-full max-w-sm">
+            <div className="w-full max-w-sm space-y-3">
+                {arenaClosed === true && (
+                    <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-center text-xs text-amber-100 leading-relaxed">
+                        <p className="font-semibold text-amber-50">The arena is closed</p>
+                        <p className="mt-1 text-amber-100/90">
+                            PIN unlock is paused until staff opens the floor. You can still create an account for an{" "}
+                            <span className="font-medium">upcoming</span> mission (not the live round).
+                        </p>
+                    </div>
+                )}
 
                 {/* Card */}
                 <div className="rounded-2xl border border-border bg-card p-8 shadow-sm">
@@ -205,7 +235,7 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
                                     "placeholder:text-muted-foreground/30",
                                     error && "border-destructive"
                                 )}
-                                disabled={loading}
+                                disabled={loading || arenaClosed === true}
                                 autoComplete="one-time-code"
                                 ref={(el) => { if (el) el.focus() }}
                                 suppressHydrationWarning
@@ -215,7 +245,7 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
 
                             <button
                                 type="submit"
-                                disabled={loading || code.length !== 4}
+                                disabled={loading || code.length !== 4 || arenaClosed === true}
                                 className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-opacity disabled:opacity-40 hover:opacity-90"
                             >
                                 {loading
@@ -324,8 +354,13 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
 
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-muted-foreground">Choose a Challenge</label>
+                                    {arenaClosed === true && challengesForRegister.length === 0 ? (
+                                        <p className="text-[11px] text-muted-foreground leading-relaxed rounded-lg border border-border bg-secondary/30 px-3 py-2">
+                                            No upcoming missions open for registration while the arena is closed. Check back when staff opens registration.
+                                        </p>
+                                    ) : (
                                     <div className="flex flex-col gap-1.5 max-h-[130px] overflow-y-auto">
-                                        {challenges.map((c) => (
+                                        {challengesForRegister.map((c) => (
                                             <button
                                                 key={c.id}
                                                 type="button"
@@ -348,6 +383,7 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
                                             </button>
                                         ))}
                                     </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -355,7 +391,14 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
 
                             <button
                                 type="submit"
-                                disabled={loading || !nickname || !username || !selectedChallenge || !password}
+                                disabled={
+                                    loading ||
+                                    !nickname ||
+                                    !username ||
+                                    !selectedChallenge ||
+                                    !password ||
+                                    (arenaClosed === true && challengesForRegister.length === 0)
+                                }
                                 className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-opacity disabled:opacity-40 hover:opacity-90"
                             >
                                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><span>Create Account</span><ArrowRight className="h-4 w-4" /></>}

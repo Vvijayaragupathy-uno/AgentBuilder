@@ -28,8 +28,15 @@ if _raw_url.startswith("postgres"):
         max_overflow=max(0, min(_max_overflow, 100)),
     )
 else:
+    # SQLite has no real schemas; `CREATE TABLE aiccore.participant` is parsed as database
+    # "aiccore" + table "participant" → OperationalError: unknown database aiccore.
+    # Map ORM schema "aiccore" to None so DDL uses unqualified names in the single .db file.
     DATABASE_URL = _raw_url
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        execution_options={"schema_translate_map": {"aiccore": None}},
+    )
 
 
 def _create_schema_if_needed():

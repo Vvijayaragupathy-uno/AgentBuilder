@@ -510,8 +510,11 @@ def create_aiccore_app():
             if is_arena_locked_db(db_session):
                 raise HTTPException(status_code=403, detail="The Arena is currently closed by the administrator.")
 
-            # 1. Find User by unlock_code (NULL = already consumed / must regenerate)
+            # 1. Find User by unlock_code (NULL = already consumed / must regenerate).
+            # Row lock on Postgres so two concurrent unlocks cannot consume the same OTP twice.
             stmt = select(User).where(User.unlock_code == code)
+            if engine.dialect.name == "postgresql":
+                stmt = stmt.with_for_update()
             user = db_session.execute(stmt).scalars().first()
             
             if not user:
@@ -1493,8 +1496,10 @@ def create_aiccore_app():
                     "duration_minutes": c.duration_minutes,
                     "start_time": c.start_time.isoformat() if c.start_time else None,
                     "location": c.location,
-                    # Never treat registration as open while the mission is live (avoids "Open" + 1/10 after start).
-                    "is_registration_open": bool(c.is_registration_open) and not bool(c.is_active),
+                    # Never treat registration as open while the mission is live or after finalize.
+                    "is_registration_open": bool(c.is_registration_open)
+                    and not bool(c.is_active)
+                    and not bool(c.is_finalized),
                     "registration_count": reg_count,
                     "starter_assets_url": c.starter_assets_url,
                     "banner_image_url": c.banner_image_url,
@@ -2083,6 +2088,7 @@ def create_aiccore_app():
                             challenge
                             and challenge.is_registration_open
                             and not challenge.is_active
+                            and not challenge.is_finalized
                         ):
                             cap_stmt = select(func.count(ChallengeRegistration.id)).where(
                                 ChallengeRegistration.challenge_id == challenge_uuid
@@ -2151,6 +2157,7 @@ def create_aiccore_app():
                         challenge
                         and challenge.is_registration_open
                         and not challenge.is_active
+                        and not challenge.is_finalized
                     ):
                         # Check capacity
                         cap_stmt = select(func.count(ChallengeRegistration.id)).where(
