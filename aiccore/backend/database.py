@@ -4,7 +4,9 @@ from sqlalchemy.orm import Session
 
 # AICCORE uses its own env var (AICCORE_DATABASE_URL).
 # Falls back to Railway's DATABASE_URL, then SQLite for local dev.
-_raw_url = os.getenv("AICCORE_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./aiccore.db"
+# Production: set AICCORE_DATABASE_URL to a dedicated Postgres (see aiccore/README.md Railway section).
+_aiccore_explicit = os.getenv("AICCORE_DATABASE_URL")
+_raw_url = _aiccore_explicit or os.getenv("DATABASE_URL") or "sqlite:///./aiccore.db"
 
 if _raw_url.startswith("postgres"):
     # Ensure psycopg2 driver (not psycopg3) and fix scheme
@@ -18,14 +20,21 @@ else:
 
 def _create_schema_if_needed():
     """
-    Nuclear Reset with Race-Condition Protection.
-    
-    Why: Multi-worker uvicorn (e.g. workers=5) triggers this concurrently.
-    We use a 'deployment_lock' table in the 'aiccore' schema as a sentinel.
-    If the table exists, we assume cleanup already happened and skip it.
+    Ensure `aiccore` schema exists and a one-time deployment sentinel for multi-worker startups.
+
+    **Public schema wipe is opt-in** (`AICCORE_NUCLEAR_RESET_PUBLIC=true`). Without it, we never
+    DROP tables in `public`, so Langflow can safely share the same Postgres host when it uses
+    `public` and AICCORE uses schema `aiccore`. Prefer a dedicated DB via `AICCORE_DATABASE_URL`.
     """
     if not DATABASE_URL.startswith(("postgresql", "postgres")):
         return
+
+    if _aiccore_explicit is None and os.getenv("DATABASE_URL"):
+        print(
+            "ℹ️  AICCORE: Using DATABASE_URL (AICCORE_DATABASE_URL unset). "
+            "For production, add a second Railway Postgres and set AICCORE_DATABASE_URL to its URL; "
+            "set LANGFLOW_DATABASE_URL for Langflow. See aiccore/README.md."
+        )
 
     with engine.connect() as conn:
         # 1. Force Reset if requested (fixes stale constraints/indexes)
@@ -38,38 +47,41 @@ def _create_schema_if_needed():
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS aiccore"))
         conn.commit()
 
-        # 2. Check if we already cleaned up this deployment
-        # We look for a sentinel table in our isolated schema
+        # 3. Sentinel: if present, skip first-boot work (multi-worker safe)
         result = conn.execute(text(
             "SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'aiccore' AND tablename = 'deployment_lock'"
         ))
         if result.first():
-            print("🚀 AICCORE: Cleanup already performed, skipping nuclear reset.")
+            print("🚀 AICCORE: deployment_lock present, skipping first-boot schema cleanup.")
             return
 
-        # 3. Discover all tables in the 'public' schema
-        result = conn.execute(text(
-            "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
+        # 4. Optional: legacy one-time wipe of public.* (DANGEROUS if Langflow lives in public)
+        if os.getenv("AICCORE_NUCLEAR_RESET_PUBLIC") == "true":
+            result = conn.execute(text(
+                "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
+            ))
+            public_tables = [row[0] for row in result]
+            if public_tables:
+                print(f"☢️  AICCORE: AICCORE_NUCLEAR_RESET_PUBLIC — dropping {len(public_tables)} public tables...")
+                for table in public_tables:
+                    try:
+                        conn.execute(text(f'DROP TABLE public."{table}" CASCADE'))
+                        conn.commit()
+                        print(f"  🧹 Dropped public.{table}")
+                    except Exception as e:
+                        conn.rollback()
+                        print(f"  ⚠️ Skipping public.{table} (maybe already dropped?): {e}")
+        else:
+            print(
+                "🚀 AICCORE: Skipping public schema DROP (default). "
+                "Set AICCORE_NUCLEAR_RESET_PUBLIC=true only for legacy single-DB cleanup."
+            )
+
+        conn.execute(text(
+            "CREATE TABLE aiccore.deployment_lock (id SERIAL PRIMARY KEY, cleaned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
-        public_tables = [row[0] for row in result]
-
-        if public_tables:
-            print(f"☢️  AICCORE Nuclear Reset: Found {len(public_tables)} tables in public. Resetting...")
-            for table in public_tables:
-                try:
-                    # Use a separate transaction for each drop to handle 'current transaction is aborted' errors
-                    conn.execute(text(f"DROP TABLE public.\"{table}\" CASCADE"))
-                    conn.commit()
-                    print(f"  🧹 Dropped public.{table}")
-                except Exception as e:
-                    # Rollback if it failed so the NEXT drop can proceed
-                    conn.rollback()
-                    print(f"  ⚠️ Skipping public.{table} (maybe already dropped?): {e}")
-
-        # 4. Create the sentinel so other workers skip this next time
-        conn.execute(text("CREATE TABLE aiccore.deployment_lock (id SERIAL PRIMARY KEY, cleaned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"))
         conn.commit()
-        print("✅ AICCORE: Public schema cleanup complete. Lock created.")
+        print("✅ AICCORE: deployment_lock created (first boot).")
 
 
 def _ensure_schema_migrations():

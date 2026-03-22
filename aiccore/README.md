@@ -47,6 +47,20 @@ Accessible at: `http://localhost:3000`
 
 **Railway variables:** Remove **`PYTHONPATH=.`** from the builder service if you set it manually — it overrides the image and can break `import aiccore`. The Docker **`CMD`** forces `PYTHONPATH=/app` at runtime; leaving `PYTHONPATH=.` in the dashboard still overrides Docker `ENV` on some platforms, so delete it on the **AgentBuilder** service. Root **`Dockerfile`** is a multi-stage build that copies the Langflow Vite bundle to **`/app/langflow-frontend`** so `AICCORE_LANGFLOW_FRONTEND_DIR=/app/langflow-frontend` matches the image (avoids missing chunks / “import failed” in the Langflow SPA).
 
+### Railway: two PostgreSQL databases (recommended)
+
+AICCORE uses schema **`aiccore`**; Langflow’s Alembic migrations target **`public`**. Use **two Postgres plugins** in Railway and two explicit URLs so you never mix Langflow metadata with AICCORE data (and you avoid accidental wipes of `public`). **Creating databases is done in the Railway UI**, not from this repo.
+
+1. **New** → **Database** → **PostgreSQL** to add a second Postgres if you only have one. Rename services for clarity (e.g. Langflow DB vs AICCORE DB).
+2. Open your **wrapper / AgentBuilder** service → **Variables**.
+3. **`LANGFLOW_DATABASE_URL`** → **Variable reference** → Postgres for Langflow → **`DATABASE_URL`** (or the connection variable that plugin provides).
+4. **`AICCORE_DATABASE_URL`** → **Variable reference** → the **other** Postgres → **`DATABASE_URL`**.
+5. If a leftover **`DATABASE_URL`** on this service pointed at a single shared DB, remove or replace it so only the two references above define where each stack connects.
+
+Langflow reads **`LANGFLOW_DATABASE_URL`**. AICCORE reads **`AICCORE_DATABASE_URL`**, then falls back to **`DATABASE_URL`**.
+
+**Legacy single Postgres:** AICCORE **does not** drop all `public` tables unless **`AICCORE_NUCLEAR_RESET_PUBLIC=true`**. Leave that unset in production; use it only for a deliberate one-time cleanup, then remove it.
+
 The dashboard calls AICCORE REST + WebSocket via **`getApiBase()`** in `museum-arena-dashboard/lib/utils.ts`:
 
 1. **`NEXT_PUBLIC_AICCORE_API_URL`** (recommended on Railway)  

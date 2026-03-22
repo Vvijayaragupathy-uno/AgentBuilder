@@ -1,0 +1,11 @@
+# Railway: https://docs.railway.com/reference/config-as-code
+# Create the two Postgres databases in the Railway UI, then set LANGFLOW_DATABASE_URL
+# and AICCORE_DATABASE_URL on this service (see aiccore/README.md).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

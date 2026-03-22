@@ -50,7 +50,8 @@ async def initialize_database(*, fix_migration: bool = False) -> None:
         # and run the migrations again
         logger.warning("Wrong revision in DB, deleting alembic_version table and running migrations again")
         async with session_getter(database_service) as session:
-            await session.exec(text("DROP TABLE alembic_version"))
+            await session.exec(text("DROP TABLE IF EXISTS alembic_version"))
+            await session.commit()
         await database_service.run_migrations(fix=fix_migration)
     except Exception as exc:
         # if the exception involves tables already existing
