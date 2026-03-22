@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { Crown, Monitor, Rocket, Zap, UserCheck, LogIn, Clock, Trophy } from "lucide-react"
+import { Crown, Monitor, Rocket, Zap, UserCheck, LogIn, Clock, Trophy, Hourglass } from "lucide-react"
 import { MosaicDisplay, type MosaicEmptyState } from "./mosaic-display"
 import { FlowPreviewCard } from "./flow-preview-card"
 import { playTVSting } from "@/lib/tv-audio"
@@ -16,6 +16,9 @@ interface DemoPresenting {
   segment_ends_at: string | null
 }
 
+/** Server-computed: one display mode for the live-mission TV plate (see demo/status). */
+export type TVLiveMode = "build_mosaic" | "demo_fullscreen" | "between_rounds"
+
 interface DemoStatusPayload {
   gate_open: boolean
   queue: { session_id: string; nickname: string; station_id: string | null }[]
@@ -23,6 +26,8 @@ interface DemoStatusPayload {
   queue_length: number
   presenting: DemoPresenting | null
   segment_seconds: number
+  /** Single source of truth from backend — mosaic vs fullscreen Langflow vs transition. */
+  tv_mode?: TVLiveMode
 }
 
 // ── Countdown Timer Hook ──────────────────────────────────────────────────────
@@ -307,6 +312,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
 
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
   const presenting = demo?.gate_open && demo.presenting
+  const tvMode: TVLiveMode = demo?.tv_mode ?? (presenting ? "demo_fullscreen" : "build_mosaic")
 
   /** During full-screen demo, show this slot’s countdown — not the mission build clock (avoids “two timers”). */
   const [demoSlotClock, setDemoSlotClock] = useState<string | null>(null)
@@ -387,6 +393,29 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
     challenge.complexity_level === "Intermediate" ? "bg-amber-500/20  text-amber-400  ring-amber-500/30"  :
                                                     "bg-rose-500/20   text-rose-400   ring-rose-500/30"
 
+  const betweenWaitingCopy = useMemo(() => {
+    if (tvMode !== "between_rounds" || presenting) return null
+    const qlen = demo?.queue_length ?? 0
+    const open = demo?.gate_open
+    if (open && qlen > 0) {
+      return {
+        title: "Demo queue ready",
+        subtitle: `${qlen} in queue — full-screen demo starts when the current slot begins.`,
+      }
+    }
+    if (open && qlen === 0) {
+      return {
+        title: "Waiting for presenters",
+        subtitle: "The demo queue is open. The facilitator can add presenters or start playback from the dashboard.",
+      }
+    }
+    return {
+      title: "Build window ended",
+      subtitle:
+        "Mosaic tiles only show active, unsubmitted builders. Next: facilitator runs demos when everyone has submitted, or the host finalizes the mission.",
+    }
+  }, [tvMode, presenting, demo?.gate_open, demo?.queue_length])
+
   return (
     <div className="relative h-screen w-screen flex flex-col overflow-hidden bg-background">
 
@@ -416,6 +445,23 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
         <div className="h-6 w-px bg-white/10" />
 
         <div className="flex items-center gap-3 flex-1 min-w-0">
+          <span
+            className={cn(
+              "shrink-0 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md ring-1",
+              tvMode === "demo_fullscreen"
+                ? "ring-violet-500/40 bg-violet-500/15 text-violet-200"
+                : tvMode === "between_rounds"
+                  ? "ring-amber-500/35 bg-amber-500/10 text-amber-200"
+                  : "ring-emerald-500/35 bg-emerald-500/10 text-emerald-200",
+            )}
+            title="Server tv_mode — build mosaic vs full-screen demo vs between rounds"
+          >
+            {tvMode === "demo_fullscreen"
+              ? "Demo"
+              : tvMode === "between_rounds"
+                ? "Between"
+                : "Build"}
+          </span>
           <span className={cn(
             "shrink-0 text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full ring-1",
             complexityStyle,
@@ -430,7 +476,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
         <div
           className={cn(
             "flex flex-col items-end gap-0.5 glass rounded-xl px-5 py-2 ring-1 shrink-0 min-w-[140px]",
-            presenting ? "ring-violet-500/30" : "ring-primary/20",
+            presenting ? "ring-violet-500/30" : tvMode === "between_rounds" ? "ring-amber-500/25" : "ring-primary/20",
           )}
         >
           {presenting && demoSlotClock != null ? (
@@ -445,10 +491,31 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
                 </span>
               </div>
               <p className="text-[10px] text-muted-foreground/75 text-right leading-snug max-w-[220px]">
-                Mission build window still{" "}
-                <span className="font-mono font-bold text-primary/85">{timer}</span> until challenge ends or finalize
+                {tvMode === "build_mosaic" ? (
+                  <>
+                    Mission build clock{" "}
+                    <span className="font-mono font-bold text-primary/85">{timer}</span>
+                  </>
+                ) : (
+                  <>Demo slot — full Langflow for {demo?.presenting?.nickname ?? "presenter"}</>
+                )}
               </p>
             </>
+          ) : tvMode === "between_rounds" ? (
+            <div className="flex flex-col items-end gap-1 py-0.5">
+              <span className="text-[9px] font-black uppercase tracking-widest text-amber-300/90">
+                Mission build
+              </span>
+              <div className="flex items-center gap-2">
+                <Hourglass className="h-5 w-5 text-amber-400/90 shrink-0" />
+                <span className="text-[22px] font-black font-mono tabular-nums text-amber-100 leading-tight text-right">
+                  Ended
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground/80 text-right leading-snug max-w-[200px]">
+                Not stuck at 00:00 — build phase is over; demos use the queue next.
+              </p>
+            </div>
           ) : (
             <div className="flex items-center gap-3 py-0.5">
               <Clock className="h-5 w-5 text-primary shrink-0" />
@@ -501,8 +568,34 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
         </div>
       ) : (
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-hidden border-r border-white/5">
-            <MosaicDisplay emptyState={mosaicEmptyState} />
+          <div className="relative flex-1 overflow-hidden border-r border-white/5 min-h-0">
+            {betweenWaitingCopy && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center p-6 md:p-10 pointer-events-none">
+                <div
+                  className={cn(
+                    "pointer-events-auto max-w-lg rounded-2xl border border-amber-500/25 bg-gradient-to-b from-amber-950/90 to-black/80 px-8 py-7 shadow-2xl shadow-black/50 ring-1 ring-amber-500/20",
+                  )}
+                >
+                  <p className="text-[11px] font-black uppercase tracking-[0.35em] text-amber-400/90 mb-2">
+                    Between build & demo
+                  </p>
+                  <h2 className="text-[clamp(1.25rem,3vw,1.75rem)] font-black text-white leading-tight mb-3">
+                    {betweenWaitingCopy.title}
+                  </h2>
+                  <p className="text-[15px] text-amber-100/75 leading-relaxed">
+                    {betweenWaitingCopy.subtitle}
+                  </p>
+                </div>
+              </div>
+            )}
+            <div
+              className={cn(
+                "h-full min-h-0 transition-opacity duration-300",
+                betweenWaitingCopy && "opacity-[0.18] saturate-50",
+              )}
+            >
+              <MosaicDisplay emptyState={mosaicEmptyState} />
+            </div>
           </div>
           <div className="w-[360px] shrink-0 overflow-hidden bg-black/20">
             <TVLeaderboard />
@@ -518,7 +611,11 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
             presenting ? "bg-violet-400" : "bg-primary",
           )} />
           <span className="text-[12px] font-black uppercase tracking-[0.3em] text-primary">
-            {presenting ? "Demo playback — full Langflow canvas" : "Now building — mosaic hides after submit"}
+            {tvMode === "demo_fullscreen"
+              ? "Demo playback — full Langflow canvas + name & station"
+              : tvMode === "between_rounds"
+                ? "Between rounds — build ended or waiting for demo / facilitator"
+                : "Build mosaic — live previews until submit"}
           </span>
         </div>
         <span className="text-white/15">·</span>

@@ -54,6 +54,54 @@ def _to_utc_aware(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _active_canonical_challenge(db: Session) -> Optional[Challenge]:
+    """Oldest active challenge — matches TV / system/status canonical mission."""
+    return db.execute(
+        select(Challenge)
+        .where(Challenge.is_active == True)
+        .order_by(Challenge.created_at.asc())
+    ).scalars().first()
+
+
+def _mission_still_in_build_phase(ch: Optional[Challenge], now_utc: datetime) -> bool:
+    """
+    True while builders may still be working on the mission clock (for TV mode).
+    After scheduled end (start + duration), returns False so TV can show "between rounds"
+    even if the challenge row is still active until finalize.
+    """
+    if not ch or not ch.is_active or ch.is_finalized:
+        return False
+    if ch.start_time is None:
+        return True
+    st_utc = _to_utc_aware(ch.start_time)
+    if now_utc < st_utc:
+        return False
+    dur_m = int(ch.duration_minutes or 0)
+    if dur_m > 0:
+        if now_utc >= st_utc + timedelta(minutes=dur_m):
+            return False
+    return True
+
+
+def _compute_tv_mode(
+    *,
+    presenting: Optional[Dict[str, Any]],
+    live_challenge: Optional[Challenge],
+    now_utc: datetime,
+) -> str:
+    """
+    Single source of truth for the live-mission TV plate (inside TVLive):
+    - build_mosaic: mission build window — show mosaic + leaderboard
+    - demo_fullscreen: timed slot with Langflow iframe + presenter metadata
+    - between_rounds: build window ended (or not started) and not in a demo slot — waiting / idle / demo queue only
+    """
+    if presenting:
+        return "demo_fullscreen"
+    if _mission_still_in_build_phase(live_challenge, now_utc):
+        return "build_mosaic"
+    return "between_rounds"
+
+
 def ordered_queue_rows(db: Session) -> List[DemoQueueEntry]:
     return list(
         db.execute(
@@ -499,6 +547,13 @@ def get_demo_status(db: Session) -> Dict[str, Any]:
                 if row.demo_segment_ends_at
                 else None,
             }
+    now_utc = datetime.now(timezone.utc)
+    live_ch = _active_canonical_challenge(db)
+    tv_mode = _compute_tv_mode(
+        presenting=presenting,
+        live_challenge=live_ch,
+        now_utc=now_utc,
+    )
     return {
         "gate_open": row.demo_gate_open,
         "queue": queue_out,
@@ -506,4 +561,5 @@ def get_demo_status(db: Session) -> Dict[str, Any]:
         "queue_length": len(q),
         "presenting": presenting,
         "segment_seconds": DEMO_SEGMENT_SECONDS,
+        "tv_mode": tv_mode,
     }
