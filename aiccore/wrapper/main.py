@@ -11,6 +11,10 @@ project_root = Path(__file__).resolve().parent.parent.parent
 
 print(f"🚀 AICCORE Wrapper starting — root: {project_root}")
 
+# Single Postgres: Langflow uses `public`; AICCORE uses `aiccore`. Langflow reads LANGFLOW_DATABASE_URL only.
+_pg = (os.getenv("DATABASE_URL") or "").strip()
+if _pg.startswith(("postgres://", "postgresql://")) and not (os.getenv("LANGFLOW_DATABASE_URL") or "").strip():
+    os.environ["LANGFLOW_DATABASE_URL"] = _pg
 
 # Import Langflow's app creator
 from langflow.main import setup_app
@@ -67,18 +71,21 @@ from aiccore.backend.security import (
     admin_cookie_settings_for_scheme,
     admin_cookie_max_age_seconds,
     hash_participant_password,
+    normalize_failed_attempt_state,
+    public_profile_password_error,
+    register_failed_attempt,
     release_station_assignments,
     safe_upload_filename,
     is_valid_admin_cookie,
     is_valid_session_token,
     issue_admin_cookie_value,
     issue_session_token,
+    session_token_max_age_seconds,
     participant_password_needs_upgrade,
-    verify_participant_password,
 )
 from aiccore.backend.session_rules import can_submit_session
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, update, delete, or_
+from sqlalchemy import select, func, update, delete, or_, text
 import random
 import re
 import threading
@@ -230,6 +237,10 @@ def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
     Reduces double-activation under multi-worker with a short process lock (best-effort).
     """
     now_utc = datetime.now(timezone.utc)
+    bind = db_session.bind
+    dialect = getattr(bind, "dialect", None) if bind is not None else None
+    if dialect is not None and dialect.name == "postgresql":
+        db_session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 91_030_221})
     with _AUTO_ACTIVATE_LOCK:
         active_n = (
             db_session.execute(
@@ -310,6 +321,59 @@ def _clear_admin_cookie(response: JSONResponse, request: Request) -> None:
         httponly=True,
         **_admin_cookie_kwargs(request),
     )
+
+
+def _session_cookie_kwargs(request: Request) -> dict:
+    return {
+        "httponly": True,
+        "path": "/",
+        "max_age": session_token_max_age_seconds(),
+        **_admin_cookie_kwargs(request),
+    }
+
+
+def _clear_session_cookies(response: JSONResponse, request: Request) -> None:
+    response.delete_cookie(
+        key="aiccore_session_id",
+        path="/",
+        httponly=True,
+        **_admin_cookie_kwargs(request),
+    )
+    response.delete_cookie(
+        key="aiccore_session_token",
+        path="/",
+        httponly=True,
+        **_admin_cookie_kwargs(request),
+    )
+
+
+def _set_session_cookies(
+    response: JSONResponse,
+    request: Request,
+    *,
+    session_id: str,
+    session_token: str,
+) -> None:
+    kwargs = _session_cookie_kwargs(request)
+    response.set_cookie(key="aiccore_session_id", value=session_id, **kwargs)
+    response.set_cookie(key="aiccore_session_token", value=session_token, **kwargs)
+
+
+def _set_session_id_cookie(
+    response: JSONResponse,
+    request: Request,
+    *,
+    session_id: str,
+) -> None:
+    response.set_cookie(key="aiccore_session_id", value=session_id, **_session_cookie_kwargs(request))
+
+
+def _store_failed_attempt_state(client_ip: str, state: dict[str, Any]) -> None:
+    if state.get("attempts", 0) <= 0 and state.get("locked_until") is None:
+        FAILED_ATTEMPTS.pop(client_ip, None)
+    else:
+        FAILED_ATTEMPTS[client_ip] = state
+
 
 def generate_unlock_code():
     return f"{random.randint(0, 9999):04d}"
@@ -545,11 +609,11 @@ def create_aiccore_app():
         now = datetime.now(timezone.utc)
         
         # 0. Rate Limiting Check
-        if client_ip in FAILED_ATTEMPTS:
-            failed = FAILED_ATTEMPTS[client_ip]
-            if failed["locked_until"] and now < failed["locked_until"]:
-                wait_time = int((failed["locked_until"] - now).total_seconds())
-                raise HTTPException(status_code=429, detail=f"Too many failed attempts. Try again in {wait_time}s")
+        failed = normalize_failed_attempt_state(FAILED_ATTEMPTS.get(client_ip), now=now)
+        _store_failed_attempt_state(client_ip, failed)
+        if failed["locked_until"] and now < failed["locked_until"]:
+            wait_time = int((failed["locked_until"] - now).total_seconds())
+            raise HTTPException(status_code=429, detail=f"Too many failed attempts. Try again in {wait_time}s")
         
         code = (req.unlock_code or "").strip()
         if not code or len(code) < 4:
@@ -571,15 +635,16 @@ def create_aiccore_app():
             
             if not user:
                 # Handle failure tracking
-                failed = FAILED_ATTEMPTS.get(client_ip, {"attempts": 0, "locked_until": None})
-                failed["attempts"] += 1
-                if failed["attempts"] >= MAX_ATTEMPTS:
-                    from datetime import timedelta
-                    failed["locked_until"] = now + timedelta(seconds=LOCKOUT_DURATION_SECONDS)
-                    FAILED_ATTEMPTS[client_ip] = failed
+                failed = register_failed_attempt(
+                    FAILED_ATTEMPTS.get(client_ip),
+                    now=now,
+                    max_attempts=MAX_ATTEMPTS,
+                    lockout_seconds=LOCKOUT_DURATION_SECONDS,
+                )
+                _store_failed_attempt_state(client_ip, failed)
+                if failed["locked_until"] and failed["attempts"] >= MAX_ATTEMPTS:
                     raise HTTPException(status_code=429, detail="Maximum attempts reached. IP locked for 5 minutes.")
-                
-                FAILED_ATTEMPTS[client_ip] = failed
+
                 raise HTTPException(status_code=401, detail=f"Invalid unlock code. {MAX_ATTEMPTS - failed['attempts']} attempts remaining.")
             
             # Reset failures on success
@@ -697,6 +762,10 @@ def create_aiccore_app():
             sub_count_stmt = select(func.count(Submission.id)).join(AICSession).where(AICSession.user_id == user.id)
             flows_count = db_session.execute(sub_count_stmt).scalar() or 0
             ach_count = len(user.honors) if user.honors else 0
+            
+            # MANDATORY: Clear old folder ID to ensure fresh start with the new random naming
+            new_session.langflow_workspace_folder_id = None
+            db_session.flush()
 
             # 4. Update Station status if found
             if station:
@@ -795,23 +864,11 @@ def create_aiccore_app():
             }
             
             res = JSONResponse(content=response)
-            # Keep in sync with builder localStorage (lock screen uses 24h). Short TTL caused
-            # 403 on POST /demo-queue (cookie gone while session id still in UI).
-            res.set_cookie(
-                key="aiccore_session_id",
-                value=str(new_session.id),
-                httponly=True,
-                samesite="lax",
-                max_age=86400,
-                path="/",
-            )
-            res.set_cookie(
-                key="aiccore_session_token",
-                value=session_token,
-                httponly=True,
-                max_age=86400,
-                path="/",
-                **_admin_cookie_kwargs(request),
+            _set_session_cookies(
+                res,
+                request,
+                session_id=str(new_session.id),
+                session_token=session_token,
             )
             return res
 
@@ -870,6 +927,10 @@ def create_aiccore_app():
             sub_count_stmt = select(func.count(Submission.id)).join(AICSession).where(AICSession.user_id == user.id)
             flows_count = db_session.execute(sub_count_stmt).scalar() or 0
             ach_count = len(user.honors) if user.honors else 0
+            
+            # MANDATORY: Clear old folder ID to ensure fresh start
+            new_session.langflow_workspace_folder_id = None
+            db_session.flush()
 
             db_session.commit()
             db_session.refresh(new_session)
@@ -945,21 +1006,11 @@ def create_aiccore_app():
             },
         }
         res = JSONResponse(content=response)
-        res.set_cookie(
-            key="aiccore_session_id",
-            value=str(new_session.id),
-            httponly=True,
-            samesite="lax",
-            max_age=86400,
-            path="/",
-        )
-        res.set_cookie(
-            key="aiccore_session_token",
-            value=session_token,
-            httponly=True,
-            max_age=86400,
-            path="/",
-            **_admin_cookie_kwargs(request),
+        _set_session_cookies(
+            res,
+            request,
+            session_id=str(new_session.id),
+            session_token=session_token,
         )
         return res
 
@@ -1115,22 +1166,7 @@ def create_aiccore_app():
             session_obj = db_session.get(AICSession, session_id)
             if not session_obj:
                 res = JSONResponse(content={"status": "not_found"})
-                res.set_cookie(
-                    key="aiccore_session_id",
-                    value="",
-                    max_age=0,
-                    path="/",
-                    httponly=True,
-                    samesite="lax",
-                )
-                res.set_cookie(
-                    key="aiccore_session_token",
-                    value="",
-                    max_age=0,
-                    path="/",
-                    httponly=True,
-                    **_admin_cookie_kwargs(request),
-                )
+                _clear_session_cookies(res, request)
                 return res
             if session_obj.user_id:
                 u = db_session.get(User, session_obj.user_id)
@@ -1184,22 +1220,7 @@ def create_aiccore_app():
         if new_unlock_code:
             body["new_unlock_code"] = new_unlock_code
         res = JSONResponse(content=body)
-        res.set_cookie(
-            key="aiccore_session_id",
-            value="",
-            max_age=0,
-            path="/",
-            httponly=True,
-            samesite="lax",
-        )
-        res.set_cookie(
-            key="aiccore_session_token",
-            value="",
-            max_age=0,
-            path="/",
-            httponly=True,
-            **_admin_cookie_kwargs(request),
-        )
+        _clear_session_cookies(res, request)
         return res
 
     @app.get("/api/v1/aiccore/sessions/active")
@@ -1382,14 +1403,7 @@ def create_aiccore_app():
             if demo_opened:
                 await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
             res = JSONResponse(content={"status": "success", "submission_id": sub_id})
-            res.set_cookie(
-                key="aiccore_session_id",
-                value=str(session_id),
-                httponly=True,
-                samesite="lax",
-                max_age=86400,
-                path="/",
-            )
+            _set_session_id_cookie(res, request, session_id=str(session_id))
             return res
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -2230,6 +2244,8 @@ def create_aiccore_app():
         
         if not clean_username:
             raise HTTPException(status_code=400, detail="Invalid handle content")
+        if clean_username == PRACTICE_KIOSK_USERNAME:
+            raise HTTPException(status_code=400, detail="Reserved handle")
 
         async def get_user_stats(db_session, user_id):
             # Count total submissions across all sessions for this user
@@ -2252,15 +2268,14 @@ def create_aiccore_app():
             participant_password = req.password or None
             
             if existing:
-                # Password Check
-                if existing.password and not verify_participant_password(
-                    participant_password or "",
-                    existing.password,
-                ):
-                    if not req.password:
-                        raise HTTPException(status_code=401, detail="PASSWORD_REQUIRED")
-                    else:
-                        raise HTTPException(status_code=401, detail="INCORRECT_PASSWORD")
+                password_error = public_profile_password_error(
+                    username=existing.username,
+                    supplied_password=participant_password,
+                    stored_password=existing.password,
+                )
+                if password_error:
+                    status_code = 409 if password_error == "PASSWORD_RESET_REQUIRED" else 401
+                    raise HTTPException(status_code=status_code, detail=password_error)
                 if existing.password and participant_password and participant_password_needs_upgrade(existing.password):
                     existing.password = hash_participant_password(participant_password)
 
@@ -2304,6 +2319,8 @@ def create_aiccore_app():
                 }
             if not clean_nickname:
                 raise HTTPException(status_code=400, detail="Display nickname is required for new profiles")
+            if not participant_password:
+                raise HTTPException(status_code=400, detail="PASSWORD_REQUIRED")
 
             new_code = None
             for _ in range(40):
@@ -2317,7 +2334,7 @@ def create_aiccore_app():
             new_user = User(
                 username=clean_username,
                 nickname=clean_nickname,
-                password=hash_participant_password(participant_password) if participant_password else None,
+                password=hash_participant_password(participant_password),
                 unlock_code=new_code,
                 unlock_code_generated_at=datetime.now(timezone.utc)
             )

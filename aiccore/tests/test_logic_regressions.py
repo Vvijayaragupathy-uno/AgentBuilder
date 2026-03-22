@@ -1,13 +1,21 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from typing import Optional
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy import ForeignKey, String, Uuid, create_engine, select
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from aiccore.backend.demo_ceremony import _latest_snapshot_for_session
-from aiccore.backend.eraser import _prepare_manifest_for_restore
+from aiccore.backend.eraser import (
+    _prepare_manifest_for_restore,
+    _submission_lookup_requires_folder_scope,
+    purge_langflow_workspace_scoped,
+)
 from aiccore.backend.middleware import _inject_flow_folder_id
 from aiccore.backend.registrations import ensure_requested_challenge_registration
 from aiccore.backend.security import (
@@ -19,6 +27,25 @@ from aiccore.backend.security import (
 )
 from aiccore.backend.session_presence import expire_stale_sessions
 from aiccore.backend.models import Base, Challenge, Event, Participant, Session as AICSession
+
+
+class _LFBase(DeclarativeBase):
+    pass
+
+
+class _Folder(_LFBase):
+    __tablename__ = "folder"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    parent_id: Mapped[Optional[UUID]] = mapped_column(Uuid, ForeignKey("folder.id"), nullable=True)
+
+
+class _Flow(_LFBase):
+    __tablename__ = "flow"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    folder_id: Mapped[Optional[UUID]] = mapped_column(Uuid, ForeignKey("folder.id"), nullable=True)
 
 
 def _test_engine():
@@ -129,6 +156,67 @@ def test_prepare_manifest_for_restore_rehomes_old_root_into_current_seat_folder(
     assert prepared["folders"][0]["parent_id"] == current_root
     assert prepared["flows"][0]["folder_id"] == current_root
     assert prepared["flows"][0]["id"] != old_flow
+
+
+def test_submission_lookup_requires_folder_scope_only_when_seat_folder_exists():
+    assert _submission_lookup_requires_folder_scope(uuid4()) is True
+    assert _submission_lookup_requires_folder_scope(None) is False
+
+
+def test_scoped_purge_keeps_other_arena_slot_folders(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _LFBase.metadata.create_all(engine)
+
+    root_id = uuid4()
+    child_id = uuid4()
+    other_root_id = uuid4()
+    scoped_flow_id = uuid4()
+    other_flow_id = uuid4()
+
+    with Session(engine) as db:
+        db.add(_Folder(id=root_id, name="ArenaSlot-root", parent_id=None))
+        db.add(_Folder(id=child_id, name="Child", parent_id=root_id))
+        db.add(_Folder(id=other_root_id, name="ArenaSlot-other", parent_id=None))
+        db.add(_Flow(id=scoped_flow_id, folder_id=child_id))
+        db.add(_Flow(id=other_flow_id, folder_id=other_root_id))
+        db.commit()
+
+    class _AsyncSessionAdapter:
+        def __init__(self, db: Session) -> None:
+            self._db = db
+
+        async def execute(self, stmt):
+            return self._db.execute(stmt)
+
+        async def commit(self) -> None:
+            self._db.commit()
+
+        async def flush(self) -> None:
+            self._db.flush()
+
+        def add(self, obj) -> None:
+            self._db.add(obj)
+
+    @asynccontextmanager
+    async def _fake_session_scope():
+        with Session(engine) as db:
+            yield _AsyncSessionAdapter(db)
+
+    monkeypatch.setattr(
+        "aiccore.backend.eraser._import_langflow_workspace_models",
+        lambda: (_Flow, _Folder, None, None, None, None, _fake_session_scope),
+    )
+
+    import asyncio
+
+    asyncio.run(purge_langflow_workspace_scoped(root_id))
+
+    with Session(engine) as db:
+        assert db.get(_Folder, root_id) is not None
+        assert db.get(_Folder, child_id) is None
+        assert db.get(_Folder, other_root_id) is not None
+        assert db.get(_Flow, scoped_flow_id) is None
+        assert db.get(_Flow, other_flow_id) is not None
 
 
 def test_expire_stale_sessions_deactivates_old_unsubmitted_browser_session():

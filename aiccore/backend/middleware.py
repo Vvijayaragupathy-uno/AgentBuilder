@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import gzip
 import json
 import asyncio
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -16,6 +19,8 @@ from .models import Event
 from .broadcast import broadcast_manager
 from .event_lock import event_sequence_write_lock, ensure_pg_advisory_xact_lock
 from .session_presence import touch_session_presence
+
+logger = logging.getLogger(__name__)
 
 
 async def _read_starlette_response_body(response: Response) -> bytes:
@@ -423,6 +428,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             payload = _blank_langflow_list_payload(payload, path)
             return _encode_filtered_list(payload, response, enc)
 
+        allowed = {root_id}
         try:
             async with session_scope() as lf:
                 allowed = await collect_folder_descendants(lf, root_id)
@@ -430,9 +436,8 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
                     row = (await lf.execute(select(Folder).where(Folder.name == name))).scalars().first()
                     if row:
                         allowed.add(row.id)
-        except Exception:
-            payload = _blank_langflow_list_payload(payload, path)
-            return _encode_filtered_list(payload, response, enc)
+        except Exception as e:
+            logger.error(f"⚠️ Filtering: collect_folder_descendants failed for {root_id}: {e}")
 
         allowed_str = {str(x) for x in allowed}
 

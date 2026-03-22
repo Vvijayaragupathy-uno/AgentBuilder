@@ -167,3 +167,7 @@ class Achievement(Base):
     name: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(String)
     icon_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+# Alias for legacy imports; prefer `Participant` in new code.
+User = Participant

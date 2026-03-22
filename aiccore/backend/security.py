@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import hashlib
 import hmac
 import os
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from typing import Any, Iterable, Optional
 from uuid import UUID
@@ -132,6 +135,53 @@ def admin_cookie_settings_for_scheme(scheme: str | None) -> dict[str, Any]:
     return {"samesite": "lax", "secure": False}
 
 
+def normalize_failed_attempt_state(
+    state: Optional[dict[str, Any]],
+    *,
+    now: datetime,
+) -> dict[str, Any]:
+    """Normalize in-memory unlock rate-limit state and clear expired lockouts."""
+    normalized = dict(state or {})
+    attempts_raw = normalized.get("attempts", 0)
+    try:
+        attempts = max(0, int(attempts_raw))
+    except (TypeError, ValueError):
+        attempts = 0
+
+    locked_until = normalized.get("locked_until")
+    if isinstance(locked_until, datetime):
+        if locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        else:
+            locked_until = locked_until.astimezone(timezone.utc)
+    else:
+        locked_until = None
+
+    now_utc = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    if locked_until is not None and now_utc >= locked_until:
+        attempts = 0
+        locked_until = None
+
+    return {"attempts": attempts, "locked_until": locked_until}
+
+
+def register_failed_attempt(
+    state: Optional[dict[str, Any]],
+    *,
+    now: datetime,
+    max_attempts: int,
+    lockout_seconds: int,
+) -> dict[str, Any]:
+    """Increment a failed-attempt state, resetting any expired lockout first."""
+    normalized = normalize_failed_attempt_state(state, now=now)
+    normalized["attempts"] += 1
+    if normalized["attempts"] >= max(1, int(max_attempts)):
+        normalized["locked_until"] = (
+            now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        ) + timedelta(seconds=max(1, int(lockout_seconds)))
+    return normalized
+
+
 def safe_upload_filename(filename: str | None, *, fallback: str = "upload.bin") -> str:
     raw = (filename or "").strip().replace("\\", "/")
     name = PurePath(raw).name.strip()
@@ -142,6 +192,24 @@ def safe_upload_filename(filename: str | None, *, fallback: str = "upload.bin") 
 
 def is_public_user(username: str | None) -> bool:
     return (username or "").strip() != PRACTICE_KIOSK_USERNAME
+
+
+def public_profile_password_error(
+    *,
+    username: str | None,
+    supplied_password: Optional[str],
+    stored_password: Optional[str],
+) -> Optional[str]:
+    """Return the public login error code for an existing participant profile, or ``None``."""
+    if not is_public_user(username):
+        return None
+    if stored_password is None:
+        return "PASSWORD_RESET_REQUIRED"
+    if not supplied_password:
+        return "PASSWORD_REQUIRED"
+    if not verify_participant_password(supplied_password, stored_password):
+        return "INCORRECT_PASSWORD"
+    return None
 
 
 def release_station_assignments(stations: Iterable[Any], session_ids: set[Any]) -> bool:

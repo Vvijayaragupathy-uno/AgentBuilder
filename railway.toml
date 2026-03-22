@@ -1,6 +1,6 @@
 # Railway: https://docs.railway.com/reference/config-as-code
-# Create the two Postgres databases in the Railway UI, then set LANGFLOW_DATABASE_URL
-# and AICCORE_DATABASE_URL on this service (see aiccore/README.md).
+# One PostgreSQL plugin → DATABASE_URL. Langflow: public schema; AICCORE: aiccore schema.
+# Optional: LANGFLOW_DATABASE_URL / AICCORE_DATABASE_URL = same reference (see aiccore/README.md).
 
 [build]
 builder = "DOCKERFILE"

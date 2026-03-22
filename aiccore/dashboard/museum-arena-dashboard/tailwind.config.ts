@@ -68,8 +68,8 @@ const config: Config = {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-geist-mono)', 'monospace'],
+        sans: ['"Avenir Next"', '"Segoe UI"', 'Inter', 'system-ui', 'sans-serif'],
+        mono: ['"SFMono-Regular"', '"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
       keyframes: {
         'accordion-down': {

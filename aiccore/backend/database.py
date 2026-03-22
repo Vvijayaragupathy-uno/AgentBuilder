@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 # AICCORE uses its own env var (AICCORE_DATABASE_URL).
 # Falls back to Railway's DATABASE_URL, then SQLite for local dev.
-# Production: set AICCORE_DATABASE_URL to a dedicated Postgres (see aiccore/README.md Railway section).
+# Production: one Postgres URL for both stacks (schema `aiccore` vs `public`); see aiccore/README.md.
 _aiccore_explicit = os.getenv("AICCORE_DATABASE_URL")
 _raw_url = _aiccore_explicit or os.getenv("DATABASE_URL") or "sqlite:///./aiccore.db"
 
@@ -45,7 +47,7 @@ def _create_schema_if_needed():
 
     **Public schema wipe is opt-in** (`AICCORE_NUCLEAR_RESET_PUBLIC=true`). Without it, we never
     DROP tables in `public`, so Langflow can safely share the same Postgres host when it uses
-    `public` and AICCORE uses schema `aiccore`. Prefer a dedicated DB via `AICCORE_DATABASE_URL`.
+    `public` and AICCORE uses schema `aiccore`. Optional: set `AICCORE_DATABASE_URL` to the same URL explicitly.
     """
     if not DATABASE_URL.startswith(("postgresql", "postgres")):
         return
@@ -53,8 +55,8 @@ def _create_schema_if_needed():
     if _aiccore_explicit is None and os.getenv("DATABASE_URL"):
         print(
             "ℹ️  AICCORE: Using DATABASE_URL (AICCORE_DATABASE_URL unset). "
-            "For production, add a second Railway Postgres and set AICCORE_DATABASE_URL to its URL; "
-            "set LANGFLOW_DATABASE_URL for Langflow. See aiccore/README.md."
+            "Single Postgres is OK: Langflow → `public`, AICCORE → `aiccore`. "
+            "Optionally set AICCORE_DATABASE_URL to the same URL. See aiccore/README.md."
         )
 
     with engine.connect() as conn:

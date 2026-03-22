@@ -203,7 +203,6 @@ export default function BuilderPage() {
         // Per-seat build window (used when mission has duration but no mission-level start_time)
         localStorage.setItem(SESSION_BUILD_START_MS_KEY, String(skewedNow()))
         localStorage.setItem("aiccore_nickname", nickname)
-        document.cookie = `aiccore_session_id=${sessionId}; path=/; max-age=86400; SameSite=Lax`
 
         if (userStats) {
             setStats({ flows: userStats.flows_count || 0, achievements: userStats.achievements_count || 0 })
@@ -242,7 +241,6 @@ export default function BuilderPage() {
         localStorage.removeItem("aiccore_nickname")
         localStorage.removeItem("aiccore_flows_count")
         localStorage.removeItem("aiccore_achievements_count")
-        document.cookie = "aiccore_session_id=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC"
         setSession(null)
         setStats(null)
         setIframeLoaded(false)

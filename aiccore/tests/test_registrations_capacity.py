@@ -1,7 +1,7 @@
 from uuid import uuid4
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from aiccore.backend.models import Base, Challenge, User, ChallengeRegistration
+from aiccore.backend.models import Base, Challenge, Participant, ChallengeRegistration
 from aiccore.backend.registrations import ensure_requested_challenge_registration
 
 def _test_engine():
@@ -20,7 +20,7 @@ def test_ensure_requested_challenge_registration_handles_capacity():
     
     with Session(engine) as db:
         # Create user
-        db.add(User(id=user_id, username="testuser", nickname="Test User"))
+        db.add(Participant(id=user_id, username="testuser", nickname="Test User"))
         
         # Create full challenge
         db.add(Challenge(
@@ -34,7 +34,7 @@ def test_ensure_requested_challenge_registration_handles_capacity():
         
         # Add a registration to fill it up
         other_user = uuid4()
-        db.add(User(id=other_user, username="otheruser", nickname="Other User"))
+        db.add(Participant(id=other_user, username="otheruser", nickname="Other User"))
         db.add(ChallengeRegistration(user_id=other_user, challenge_id=challenge_id))
         
         db.commit()

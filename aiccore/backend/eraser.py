@@ -1,16 +1,40 @@
+from __future__ import annotations
+
 import asyncio
+import logging
 import os
 from uuid import UUID, uuid4
 from typing import Optional, Set, Dict, Any
 from datetime import datetime
 from sqlalchemy import delete, desc, or_, select
-from langflow.services.database.models import Flow, MessageTable, Variable, TransactionTable, ApiKey, File, Folder, Job, User as LFUser
-from langflow.services.deps import session_scope
-from lfx.log.logger import logger
+
+try:
+    from lfx.log.logger import logger
+except Exception:  # pragma: no cover - test envs may not have lfx installed
+    logger = logging.getLogger(__name__)
 
 # Serialize workspace submit per session — the HTTP handler's pre-check is not atomic with this coroutine.
 _workspace_submit_locks: dict[str, asyncio.Lock] = {}
 _workspace_submit_locks_guard = asyncio.Lock()
+
+
+def _import_langflow_workspace_models():
+    from langflow.services.database.models import (
+        Flow,
+        Folder,
+        MessageTable,
+        TransactionTable,
+        User as LFUser,
+        Variable,
+    )
+    from langflow.services.deps import session_scope
+
+    return Flow, Folder, MessageTable, TransactionTable, Variable, LFUser, session_scope
+
+
+def _submission_lookup_requires_folder_scope(root_folder_id: Optional[UUID]) -> bool:
+    """Shared Langflow DBs must stay seat-scoped whenever a seat folder is available."""
+    return root_folder_id is not None
 
 
 async def _acquire_workspace_submit_lock(session_id: UUID) -> asyncio.Lock:
@@ -25,6 +49,7 @@ async def _acquire_workspace_submit_lock(session_id: UUID) -> asyncio.Lock:
 
 async def collect_folder_descendants(lf_session, root_folder_id: UUID) -> Set[UUID]:
     """All folder IDs at or under root (BFS)."""
+    _, Folder, _, _, _, _, _ = _import_langflow_workspace_models()
     out: Set[UUID] = {root_folder_id}
     frontier = [root_folder_id]
     while frontier:
@@ -173,6 +198,8 @@ async def ensure_langflow_workspace_folder(session_id: UUID) -> Optional[UUID]:
             return None
         stored_fid = aic_sess.langflow_workspace_folder_id
 
+    _, Folder, _, _, _, LFUser, session_scope = _import_langflow_workspace_models()
+
     async with session_scope() as lf:
         user_obj = (await lf.execute(select(LFUser).limit(1))).scalar()
         if not user_obj:
@@ -188,26 +215,23 @@ async def ensure_langflow_workspace_folder(session_id: UUID) -> Optional[UUID]:
                 logger.warning(
                     f"AICCORE: Stored arena folder {stored_fid} missing for session {session_id}; recreating."
                 )
-        # Full UUID — the old 8-hex prefix could collide across seats and reuse one folder,
-        # so two AICCORE sessions saw each other's flows and submit/mosaic used the wrong workspace.
-        folder_name = f"Arena-{session_id}"
+        # CRITICAL: Use a random, non-predictable name for the arena folder.
+        # Predicted names like 'Arena-{session_id}' allowed different participants on the 
+        # same station to see old flows if the cleanup was incomplete.
+        folder_name = f"ArenaSlot-{uuid4().hex[:12]}"
+        
         if new_folder is None:
-            existing = (
-                await lf.execute(select(Folder).where(Folder.user_id == uid, Folder.name == folder_name))
-            ).scalars().first()
-            if existing:
-                new_folder = existing
-            else:
-                new_folder = Folder(
-                    id=uuid4(),
-                    name=folder_name,
-                    description="AICCORE seat workspace",
-                    parent_id=None,
-                    user_id=uid,
-                )
-                lf.add(new_folder)
-                await lf.commit()
-                await lf.refresh(new_folder)
+            # We do NOT search by name anymore to ensure absolute isolation.
+            new_folder = Folder(
+                id=uuid4(),
+                name=folder_name,
+                description="AICCORE seat workspace",
+                parent_id=None,
+                user_id=uid,
+            )
+            lf.add(new_folder)
+            await lf.commit()
+            await lf.refresh(new_folder)
         if new_folder is None:
             return None
         if stored_fid and new_folder.id != stored_fid:
@@ -226,9 +250,10 @@ async def ensure_langflow_workspace_folder(session_id: UUID) -> Optional[UUID]:
 
 
 async def purge_langflow_workspace_scoped(root_folder_id: UUID) -> None:
-    """Delete seat content under root_folder_id, but preserve the root folder itself."""
+    """Delete only this seat's content under ``root_folder_id`` and preserve other seats."""
     logger.info(f"🧹 AICCORE: Scoped purge for Langflow folder {root_folder_id}...")
     try:
+        Flow, Folder, _, _, _, _, session_scope = _import_langflow_workspace_models()
         async with session_scope() as lf:
             scope = await collect_folder_descendants(lf, root_folder_id)
             await lf.execute(delete(Flow).where(Flow.folder_id.in_(scope)))
@@ -249,6 +274,7 @@ async def purge_langflow_workspace_scoped(root_folder_id: UUID) -> None:
                 if not deleted_any:
                     break
             await lf.commit()
+
             logger.info(f"✨ AICCORE: Scoped purge done ({len(scope)} folder slots cleared).")
     except Exception as e:
         logger.error(f"❌ AICCORE: Scoped purge failed: {e}")
@@ -278,18 +304,24 @@ async def capture_full_workspace_snapshot(session_id: UUID):
             except Exception:
                 root_id = aic_sess.langflow_workspace_folder_id
 
+        Flow, Folder, _, _, _, _, session_scope = _import_langflow_workspace_models()
+
         async with session_scope() as session:
+            # BROAD SEARCH: If we have a seat folder, only snapshot that. 
+            # If not (admin/practice), snapshot everything except starters.
             if root_id:
                 scope = await collect_folder_descendants(session, root_id)
                 folder_stmt = select(Folder).where(Folder.id.in_(scope))
                 flow_stmt = select(Flow).where(Flow.folder_id.in_(scope))
-                folders = (await session.execute(folder_stmt)).scalars().all()
-                flows = (await session.execute(flow_stmt)).scalars().all()
-                variables = []
             else:
-                folders = []
-                flows = []
-                variables = []
+                folder_stmt = select(Folder).where(Folder.name.like("ArenaSlot-%"))
+                flow_stmt = select(Flow).where(or_(Flow.folder_id.is_(None), Flow.folder_id.in_(
+                    select(Folder.id).where(Folder.name.like("ArenaSlot-%"))
+                )))
+            
+            folders = (await session.execute(folder_stmt)).scalars().all()
+            flows = (await session.execute(flow_stmt)).scalars().all()
+            variables = []
             
             # 4. Build Manifest
             manifest = {
@@ -362,6 +394,7 @@ async def purge_langflow_workspace():
     """
     logger.info("🧹 AICCORE: Purging Langflow workspace for new session...")
     try:
+        Flow, Folder, MessageTable, TransactionTable, Variable, _, session_scope = _import_langflow_workspace_models()
         async with session_scope() as session:
             # 1. Identify Starter Projects folder to spare its items
             starter_folder_stmt = select(Folder).where(Folder.name == "Starter Projects").limit(1)
@@ -403,6 +436,7 @@ async def restore_user_workspace(manifest: dict, default_flow_folder_id: Optiona
     """
     logger.info("🔄 AICCORE: Re-manifesting builder workspace...")
     try:
+        Flow, Folder, _, _, Variable, LFUser, session_scope = _import_langflow_workspace_models()
         async with session_scope() as session:
             # 1. Identify Default User for Ownership
             user_stmt = select(LFUser).limit(1)
@@ -509,8 +543,10 @@ async def _submit_workspace_as_flow_impl(session_id: UUID) -> str:
                 root_id = aic_sess.langflow_workspace_folder_id
 
         main_flow = None
+        Flow, _, _, _, _, _, session_scope = _import_langflow_workspace_models()
+
         async with session_scope() as session:
-            if root_id:
+            if _submission_lookup_requires_folder_scope(root_id):
                 scope = await collect_folder_descendants(session, root_id)
                 flow_stmt = (
                     select(Flow)
@@ -528,7 +564,9 @@ async def _submit_workspace_as_flow_impl(session_id: UUID) -> str:
                         .limit(1)
                     )
                     main_flow = (await session.execute(flow_stmt)).scalar()
-            # No root_id: never pick an arbitrary global Flow row from another seat's folder.
+            # No global Flow fallback here: in a shared Langflow DB that can pick another
+            # participant's graph. If the seat folder is empty, submit the latest
+            # session-scoped event snapshot instead.
 
         flow_snapshot: Optional[dict] = None
         if main_flow:
@@ -667,4 +705,3 @@ def schedule_workspace_snapshot(session_id: UUID) -> None:
         return
     task = loop.create_task(_debounced())
     _pending_snapshots[key] = task
-
