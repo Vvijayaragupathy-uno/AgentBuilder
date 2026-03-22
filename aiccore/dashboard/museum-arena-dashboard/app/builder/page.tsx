@@ -364,8 +364,8 @@ export default function BuilderPage() {
         return () => document.removeEventListener("visibilitychange", onVis)
     }, [])
 
-    const handleSubmit = useCallback(async () => {
-        if (!session || isSubmitting || isSubmitted) return
+    const handleSubmit = useCallback(async (): Promise<boolean> => {
+        if (!session || isSubmitting || isSubmitted) return false
         setIsSubmitting(true)
         setSubmitError(null)
         try {
@@ -377,7 +377,7 @@ export default function BuilderPage() {
             })
             if (res.ok) {
                 setIsSubmitted(true)
-                return
+                return true
             }
             let msg = `Submit failed (${res.status})`
             try {
@@ -388,9 +388,11 @@ export default function BuilderPage() {
                 /* ignore */
             }
             setSubmitError(msg)
+            return false
         } catch (e) {
             console.error("Submission failed:", e)
             setSubmitError("Network error — try again.")
+            return false
         } finally {
             setIsSubmitting(false)
         }
@@ -405,7 +407,7 @@ export default function BuilderPage() {
     }, [challengeTickKey])
 
     useEffect(() => {
-        if (!challengeInfo) return
+        if (!challengeInfo || isSubmitted || isSystemLocked) return
 
         const timer = setInterval(() => {
             const start = new Date(challengeInfo.start_time).getTime()
@@ -432,8 +434,11 @@ export default function BuilderPage() {
             if (remaining === 0 && !isSubmitted && !isSystemLocked) {
                 if (autoSubmitFiredRef.current) return
                 autoSubmitFiredRef.current = true
-                void handleSubmit()
-                clearInterval(timer)
+                void handleSubmit().then((ok) => {
+                    if (!ok) autoSubmitFiredRef.current = false
+                })
+                // Do not clearInterval here: on failure we retry next tick; on success isSubmitted
+                // flips true and this effect's cleanup disposes the interval.
             }
         }, 1000)
 

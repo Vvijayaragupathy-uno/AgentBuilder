@@ -389,19 +389,25 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         from langflow.initial_setup.constants import STARTER_FOLDER_NAME
         from .eraser import collect_folder_descendants, ensure_langflow_workspace_folder
 
+        has_aic_row = False
+        root_id = None
         with AICSessionORM(aic_engine) as db:
-            aic_sess = db.get(AICSession, session_id)
-            root_id = aic_sess.langflow_workspace_folder_id if aic_sess else None
+            row = db.get(AICSession, session_id)
+            if row:
+                has_aic_row = True
+                root_id = row.langflow_workspace_folder_id
 
         # Validate or recreate the seat folder before Langflow list runs so filtering never trusts
         # a stale folder ID left behind by older code or manual cleanup.
-        if aic_sess:
+        if has_aic_row:
             try:
                 fid = await ensure_langflow_workspace_folder(session_id)
                 if fid:
                     root_id = fid
             except Exception:
-                root_id = aic_sess.langflow_workspace_folder_id
+                with AICSessionORM(aic_engine) as db2:
+                    row2 = db2.get(AICSession, session_id)
+                    root_id = row2.langflow_workspace_folder_id if row2 else root_id
 
         response = await call_next(request)
         if response.status_code != 200:
@@ -424,7 +430,7 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
         path = request.url.path.rstrip("/")
 
         # No AICCORE session row, or no seat folder after ensure: do not leak the global Langflow DB.
-        if not aic_sess or not root_id:
+        if not has_aic_row or not root_id:
             payload = _blank_langflow_list_payload(payload, path)
             return _encode_filtered_list(payload, response, enc)
 

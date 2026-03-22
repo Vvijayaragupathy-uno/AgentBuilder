@@ -286,9 +286,6 @@ def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
     return None
 
 
-    return None
-
-
 def heal_duplicate_active_challenges(db_session: Session) -> int:
     """
     If a race or legacy data left >1 row with is_active=True, keep the oldest by
@@ -820,10 +817,15 @@ def create_aiccore_app():
 
             # 5. Langflow workspace: one folder per AICCORE session so concurrent seats do not share flows.
             try:
+                # Concurrent *builders* (still editing). Submitted seats stay is_active for demo-queue rules
+                # but must not inflate this count — wrong count skips global Langflow purge when folder_id is missing.
                 with Session(engine) as cnt_sess:
                     active_n = (
                         cnt_sess.execute(
-                            select(func.count(AICSession.id)).where(AICSession.is_active == True)
+                            select(func.count(AICSession.id)).where(
+                                AICSession.is_active == True,
+                                AICSession.is_submitted == False,
+                            )
                         ).scalar()
                         or 0
                     )
@@ -844,23 +846,39 @@ def create_aiccore_app():
                         print(f"ℹ️ AICCORE: active_aiccore_sessions={active_n} — global Langflow purge (legacy).")
                         await purge_langflow_workspace()
 
-                # 5.5 Sync Persistence: Restore workspace from latest manifest into this seat's folder when needed
+                # 5.5 Resume-only persistence: never pull canvas state from a *submitted* attempt.
+                # Otherwise a fresh unlock replays old graphs and pairs badly with timer auto-submit.
                 if user.username and user.username != "testuser":
-                    event_stmt = select(Event).join(AICSession).where(
-                        AICSession.user_id == user.id,
-                        AICSession.challenge_id == active_challenge_id,
-                        Event.event_type == "workspace_snapshot"
-                    ).order_by(Event.timestamp.desc())
+                    event_stmt = (
+                        select(Event)
+                        .join(AICSession, Event.session_id == AICSession.id)
+                        .where(
+                            AICSession.user_id == user.id,
+                            AICSession.challenge_id == active_challenge_id,
+                            AICSession.is_submitted == False,
+                            Event.event_type == "workspace_snapshot",
+                        )
+                        .order_by(Event.timestamp.desc())
+                    )
                     latest_event = db_session.execute(event_stmt).scalars().first()
 
                     if latest_event:
                         await restore_user_workspace(latest_event.payload, default_flow_folder_id=seat_folder_id)
                         print(f"🔄 Persistence: Re-manifested full workspace for {user.username}")
-                    else:
-                        sub_stmt = select(Submission).join(AICSession).where(
-                            AICSession.user_id == user.id,
-                            AICSession.challenge_id == active_challenge_id
-                        ).order_by(Submission.submitted_at.desc())
+                    elif os.getenv("AICCORE_RESTORE_LEGACY_SUBMISSION", "").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    ):
+                        sub_stmt = (
+                            select(Submission)
+                            .join(AICSession, Submission.session_id == AICSession.id)
+                            .where(
+                                AICSession.user_id == user.id,
+                                AICSession.challenge_id == active_challenge_id,
+                            )
+                            .order_by(Submission.submitted_at.desc())
+                        )
                         latest_sub = db_session.execute(sub_stmt).scalars().first()
                         if latest_sub:
                             legacy_manifest = {

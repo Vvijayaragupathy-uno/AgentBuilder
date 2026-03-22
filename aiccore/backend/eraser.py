@@ -568,20 +568,29 @@ async def _submit_workspace_as_flow_impl(session_id: UUID) -> str:
             # participant's graph. If the seat folder is empty, submit the latest
             # session-scoped event snapshot instead.
 
+        from .demo_ceremony import _snapshot_canvas_nonempty, get_mosaic_snapshot_for_session
+
         flow_snapshot: Optional[dict] = None
         if main_flow:
             flow_snapshot = main_flow.data if isinstance(main_flow.data, dict) else {}
             if flow_snapshot is None:
                 flow_snapshot = {}
         else:
-            from .demo_ceremony import get_mosaic_snapshot_for_session
-
             with AICSessionORM(aic_engine) as db:
                 snap = get_mosaic_snapshot_for_session(db, session_id)
             if isinstance(snap, dict) and snap:
                 flow_snapshot = snap
 
-        if main_flow is None and flow_snapshot is None:
+        # Empty Langflow rows still exist after purge/restore; prefer session events, then reject empty canvas.
+        if main_flow is not None and (
+            flow_snapshot is None or not _snapshot_canvas_nonempty(flow_snapshot)
+        ):
+            with AICSessionORM(aic_engine) as db:
+                snap = get_mosaic_snapshot_for_session(db, session_id)
+            if isinstance(snap, dict) and _snapshot_canvas_nonempty(snap):
+                flow_snapshot = snap
+
+        if flow_snapshot is None or not _snapshot_canvas_nonempty(flow_snapshot):
             raise Exception("No flows found in workspace to submit.")
 
         # 2. Save to AICCORE Submission table (flow_snapshot from Langflow row or mosaic fallback)
