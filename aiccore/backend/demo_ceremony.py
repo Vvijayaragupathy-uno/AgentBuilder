@@ -222,13 +222,19 @@ def _starter_template_folder_ids(manifest: Dict[str, Any]) -> set[str]:
     return out
 
 
-def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, Any]:
-    """Mosaic HTTP poll: use latest flow_saved for this session (even if empty).
+def _snapshot_canvas_nonempty(snap: Any) -> bool:
+    if not isinstance(snap, dict):
+        return False
+    nodes = snap.get("nodes") or []
+    edges = snap.get("edges") or []
+    return len(nodes) > 0 or len(edges) > 0
 
-    Only if there is no flow_saved do we fall back to workspace_snapshot, picking the
-    richest flow **outside** starter template folders. Previously an empty flow_saved
-    caused a fallback that picked the globally largest flow — wrong when multiple
-    builders share one Langflow DB or when starter templates have more nodes.
+
+def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, Any]:
+    """Mosaic HTTP poll: prefer latest flow_saved when it actually has canvas data.
+
+    If flow_saved exists but Langflow sent a partial PATCH (empty nodes/edges), fall back
+    to workspace_snapshot so live tiles and submit still see the real graph.
     """
     flow_stmt = (
         select(Event)
@@ -239,9 +245,8 @@ def get_mosaic_snapshot_for_session(db: Session, session_id: UUID) -> Dict[str, 
     latest_flow = db.execute(flow_stmt).scalars().first()
     if latest_flow and latest_flow.payload is not None:
         snap = latest_flow.payload.get("snapshot")
-        if isinstance(snap, dict):
+        if isinstance(snap, dict) and _snapshot_canvas_nonempty(snap):
             return snap
-        return {}
 
     ws_stmt = (
         select(Event)

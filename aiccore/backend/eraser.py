@@ -46,7 +46,9 @@ async def ensure_langflow_workspace_folder(session_id: UUID) -> Optional[UUID]:
             logger.error("AICCORE: No Langflow user — cannot create arena folder")
             return None
         uid = user_obj.id
-        folder_name = f"Arena {str(session_id).replace('-', '')[:8]}"
+        # Full UUID — the old 8-hex prefix could collide across seats and reuse one folder,
+        # so two AICCORE sessions saw each other's flows and submit/mosaic used the wrong workspace.
+        folder_name = f"Arena-{session_id}"
         existing = (
             await lf.execute(select(Folder).where(Folder.user_id == uid, Folder.name == folder_name))
         ).scalars().first()

@@ -190,15 +190,21 @@ class AICCoreEventMiddleware(BaseHTTPMiddleware):
             body = {}
             flow_data = {}
 
-        # Put new flows into this seat's arena folder (concurrent builders share one Langflow DB).
-        if request.method == "POST" and "/api/v1/flows" in req_path and isinstance(body, dict) and not body.get("folder_id"):
+        # Put flows into this seat's arena folder (shared Langflow DB). POST: only when missing.
+        # PATCH: always set so edits to starter/template flows move into the seat folder (submit + DB scope).
+        if "/api/v1/flows" in req_path and isinstance(body, dict):
             try:
                 with Session(engine) as db_session:
                     from .models import Session as AICSession
                     s = db_session.get(AICSession, session_id)
-                    if s and s.langflow_workspace_folder_id:
-                        body["folder_id"] = str(s.langflow_workspace_folder_id)
-                        body_bytes = json.dumps(body).encode("utf-8")
+                    fid = str(s.langflow_workspace_folder_id) if s and s.langflow_workspace_folder_id else None
+                    if fid:
+                        if request.method == "POST" and not body.get("folder_id"):
+                            body["folder_id"] = fid
+                            body_bytes = json.dumps(body).encode("utf-8")
+                        elif request.method == "PATCH":
+                            body["folder_id"] = fid
+                            body_bytes = json.dumps(body).encode("utf-8")
             except Exception:
                 pass
 
