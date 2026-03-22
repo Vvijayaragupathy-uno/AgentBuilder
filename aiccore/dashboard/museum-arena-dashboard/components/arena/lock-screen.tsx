@@ -59,11 +59,26 @@ export function LockScreen({ onUnlock }: LockScreenProps) {
                 }),
                 credentials: "include"
             })
-            if (!res.ok) throw new Error("invalid")
+            if (!res.ok) {
+                let detail = "Unlock failed."
+                try {
+                    const err = await res.json()
+                    const raw = err?.detail
+                    detail =
+                        typeof raw === "string"
+                            ? raw
+                            : Array.isArray(raw)
+                                ? raw.map((x: { msg?: string }) => x?.msg).filter(Boolean).join(" ")
+                                : detail
+                } catch {
+                    /* ignore */
+                }
+                throw new Error(detail)
+            }
             const data = await res.json()
             onUnlock(data.session_id, data.nickname, data.stats)
-        } catch {
-            setError("Incorrect PIN. Please try again.")
+        } catch (err: any) {
+            setError(err?.message || "Unlock failed.")
             setCode("")
         } finally {
             setLoading(false)

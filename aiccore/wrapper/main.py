@@ -20,6 +20,7 @@ from pydantic import BaseModel
 import shutil
 from uuid import UUID, uuid4
 from typing import Optional, Dict, Any, List
+from urllib.parse import urlparse
 
 # Import AICCORE backend
 from aiccore.backend.database import init_db, get_session, engine
@@ -61,6 +62,69 @@ import threading
 FAILED_ATTEMPTS = {}
 LOCKOUT_DURATION_SECONDS = 300 # 5 minutes
 MAX_ATTEMPTS = 5
+
+
+def _browser_origins_from_env_blob(blob: str | None) -> List[str]:
+    """
+    Parse browser origins for CORS / CSP frame-ancestors from env strings.
+    Each entry may be a hostname (foo.up.railway.app) or a full URL (https://foo.../path).
+    Prevents double https:// when the value already includes a scheme (common with Railway
+    templates or copy-pasted public URLs).
+    """
+    if not blob:
+        return []
+    out: List[str] = []
+    for part in blob.split(","):
+        raw = part.strip()
+        if not raw:
+            continue
+        if "://" in raw:
+            parsed = urlparse(raw)
+            if parsed.scheme in ("http", "https") and parsed.netloc:
+                out.append(f"{parsed.scheme}://{parsed.netloc}")
+            continue
+        host = raw.split("/")[0].strip()
+        if host:
+            out.append(f"https://{host}")
+    return out
+
+
+def _origins_from_railway_service_ref_env() -> List[str]:
+    """
+    Railway injects one variable per linked service, e.g. RAILWAY_SERVICE_DASHBOARD_URL,
+    RAILWAY_SERVICE_AGENTBUILDER_URL — names depend on service titles. Collect every
+    RAILWAY_SERVICE_*_URL that looks like a public browser host (not *.railway.internal).
+    """
+    out: List[str] = []
+    prefix, suffix = "RAILWAY_SERVICE_", "_URL"
+    for key, val in os.environ.items():
+        if not key.startswith(prefix) or not key.endswith(suffix):
+            continue
+        if not val or not str(val).strip():
+            continue
+        blob = str(val).strip()
+        low = blob.lower()
+        if "://" in low and "railway.internal" in low and "up.railway.app" not in low:
+            continue
+        if "railway.internal" in low and "://" not in low:
+            continue
+        out.extend(_browser_origins_from_env_blob(blob))
+    return out
+
+
+def _collect_aiccore_browser_origins() -> List[str]:
+    """Dashboard / extra hosts that must call the API and embed Langflow (Railway multi-service)."""
+    merged: List[str] = []
+    merged.extend(_browser_origins_from_env_blob(os.getenv("AICCORE_ALLOWED_ORIGINS")))
+    # Every linked Railway service URL (name varies with service title)
+    merged.extend(_origins_from_railway_service_ref_env())
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for o in merged:
+        if o not in seen:
+            seen.add(o)
+            deduped.append(o)
+    return deduped
 
 
 def _aiccore_session_auth_ok(request: Request, session_id: UUID) -> bool:
@@ -292,30 +356,15 @@ def create_aiccore_app():
     )
     app = setup_app(backend_only=langflow_backend_only)
 
-    # Dynamic origins for CORS
-    allowed_origins = [
+    # CORS allow-list built once; middleware registered at the very end so it stays
+    # outermost (Starlette runs last-added middleware first on the request).
+    _cors_allow_origins = [
         "http://localhost:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
     ]
-    
-    # Add Railway service URLs if they exist
-    dashboard_url = os.getenv("RAILWAY_SERVICE_AICCORE_DASHBOARD_URL")
-    if dashboard_url:
-        allowed_origins.append(f"https://{dashboard_url}")
-        
-    langflow_url = os.getenv("RAILWAY_SERVICE_HAPPY_CAT_URL")
-    if langflow_url:
-        allowed_origins.append(f"https://{langflow_url}")
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True, # Required for cookies/auth with explicit origins
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    _cors_allow_origins.extend(_collect_aiccore_browser_origins())
 
     # Initialize AICCORE Database
     print("🔧 Initializing AICCORE Database...")
@@ -344,13 +393,7 @@ def create_aiccore_app():
             "http://127.0.0.1:3000",
             "http://127.0.0.1:3001",
         ]
-        # Include Railway service URLs when available
-        dashboard_url = os.getenv("RAILWAY_SERVICE_AICCORE_DASHBOARD_URL")
-        if dashboard_url:
-            frame_ancestors.append(f"https://{dashboard_url}")
-        happy_cat_url = os.getenv("RAILWAY_SERVICE_HAPPY_CAT_URL")
-        if happy_cat_url:
-            frame_ancestors.append(f"https://{happy_cat_url}")
+        frame_ancestors.extend(_collect_aiccore_browser_origins())
 
         csp = response.headers.get("Content-Security-Policy", "")
         if csp:
@@ -1962,9 +2005,17 @@ def create_aiccore_app():
         state = await get_arena_state()
         return {"status": "ok", "data": state}
 
-    # Attach AICCORE Telemetry Middleware
+    # Attach AICCORE Telemetry Middleware (inner); CORS added last = outermost.
     app.add_middleware(AICCoreEventMiddleware)
-    
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_allow_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     if serve_bundled_frontend and static_files_dir is not None:
         app.mount("/", StaticFiles(directory=static_files_dir, html=True), name="langflow-static")
 

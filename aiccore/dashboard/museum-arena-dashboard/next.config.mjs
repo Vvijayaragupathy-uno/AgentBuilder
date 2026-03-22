@@ -1,8 +1,17 @@
 /** @type {import('next').NextConfig} */
-const upstream =
+function normalizeRewriteUpstream(raw) {
+  const s = (raw || "").trim()
+  if (!s || s.startsWith("/")) return ""
+  if (s.startsWith("http://") || s.startsWith("https://")) return s
+  // Railway often provides hostname only (e.g. *.up.railway.app)
+  return `https://${s}`
+}
+
+const upstream = normalizeRewriteUpstream(
   process.env.AICCORE_UPSTREAM_URL ||
-  process.env.NEXT_PUBLIC_AICCORE_API_URL ||
-  ""
+    process.env.NEXT_PUBLIC_AICCORE_API_URL ||
+    "",
+)
 
 const nextConfig = {
   typescript: {

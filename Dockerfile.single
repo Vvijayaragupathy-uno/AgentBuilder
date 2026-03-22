@@ -47,4 +47,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 7860
 
-CMD ["sh", "-c", "python -m uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]
+# Same as root Dockerfile; PYTHONPATH forced so Railway overrides cannot break aiccore imports
+CMD ["sh", "-c", "PYTHONPATH=/app python -m uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]

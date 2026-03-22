@@ -43,6 +43,10 @@ Accessible at: `http://localhost:3000`
 
 ## Railway / production URLs (`getApiBase()`)
 
+**Backend CORS (builder / Langflow service):** The wrapper allows localhost plus **every `RAILWAY_SERVICE_*_URL`** Railway injects for linked services (dashboard, builder, etc.), normalized to `https://…` origins. Add **`AICCORE_ALLOWED_ORIGINS`** (comma-separated hostnames or full URLs) for **custom domains** or hosts not exposed as service-reference variables. Without a matching `Origin`, the browser blocks API calls and the embedded builder breaks.
+
+**Railway variables:** Remove **`PYTHONPATH=.`** from the builder service if you set it manually — it overrides the image and can break `import aiccore`. The Docker **`CMD`** forces `PYTHONPATH=/app` at runtime; leaving `PYTHONPATH=.` in the dashboard still overrides Docker `ENV` on some platforms, so delete it on the **AgentBuilder** service. Root **`Dockerfile`** is a multi-stage build that copies the Langflow Vite bundle to **`/app/langflow-frontend`** so `AICCORE_LANGFLOW_FRONTEND_DIR=/app/langflow-frontend` matches the image (avoids missing chunks / “import failed” in the Langflow SPA).
+
 The dashboard calls AICCORE REST + WebSocket via **`getApiBase()`** in `museum-arena-dashboard/lib/utils.ts`:
 
 1. **`NEXT_PUBLIC_AICCORE_API_URL`** (recommended on Railway)  

@@ -1,59 +1,56 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# python:3.11-slim + langflow-base (backend only, no bundled frontend)
+# Multi-stage: Langflow Vite build → Python image with AICCORE + bundled SPA.
+# Matches Railway “one service” (Langflow UI + API + AICCORE). Backend-only deploys
+# can set AICCORE_BACKEND_ONLY=true (SPA files stay in image but are not mounted).
 #
-# Why NOT langflow==1.8.0?  → Full package bundles the compiled JS frontend
-#                             making the image 4GB+ (Railway limit is 4GB)
-# Why langflow-base==0.8.0? → Backend only, provides langflow.main.setup_app,
-#                             already includes lfx as a dependency, ~1.5GB image
+# Railway: do not set PYTHONPATH=. on the service — it overrides this image and can
+# break `import aiccore`. CMD below forces PYTHONPATH=/app at runtime.
 # ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS langflow_frontend_build
+
+WORKDIR /frontend
+
+COPY langflow/src/frontend/package.json /frontend/package.json
+COPY langflow/src/frontend/package-lock.json /frontend/package-lock.json
+COPY langflow/src/frontend/tsconfig.json /frontend/tsconfig.json
+COPY langflow/src/frontend/vite.config.mts /frontend/vite.config.mts
+COPY langflow/src/frontend/index.html /frontend/index.html
+COPY langflow/src/frontend/tailwind.config.mjs /frontend/tailwind.config.mjs
+COPY langflow/src/frontend/postcss.config.js /frontend/postcss.config.js
+RUN npm ci
+
+COPY langflow/src/frontend/src /frontend/src
+COPY langflow/src/frontend/public /frontend/public
+# Same-origin API (baseURL "" in customization); no BACKEND_URL needed for Railway single host
+RUN npm run build
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
-# Run backend-only mode (no frontend to serve)
-ENV AICCORE_BACKEND_ONLY=true
-
-# ── Database separation ───────────────────────────────────────────────────────
-# Both Langflow and AICCORE use the same Railway Postgres, but in DIFFERENT schemas:
-#   Langflow  → LANGFLOW_DATABASE_URL → public schema (its own tables)
-#   AICCORE   → DATABASE_URL → aiccore schema (Session, Challenge, Submission, etc.)
-# Langflow's Alembic checker only scans 'public' — it never sees the 'aiccore' schema.
-#
-# ACTION REQUIRED in Railway dashboard:
-#   Set LANGFLOW_DATABASE_URL = <your Railway Postgres URL>
-#   (AICCORE will automatically use DATABASE_URL that Railway already injects)
-# ─────────────────────────────────────────────────────────────────────────────
+ENV AICCORE_BACKEND_ONLY=false
+ENV AICCORE_LANGFLOW_FRONTEND_DIR=/app/langflow-frontend
 ENV LANGFLOW_AUTO_LOGIN=true
-# Required alongside AUTO_LOGIN: makes skip_auth_auto_login apply to all
-# auth paths (JWT + API-key), not just API-key. Without this the Langflow
-# React frontend gets 403 on whoami/variables/projects during initialisation
-# because those requests race ahead of the auto_login cookie being stored.
 ENV LANGFLOW_SKIP_AUTH_AUTO_LOGIN=true
 
 WORKDIR /app
 
-# System deps for psycopg2 (libpq) and compiling native extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev \
         build-essential \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Step 1: Install langflow-base (backend only — includes lfx as a dependency)
-# This provides: langflow.main.setup_app
-# This does NOT include: the compiled JS frontend (saves ~2.5GB)
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir "langflow-base==0.8.0"
 
-# Step 2: Copy AICCORE application code + requirements
 COPY aiccore /app/aiccore
 COPY requirements.txt /app/requirements.txt
+COPY --from=langflow_frontend_build /frontend/build /app/langflow-frontend
 
-# Step 3: Install remaining app-specific dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 7860
 
-# Use sh -c so Railway's $PORT env var gets expanded by the shell
-CMD ["sh", "-c", "python -m uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]
+# Force PYTHONPATH so Railway dashboard vars like PYTHONPATH=. cannot break imports
+CMD ["sh", "-c", "PYTHONPATH=/app python -m uvicorn aiccore.wrapper.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]
