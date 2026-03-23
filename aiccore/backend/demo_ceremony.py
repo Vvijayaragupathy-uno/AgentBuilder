@@ -35,6 +35,40 @@ def _demo_segment_seconds() -> int:
 DEMO_SEGMENT_SECONDS = _demo_segment_seconds()
 
 
+def _demo_lineup_seconds() -> int:
+    raw = os.getenv("AICCORE_DEMO_LINEUP_SECONDS", "30")
+    try:
+        return max(5, min(int(raw), 600))
+    except ValueError:
+        return 30
+
+
+def _demo_present_seconds() -> int:
+    raw = os.getenv("AICCORE_DEMO_PRESENT_SECONDS", "180")
+    try:
+        return max(30, min(int(raw), 7200))
+    except ValueError:
+        return 180
+
+
+def _demo_prep_seconds() -> int:
+    raw = os.getenv("AICCORE_DEMO_PREP_SECONDS", "30")
+    try:
+        return max(5, min(int(raw), 600))
+    except ValueError:
+        return 30
+
+
+def _segment_seconds_for_phase(phase: Optional[str]) -> int:
+    if phase == "lineup":
+        return _demo_lineup_seconds()
+    if phase == "prep":
+        return _demo_prep_seconds()
+    if phase == "present":
+        return _demo_present_seconds()
+    return DEMO_SEGMENT_SECONDS
+
+
 def get_or_create_arena_row(db: Session) -> ArenaState:
     row = db.get(ArenaState, 1)
     if row is None:
@@ -85,18 +119,33 @@ def _mission_still_in_build_phase(ch: Optional[Challenge], now_utc: datetime) ->
 
 def _compute_tv_mode(
     *,
+    row: ArenaState,
+    queue_len: int,
     presenting: Optional[Dict[str, Any]],
     live_challenge: Optional[Challenge],
     now_utc: datetime,
 ) -> str:
     """
-    Single source of truth for the live-mission TV plate (inside TVLive):
-    - build_mosaic: mission build window — show mosaic + leaderboard
-    - demo_fullscreen: timed slot with Langflow iframe + presenter metadata
-    - between_rounds: build window ended (or not started) and not in a demo slot — waiting / idle / demo queue only
+    Live-mission TV plate:
+    - build_mosaic / between_rounds: mission timing
+    - demo_lineup: roster before each presenter block (who joined the demo queue)
+    - demo_present: full Langflow + flow preview for current slot
+    - demo_prep: gap before the next presenter
     """
+    if (
+        row.demo_gate_open
+        and row.demo_cursor >= 0
+        and queue_len > 0
+    ):
+        eff = row.demo_phase or "present"
+        if eff == "lineup":
+            return "demo_lineup"
+        if eff == "prep":
+            return "demo_prep"
+        if eff == "present":
+            return "demo_present"
     if presenting:
-        return "demo_fullscreen"
+        return "demo_present"
     if _mission_still_in_build_phase(live_challenge, now_utc):
         return "build_mosaic"
     return "between_rounds"
@@ -115,7 +164,16 @@ def reset_demo_state(db: Session) -> None:
     row.demo_gate_open = False
     row.demo_cursor = -1
     row.demo_segment_ends_at = None
+    row.demo_phase = None
     db.execute(delete(DemoQueueEntry))
+    db.commit()
+
+
+def _close_demo_sequence(row: ArenaState, db: Session) -> None:
+    row.demo_gate_open = False
+    row.demo_cursor = -1
+    row.demo_segment_ends_at = None
+    row.demo_phase = None
     db.commit()
 
 
@@ -125,10 +183,12 @@ def _start_demo_playback_from_gate(db: Session) -> None:
     if not q:
         row.demo_cursor = -1
         row.demo_segment_ends_at = None
+        row.demo_phase = None
     else:
         row.demo_cursor = 0
+        row.demo_phase = "lineup"
         row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
-            seconds=DEMO_SEGMENT_SECONDS
+            seconds=_demo_lineup_seconds()
         )
 
 
@@ -152,8 +212,9 @@ def ensure_demo_playback_if_gate_open_idle(db: Session) -> bool:
     if not q:
         return False
     row.demo_cursor = 0
+    row.demo_phase = "lineup"
     row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
-        seconds=DEMO_SEGMENT_SECONDS
+        seconds=_demo_lineup_seconds()
     )
     db.commit()
     return True
@@ -331,6 +392,41 @@ def finalize_or_open_demo_gate(db: Session) -> tuple[Optional[dict], bool]:
     return None, try_open_demo_gate(db)
 
 
+def _advance_demo_state_machine(db: Session, row: ArenaState, q: List[DemoQueueEntry]) -> None:
+    """Single step: lineup → present → prep → next present → … → close."""
+    now = datetime.now(timezone.utc)
+    phase = row.demo_phase
+
+    if phase == "lineup":
+        row.demo_phase = "present"
+        row.demo_segment_ends_at = now + timedelta(seconds=_demo_present_seconds())
+        db.commit()
+        return
+
+    if phase == "prep":
+        row.demo_cursor += 1
+        row.demo_phase = "present"
+        row.demo_segment_ends_at = now + timedelta(seconds=_demo_present_seconds())
+        db.commit()
+        return
+
+    if phase == "present":
+        if row.demo_cursor + 1 < len(q):
+            row.demo_phase = "prep"
+            row.demo_segment_ends_at = now + timedelta(seconds=_demo_prep_seconds())
+            db.commit()
+        else:
+            _close_demo_sequence(row, db)
+        return
+
+    if row.demo_cursor + 1 >= len(q):
+        _close_demo_sequence(row, db)
+    else:
+        row.demo_cursor += 1
+        row.demo_segment_ends_at = now + timedelta(seconds=DEMO_SEGMENT_SECONDS)
+        db.commit()
+
+
 def advance_demo_if_expired(db: Session) -> None:
     row = get_or_create_arena_row(db)
     if not row.demo_gate_open or row.demo_cursor < 0:
@@ -342,44 +438,23 @@ def advance_demo_if_expired(db: Session) -> None:
         return
     q = ordered_queue_rows(db)
     if not q:
-        row.demo_cursor = -1
-        row.demo_segment_ends_at = None
-        db.commit()
+        _close_demo_sequence(row, db)
         return
-    if row.demo_cursor + 1 >= len(q):
-        row.demo_cursor = -1
-        row.demo_segment_ends_at = None
-        row.demo_gate_open = False  # Auto-close gate when queue ends
-    else:
-        row.demo_cursor += 1
-        row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
-            seconds=DEMO_SEGMENT_SECONDS
-        )
-    db.commit()
+    _advance_demo_state_machine(db, row, q)
 
 
 def admin_advance_demo(db: Session) -> dict:
-    """Skip to next presenter or end sequence."""
+    """Skip to next demo phase (lineup / present / prep) or end sequence."""
     row = get_or_create_arena_row(db)
     if not row.demo_gate_open or row.demo_cursor < 0:
-        return {"status": "idle", "cursor": row.demo_cursor}
+        return {"status": "idle", "cursor": row.demo_cursor, "phase": row.demo_phase}
     q = ordered_queue_rows(db)
     if not q:
-        row.demo_cursor = -1
-        row.demo_segment_ends_at = None
-        db.commit()
-        return {"status": "idle", "cursor": -1}
-    if row.demo_cursor + 1 >= len(q):
-        row.demo_cursor = -1
-        row.demo_segment_ends_at = None
-        row.demo_gate_open = False  # Auto-close gate when queue ends
-    else:
-        row.demo_cursor += 1
-        row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
-            seconds=DEMO_SEGMENT_SECONDS
-        )
-    db.commit()
-    return {"status": "advanced", "cursor": row.demo_cursor}
+        _close_demo_sequence(row, db)
+        return {"status": "idle", "cursor": -1, "phase": None}
+    _advance_demo_state_machine(db, row, q)
+    row = get_or_create_arena_row(db)
+    return {"status": "advanced", "cursor": row.demo_cursor, "phase": row.demo_phase}
 
 
 def _starter_template_folder_ids(manifest: Dict[str, Any]) -> set[str]:
@@ -559,20 +634,22 @@ def remove_session_from_demo_queue(db: Session, session_id: UUID) -> None:
         if not q_after:
             row.demo_cursor = -1
             row.demo_segment_ends_at = None
+            row.demo_phase = None
         else:
             # Same slot may now be the next person; clamp if we removed the tail.
             row.demo_cursor = min(cur, len(q_after) - 1)
             row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
-                seconds=DEMO_SEGMENT_SECONDS
+                seconds=_segment_seconds_for_phase(row.demo_phase)
             )
     if q_after and row.demo_cursor >= len(q_after):
         row.demo_cursor = len(q_after) - 1
         row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
-            seconds=DEMO_SEGMENT_SECONDS
+            seconds=_segment_seconds_for_phase(row.demo_phase)
         )
     if not q_after:
         row.demo_cursor = -1
         row.demo_segment_ends_at = None
+        row.demo_phase = None
     db.commit()
 
 
@@ -584,12 +661,13 @@ def _repair_demo_cursor_if_needed(db: Session) -> None:
         if row.demo_cursor >= 0 or row.demo_segment_ends_at is not None:
             row.demo_cursor = -1
             row.demo_segment_ends_at = None
+            row.demo_phase = None
             db.commit()
         return
     if row.demo_cursor >= len(q):
         row.demo_cursor = len(q) - 1
         row.demo_segment_ends_at = datetime.now(timezone.utc) + timedelta(
-            seconds=DEMO_SEGMENT_SECONDS
+            seconds=_segment_seconds_for_phase(row.demo_phase)
         )
         db.commit()
 
@@ -611,11 +689,13 @@ def get_demo_status(db: Session) -> Dict[str, Any]:
                     "station_id": s.station_id,
                 }
             )
+    eff_phase = row.demo_phase or "present"
     presenting = None
     if (
         row.demo_gate_open
         and row.demo_cursor >= 0
         and row.demo_cursor < len(q)
+        and eff_phase == "present"
     ):
         entry = q[row.demo_cursor]
         s = db.get(AICSession, entry.session_id)
@@ -630,9 +710,27 @@ def get_demo_status(db: Session) -> Dict[str, Any]:
                 if row.demo_segment_ends_at
                 else None,
             }
+
+    up_next = None
+    if (
+        eff_phase == "prep"
+        and row.demo_cursor >= 0
+        and row.demo_cursor + 1 < len(q)
+    ):
+        ne = q[row.demo_cursor + 1]
+        ns = db.get(AICSession, ne.session_id)
+        if ns:
+            up_next = {
+                "session_id": str(ne.session_id),
+                "nickname": ns.nickname,
+                "station_id": ns.station_id,
+            }
+
     now_utc = datetime.now(timezone.utc)
     live_ch = _active_canonical_challenge(db)
     tv_mode = _compute_tv_mode(
+        row=row,
+        queue_len=len(q),
         presenting=presenting,
         live_challenge=live_ch,
         now_utc=now_utc,
@@ -642,7 +740,15 @@ def get_demo_status(db: Session) -> Dict[str, Any]:
         "queue": queue_out,
         "cursor": row.demo_cursor,
         "queue_length": len(q),
+        "demo_phase": row.demo_phase,
+        "segment_ends_at": row.demo_segment_ends_at.isoformat()
+        if row.demo_segment_ends_at
+        else None,
         "presenting": presenting,
-        "segment_seconds": DEMO_SEGMENT_SECONDS,
+        "up_next": up_next,
+        "segment_seconds": _segment_seconds_for_phase(row.demo_phase),
+        "lineup_seconds": _demo_lineup_seconds(),
+        "present_seconds": _demo_present_seconds(),
+        "prep_seconds": _demo_prep_seconds(),
         "tv_mode": tv_mode,
     }

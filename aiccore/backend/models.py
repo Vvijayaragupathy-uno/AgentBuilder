@@ -148,6 +148,8 @@ class ArenaState(Base):
     demo_segment_ends_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Phased TV demo: lineup (roster) → present (Langflow) → prep (next) → …; NULL = legacy single-length segments.
+    demo_phase: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class DemoQueueEntry(Base):

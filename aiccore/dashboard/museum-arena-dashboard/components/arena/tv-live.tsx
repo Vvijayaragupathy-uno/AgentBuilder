@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { Crown, Monitor, Rocket, Zap, UserCheck, LogIn, Clock, Trophy, Hourglass } from "lucide-react"
+import { Crown, Monitor, Rocket, Zap, UserCheck, LogIn, Clock, Trophy, Hourglass, Users, Mic2 } from "lucide-react"
 import { MosaicDisplay, type MosaicEmptyState } from "./mosaic-display"
 import { FlowPreviewCard } from "./flow-preview-card"
 import { playTVSting } from "@/lib/tv-audio"
@@ -16,8 +16,14 @@ interface DemoPresenting {
   segment_ends_at: string | null
 }
 
-/** Server-computed: one display mode for the live-mission TV plate (see demo/status). */
-export type TVLiveMode = "build_mosaic" | "demo_fullscreen" | "between_rounds"
+/** Server-computed: live-mission TV plate (see demo/status). */
+export type TVLiveMode =
+  | "build_mosaic"
+  | "between_rounds"
+  | "demo_lineup"
+  | "demo_prep"
+  | "demo_present"
+  | "demo_fullscreen"
 
 interface DemoStatusPayload {
   gate_open: boolean
@@ -25,9 +31,23 @@ interface DemoStatusPayload {
   cursor: number
   queue_length: number
   presenting: DemoPresenting | null
+  demo_phase?: string | null
+  /** Current phased segment end (lineup / present / prep). */
+  segment_ends_at?: string | null
   segment_seconds: number
-  /** Single source of truth from backend — mosaic vs fullscreen Langflow vs transition. */
-  tv_mode?: TVLiveMode
+  lineup_seconds?: number
+  present_seconds?: number
+  prep_seconds?: number
+  up_next?: { session_id: string; nickname: string; station_id: string | null } | null
+  tv_mode?: string
+}
+
+function normalizeTvMode(raw: string | undefined, hasPresenting: boolean): TVLiveMode {
+  if (raw === "demo_lineup" || raw === "demo_prep" || raw === "demo_present") return raw
+  if (raw === "demo_fullscreen" || (hasPresenting && !raw)) return "demo_present"
+  if (raw === "between_rounds") return "between_rounds"
+  if (raw === "build_mosaic") return "build_mosaic"
+  return hasPresenting ? "demo_present" : "build_mosaic"
 }
 
 // ── Countdown Timer Hook ──────────────────────────────────────────────────────
@@ -311,12 +331,12 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
   }, [loadDemo, lastEventId])
 
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
-  const presenting = demo?.gate_open && demo.presenting
-  const tvMode: TVLiveMode = demo?.tv_mode ?? (presenting ? "demo_fullscreen" : "build_mosaic")
+  const hasPresentingPayload = Boolean(demo?.presenting)
+  const tvMode = normalizeTvMode(demo?.tv_mode, hasPresentingPayload)
+  const inLangflowDemo = tvMode === "demo_present" && hasPresentingPayload
 
-  /** During full-screen demo, show this slot’s countdown — not the mission build clock (avoids “two timers”). */
   const [demoSlotClock, setDemoSlotClock] = useState<string | null>(null)
-  const prevPresentingRef = useRef(false)
+  const prevLangflowDemoRef = useRef(false)
 
   useEffect(() => {
     if (showCongrats) {
@@ -325,19 +345,28 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
   }, [showCongrats])
 
   useEffect(() => {
-    const now = Boolean(presenting)
-    if (now && !prevPresentingRef.current) {
+    const now = Boolean(inLangflowDemo)
+    if (now && !prevLangflowDemoRef.current) {
       playTVSting("demoStart", 0.4)
     }
-    prevPresentingRef.current = now
-  }, [presenting])
+    prevLangflowDemoRef.current = now
+  }, [inLangflowDemo])
 
   useEffect(() => {
-    if (!presenting || !demo?.presenting?.segment_ends_at) {
+    let endIso: string | null = null
+    if (inLangflowDemo && demo?.presenting?.segment_ends_at) {
+      endIso = demo.presenting.segment_ends_at
+    } else if (
+      (tvMode === "demo_lineup" || tvMode === "demo_prep") &&
+      demo?.segment_ends_at
+    ) {
+      endIso = demo.segment_ends_at
+    }
+    if (!endIso) {
       setDemoSlotClock(null)
       return
     }
-    const end = new Date(demo.presenting.segment_ends_at).getTime()
+    const end = new Date(endIso).getTime()
     const tick = () => {
       if (!Number.isFinite(end)) {
         setDemoSlotClock("—:—")
@@ -351,7 +380,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
     tick()
     const id = window.setInterval(tick, 1000)
     return () => clearInterval(id)
-  }, [presenting, demo?.presenting?.segment_ends_at])
+  }, [inLangflowDemo, tvMode, demo?.presenting?.segment_ends_at, demo?.segment_ends_at])
 
   /** Empty mosaic copy: scheduled end at 00:00, or open-ended mission + demo gate / queue. */
   const mosaicEmptyState = useMemo((): MosaicEmptyState => {
@@ -394,7 +423,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
                                                     "bg-rose-500/20   text-rose-400   ring-rose-500/30"
 
   const betweenWaitingCopy = useMemo(() => {
-    if (tvMode !== "between_rounds" || presenting) return null
+    if (tvMode !== "between_rounds") return null
     const qlen = demo?.queue_length ?? 0
     const open = demo?.gate_open
     if (open && qlen > 0) {
@@ -414,7 +443,17 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
       subtitle:
         "Mosaic tiles only show active, unsubmitted builders. Next: facilitator runs demos when everyone has submitted, or the host finalizes the mission.",
     }
-  }, [tvMode, presenting, demo?.gate_open, demo?.queue_length])
+  }, [tvMode, demo?.gate_open, demo?.queue_length])
+
+  const showDemoSegmentClock =
+    demoSlotClock != null &&
+    (inLangflowDemo || tvMode === "demo_lineup" || tvMode === "demo_prep")
+
+  const contextStripPulseClass =
+    inLangflowDemo ? "bg-violet-400"
+    : tvMode === "demo_lineup" ? "bg-sky-400"
+    : tvMode === "demo_prep" ? "bg-amber-400"
+    : "bg-primary"
 
   return (
     <div className="relative h-screen w-screen flex flex-col overflow-hidden bg-background">
@@ -448,19 +487,27 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
           <span
             className={cn(
               "shrink-0 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md ring-1",
-              tvMode === "demo_fullscreen"
+              tvMode === "demo_present" || tvMode === "demo_fullscreen"
                 ? "ring-violet-500/40 bg-violet-500/15 text-violet-200"
-                : tvMode === "between_rounds"
-                  ? "ring-amber-500/35 bg-amber-500/10 text-amber-200"
-                  : "ring-emerald-500/35 bg-emerald-500/10 text-emerald-200",
+                : tvMode === "demo_lineup"
+                  ? "ring-sky-500/40 bg-sky-500/15 text-sky-200"
+                  : tvMode === "demo_prep"
+                    ? "ring-amber-500/40 bg-amber-500/12 text-amber-200"
+                    : tvMode === "between_rounds"
+                      ? "ring-amber-500/35 bg-amber-500/10 text-amber-200"
+                      : "ring-emerald-500/35 bg-emerald-500/10 text-emerald-200",
             )}
-            title="Server tv_mode — build mosaic vs full-screen demo vs between rounds"
+            title="Server tv_mode — build, phased demo, or between rounds"
           >
-            {tvMode === "demo_fullscreen"
+            {tvMode === "demo_present" || tvMode === "demo_fullscreen"
               ? "Demo"
-              : tvMode === "between_rounds"
-                ? "Between"
-                : "Build"}
+              : tvMode === "demo_lineup"
+                ? "Lineup"
+                : tvMode === "demo_prep"
+                  ? "Next"
+                  : tvMode === "between_rounds"
+                    ? "Between"
+                    : "Build"}
           </span>
           <span className={cn(
             "shrink-0 text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full ring-1",
@@ -476,28 +523,65 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
         <div
           className={cn(
             "flex flex-col items-end gap-0.5 glass rounded-xl px-5 py-2 ring-1 shrink-0 min-w-[140px]",
-            presenting ? "ring-violet-500/30" : tvMode === "between_rounds" ? "ring-amber-500/25" : "ring-primary/20",
+            inLangflowDemo
+              ? "ring-violet-500/30"
+              : tvMode === "demo_lineup"
+                ? "ring-sky-500/28"
+                : tvMode === "demo_prep"
+                  ? "ring-amber-500/28"
+                  : tvMode === "between_rounds"
+                    ? "ring-amber-500/25"
+                    : "ring-primary/20",
           )}
         >
-          {presenting && demoSlotClock != null ? (
+          {showDemoSegmentClock ? (
             <>
-              <span className="text-[9px] font-black uppercase tracking-widest text-violet-300/90">
-                Demo slot (auto-next or admin Advance)
+              <span
+                className={cn(
+                  "text-[9px] font-black uppercase tracking-widest",
+                  inLangflowDemo && "text-violet-300/90",
+                  tvMode === "demo_lineup" && "text-sky-300/90",
+                  tvMode === "demo_prep" && "text-amber-300/90",
+                )}
+              >
+                {tvMode === "demo_lineup"
+                  ? "Who’s presenting (lineup)"
+                  : tvMode === "demo_prep"
+                    ? "Next presenter — get ready"
+                    : "Demo slot (auto-next or admin Advance)"}
               </span>
               <div className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-violet-400 shrink-0" />
-                <span className="text-[36px] font-black font-mono tabular-nums text-violet-200 leading-none">
+                <Clock
+                  className={cn(
+                    "h-5 w-5 shrink-0",
+                    inLangflowDemo && "text-violet-400",
+                    tvMode === "demo_lineup" && "text-sky-400",
+                    tvMode === "demo_prep" && "text-amber-400",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "text-[36px] font-black font-mono tabular-nums leading-none",
+                    inLangflowDemo && "text-violet-200",
+                    tvMode === "demo_lineup" && "text-sky-100",
+                    tvMode === "demo_prep" && "text-amber-100",
+                  )}
+                >
                   {demoSlotClock}
                 </span>
               </div>
-              <p className="text-[10px] text-muted-foreground/75 text-right leading-snug max-w-[220px]">
-                {tvMode === "build_mosaic" ? (
+              <p className="text-[10px] text-muted-foreground/75 text-right leading-snug max-w-[240px]">
+                {tvMode === "demo_prep" && demo?.up_next ? (
                   <>
-                    Mission build clock{" "}
-                    <span className="font-mono font-bold text-primary/85">{timer}</span>
+                    Next: <span className="font-semibold text-foreground/90">{demo.up_next.nickname}</span>
+                    {demo.up_next.station_id
+                      ? ` · ${formatBuilderSeatLabel(demo.up_next.station_id)}`
+                      : null}
                   </>
+                ) : inLangflowDemo ? (
+                  <>Full Langflow for {demo?.presenting?.nickname ?? "presenter"}</>
                 ) : (
-                  <>Demo slot — full Langflow for {demo?.presenting?.nickname ?? "presenter"}</>
+                  <>Roster and order — then each presenter gets their slot.</>
                 )}
               </p>
             </>
@@ -528,7 +612,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
       </div>
 
       {/* ── Main content ── */}
-      {presenting ? (
+      {inLangflowDemo ? (
         <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
           <div className="shrink-0 flex items-center justify-between gap-4 px-6 py-3 bg-violet-950/70 border-b border-violet-500/25">
             <div className="flex items-center gap-4 min-w-0">
@@ -564,6 +648,101 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
                 />
               </div>
             </div>
+          </div>
+        </div>
+      ) : tvMode === "demo_lineup" && demo?.gate_open ? (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <div className="flex flex-1 flex-col min-h-0 bg-gradient-to-br from-sky-950/90 via-background to-black border-r border-sky-500/15 px-8 py-10 md:px-14 md:py-12 overflow-y-auto">
+            <div className="flex items-center gap-4 mb-8 shrink-0">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-500/20 ring-1 ring-sky-500/35">
+                <Users className="h-8 w-8 text-sky-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-400/90 mb-1">
+                  Demo lineup
+                </p>
+                <h2 className="text-[clamp(1.5rem,4vw,2.5rem)] font-black text-white leading-tight">
+                  Who’s on TV today
+                </h2>
+              </div>
+            </div>
+            {(demo.queue?.length ?? 0) === 0 ? (
+              <p className="text-lg text-sky-100/70 font-medium max-w-xl">
+                Demo gate is open — presenters can join from the builder. The roster will appear here.
+              </p>
+            ) : (
+              <ol className="flex flex-col gap-3 max-w-3xl">
+                {demo.queue.map((q, i) => {
+                  const isNext = i === Math.max(0, demo.cursor)
+                  return (
+                    <li
+                      key={q.session_id}
+                      className={cn(
+                        "flex items-center gap-5 rounded-xl px-5 py-4 ring-1 transition-colors",
+                        isNext
+                          ? "bg-sky-500/15 ring-sky-400/40"
+                          : "bg-black/25 ring-white/10",
+                      )}
+                    >
+                      <span className="text-[28px] font-black font-mono tabular-nums text-sky-400/90 w-12 shrink-0">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[22px] font-black text-white truncate">{q.nickname}</p>
+                        {q.station_id ? (
+                          <p className="text-[13px] font-mono text-sky-300/80">
+                            {formatBuilderSeatLabel(q.station_id)}
+                          </p>
+                        ) : null}
+                      </div>
+                      {isNext ? (
+                        <span className="text-[10px] font-black uppercase tracking-widest text-sky-200 shrink-0">
+                          Up next
+                        </span>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ol>
+            )}
+          </div>
+          <div className="w-[360px] shrink-0 overflow-hidden bg-black/20">
+            <TVLeaderboard />
+          </div>
+        </div>
+      ) : tvMode === "demo_prep" && demo?.gate_open ? (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <div className="flex flex-1 flex-col items-center justify-center text-center px-8 bg-gradient-to-b from-amber-950/80 via-background to-black border-r border-amber-500/15 min-h-0">
+            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-amber-500/20 ring-1 ring-amber-500/35 mb-8">
+              <Mic2 className="h-10 w-10 text-amber-300" />
+            </div>
+            <p className="text-[11px] font-black uppercase tracking-[0.35em] text-amber-400/90 mb-3">
+              Next presenter
+            </p>
+            {demo.up_next ? (
+              <>
+                <h2 className="text-[clamp(2rem,6vw,3.5rem)] font-black text-white mb-2">
+                  {demo.up_next.nickname}
+                </h2>
+                {demo.up_next.station_id ? (
+                  <p className="text-[15px] font-mono text-amber-200/80 mb-6">
+                    {formatBuilderSeatLabel(demo.up_next.station_id)}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <h2 className="text-[clamp(1.5rem,4vw,2.25rem)] font-black text-white mb-6">
+                Preparing the next slot…
+              </h2>
+            )}
+            <p className="text-[15px] text-amber-100/70 max-w-md leading-relaxed">
+              {demo.prep_seconds != null
+                ? `${demo.prep_seconds}s to get mic-ready — then your flow goes full screen on this TV.`
+                : "Short prep window — then your flow goes full screen on this TV."}
+            </p>
+          </div>
+          <div className="w-[360px] shrink-0 overflow-hidden bg-black/20">
+            <TVLeaderboard />
           </div>
         </div>
       ) : (
@@ -606,23 +785,24 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
       {/* ── Bottom context strip ── */}
       <div className="shrink-0 flex items-center gap-4 border-t border-white/5 bg-black/40 px-8 py-3">
         <div className="flex items-center gap-2 shrink-0">
-          <div className={cn(
-            "h-1.5 w-1.5 rounded-full animate-pulse",
-            presenting ? "bg-violet-400" : "bg-primary",
-          )} />
+          <div className={cn("h-1.5 w-1.5 rounded-full animate-pulse", contextStripPulseClass)} />
           <span className="text-[12px] font-black uppercase tracking-[0.3em] text-primary">
-            {tvMode === "demo_fullscreen"
+            {tvMode === "demo_present" || tvMode === "demo_fullscreen"
               ? "Demo playback — full Langflow canvas + name & station"
-              : tvMode === "between_rounds"
-                ? "Between rounds — build ended or waiting for demo / facilitator"
-                : "Build mosaic — live previews until submit"}
+              : tvMode === "demo_lineup"
+                ? "Demo lineup — roster and order before each presenter’s slot"
+                : tvMode === "demo_prep"
+                  ? "Demo prep — next presenter gets ready; then full-screen flow"
+                  : tvMode === "between_rounds"
+                    ? "Between rounds — build ended or waiting for demo / facilitator"
+                    : "Build mosaic — live previews until submit"}
           </span>
         </div>
         <span className="text-white/15">·</span>
         <p className="text-[15px] font-semibold text-muted-foreground flex-1 truncate">
           {challenge.description}
         </p>
-        {demo && demo.queue_length > 0 && !presenting && demo.gate_open && (
+        {demo && demo.queue_length > 0 && !inLangflowDemo && demo.gate_open && (
           <span className="text-[10px] font-bold text-amber-400/90 uppercase tracking-widest shrink-0">
             {demo.queue_length} in demo queue
           </span>

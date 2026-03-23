@@ -158,6 +158,7 @@ def _ensure_schema_migrations():
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_gate_open BOOLEAN DEFAULT false NOT NULL",
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_cursor INTEGER DEFAULT -1 NOT NULL",
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_segment_ends_at TIMESTAMPTZ",
+            "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_phase VARCHAR",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_text TEXT",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_document_url VARCHAR",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS build_phase_ended_at TIMESTAMPTZ",
@@ -187,6 +188,7 @@ def _ensure_schema_migrations():
                 ("demo_gate_open", "ALTER TABLE arena_state ADD COLUMN demo_gate_open BOOLEAN DEFAULT 0 NOT NULL"),
                 ("demo_cursor", "ALTER TABLE arena_state ADD COLUMN demo_cursor INTEGER DEFAULT -1 NOT NULL"),
                 ("demo_segment_ends_at", "ALTER TABLE arena_state ADD COLUMN demo_segment_ends_at TEXT"),
+                ("demo_phase", "ALTER TABLE arena_state ADD COLUMN demo_phase VARCHAR"),
             ):
                 if col not in arena_cols:
                     try:

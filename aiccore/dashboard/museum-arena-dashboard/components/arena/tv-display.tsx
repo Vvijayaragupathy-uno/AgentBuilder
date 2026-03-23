@@ -120,15 +120,16 @@ function TVResults({
       delay: (i % 20) * 0.1,
     })), [])
 
-  const winner = leaderboard[0]
+  /** Host-marked winner only — submitting does not crown someone by default. */
+  const declaredWinner = leaderboard.find(s => s.is_winner)
   const podium = leaderboard.slice(0, 3)
   const winnerStingRef = useRef(false)
 
   useEffect(() => {
-    if (!winner || winnerStingRef.current) return
+    if (!declaredWinner || winnerStingRef.current) return
     winnerStingRef.current = true
     playTVSting("winner", 0.42)
-  }, [winner])
+  }, [declaredWinner])
 
   const podiumStyles = [
     { ring: "ring-amber-400/40", text: "text-amber-400", bg: "bg-amber-400/15", py: "py-10" },
@@ -141,23 +142,25 @@ function TVResults({
       {/* Ambient glow */}
       <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[800px] w-[800px] rounded-full bg-primary/8 blur-[120px]" />
 
-      {/* Confetti */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        {confetti.map(c => (
-          <div
-            key={c.id}
-            className="absolute top-0 rounded-sm"
-            style={{
-              left: `${c.x}%`,
-              width: c.w,
-              height: c.h,
-              backgroundColor: c.color,
-              opacity: 0,
-              animation: `tv-confetti-fall ${c.dur}s ease-in ${c.delay}s forwards`,
-            }}
-          />
-        ))}
-      </div>
+      {/* Confetti only when a host-declared winner exists */}
+      {declaredWinner && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          {confetti.map(c => (
+            <div
+              key={c.id}
+              className="absolute top-0 rounded-sm"
+              style={{
+                left: `${c.x}%`,
+                width: c.w,
+                height: c.h,
+                backgroundColor: c.color,
+                opacity: 0,
+                animation: `tv-confetti-fall ${c.dur}s ease-in ${c.delay}s forwards`,
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Dot grid */}
       <div className="pointer-events-none absolute inset-0 bg-dot-grid opacity-20" />
@@ -173,27 +176,33 @@ function TVResults({
           </h1>
         </div>
 
-        {/* Winner spotlight */}
-        {winner && (
+        {/* Winner spotlight — only after host marks a winner (not “first row after submit”). */}
+        {declaredWinner && (
           <div className="flex flex-col items-center gap-5 animate-in fade-in slide-in-from-bottom-8 duration-1000">
             <div className="relative">
               <div className="absolute inset-0 rounded-full bg-amber-400/25 blur-2xl" />
               <div className="relative h-32 w-32 rounded-full bg-amber-400/15 ring-4 ring-amber-400/50 flex items-center justify-center glow-gold">
                 <span className="text-5xl font-black text-amber-400">
-                  {winner.nickname.slice(0, 2).toUpperCase()}
+                  {declaredWinner.nickname.slice(0, 2).toUpperCase()}
                 </span>
               </div>
               <Crown className="absolute -top-5 left-1/2 -translate-x-1/2 h-9 w-9 text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.8)]" />
             </div>
             <div>
               <p className="text-[52px] font-black uppercase tracking-tighter text-amber-400 leading-none">
-                {winner.nickname}
+                {declaredWinner.nickname}
               </p>
               <p className="text-[18px] font-bold text-muted-foreground uppercase tracking-widest mt-1">
-                1st Place · {winner.score.toLocaleString()} pts
+                Winner · {declaredWinner.score.toLocaleString()} pts
               </p>
             </div>
           </div>
+        )}
+
+        {!declaredWinner && podium.length > 0 && (
+          <p className="max-w-xl text-[17px] font-semibold text-muted-foreground leading-relaxed">
+            Submissions are in. The host will review and assign scores — a winner appears here once marked in the dashboard.
+          </p>
         )}
 
         {/* Podium */}
@@ -304,6 +313,24 @@ function TVDisplayInner() {
         setActiveChallenge(nowActive)
         setMode("live")
       } else if (wasActive) {
+        // Stay on live TV while the demo ceremony is running (mission may be finalized in DB).
+        let demoBusy = false
+        try {
+          const dr = await fetch(`${base}/api/v1/aiccore/demo/status`)
+          if (dr.ok) {
+            const dj = await dr.json()
+            const ql = typeof dj.queue_length === "number" ? dj.queue_length : 0
+            const cur = typeof dj.cursor === "number" ? dj.cursor : -1
+            demoBusy = Boolean(dj.gate_open && (ql > 0 || cur >= 0))
+          }
+        } catch {
+          /* ignore */
+        }
+        if (demoBusy) {
+          setActiveChallenge(wasActive)
+          setMode("live")
+          return
+        }
         prevActiveRef.current = null
         const lb = await fetchLeaderboard()
         const upcoming =
@@ -408,11 +435,22 @@ function TVDisplayInner() {
             void pollChallengesRef.current()
           }
 
-          if (
-            msg.type === "MISSION_LIVE" ||
-            msg.type === "MISSION_ENDED" ||
-            msg.type === "DEMO_GATE_OPEN"
-          ) {
+          if (msg.type === "MISSION_ENDED") {
+            const t = msg.data?.title
+            addToast(
+              typeof t === "string" && t.trim()
+                ? `Mission ended: ${t}`
+                : "Mission ended — demos or results follow.",
+              "warning",
+            )
+            void pollChallengesRef.current()
+          }
+
+          if (msg.type === "DEMO_QUEUE_UPDATE") {
+            addToast("Demo queue updated", "join")
+          }
+
+          if (msg.type === "MISSION_LIVE" || msg.type === "DEMO_GATE_OPEN") {
             void pollChallengesRef.current()
           }
         })
