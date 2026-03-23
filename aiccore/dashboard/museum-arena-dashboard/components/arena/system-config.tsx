@@ -124,6 +124,23 @@ function minutesBetweenStartEnd(start: string, end: string): number | null {
     return clampMissionMinutes((e.getTime() - s.getTime()) / 60000)
 }
 
+/** Aligned with API `_CHALLENGE_START_MIN_LEAD` — clock / save lag tolerance. */
+const MISSION_START_GRACE_MS = 90_000
+
+function missionStartBeforeEarliestAllowed(start: string): boolean {
+    const s = parseDatetimeLocal(start)
+    if (!s) return false
+    return s.getTime() < Date.now() - MISSION_START_GRACE_MS
+}
+
+function missionStartTimesEquivalentStrings(a: string, b: string): boolean {
+    const da = parseDatetimeLocal(a)
+    const db = parseDatetimeLocal(b)
+    if (!da && !db) return true
+    if (!da || !db) return false
+    return Math.abs(da.getTime() - db.getTime()) < 1000
+}
+
 function endFromStartAndDuration(start: string, duration: number): string {
     const s = parseDatetimeLocal(start)
     if (!s) return ""
@@ -174,6 +191,9 @@ export function SystemConfig() {
         instructionsText: "",
         instructionsDocumentUrl: "",
     })
+    /** When editing, original `datetime-local` start — unchanged past starts stay saveable (fix other fields). */
+    const [editMissionStartBaseline, setEditMissionStartBaseline] = useState("")
+    const [challengeSaveError, setChallengeSaveError] = useState<string | null>(null)
 
     const [newAchievement, setNewAchievement] = useState({
         name: "",
@@ -271,6 +291,7 @@ export function SystemConfig() {
     }
 
     const onMissionStartChange = (startTime: string) => {
+        setChallengeSaveError(null)
         setChallengeForm((prev) => {
             if (!startTime) {
                 return { ...prev, startTime: "", endTime: "" }
@@ -312,6 +333,12 @@ export function SystemConfig() {
         Boolean(challengeForm.endTime) &&
         minutesBetweenStartEnd(challengeForm.startTime, challengeForm.endTime) === null
 
+    const missionStartInPastNotAllowed =
+        Boolean(challengeForm.startTime) &&
+        missionStartBeforeEarliestAllowed(challengeForm.startTime) &&
+        (!editingId ||
+            !missionStartTimesEquivalentStrings(challengeForm.startTime, editMissionStartBaseline))
+
     const handleSaveChallenge = async (e: React.FormEvent) => {
         e.preventDefault()
         if (
@@ -321,6 +348,11 @@ export function SystemConfig() {
         ) {
             return
         }
+        if (missionStartInPastNotAllowed) {
+            setChallengeSaveError("Mission start must be in the future, or clear the start field.")
+            return
+        }
+        setChallengeSaveError(null)
         setIsSubmitting(true)
         try {
             const apiBase = getApiBase()
@@ -351,6 +383,15 @@ export function SystemConfig() {
             if (res.ok) {
                 resetForm()
                 fetchData()
+            } else {
+                let msg = `Save failed (${res.status})`
+                try {
+                    const j = (await res.json()) as { detail?: unknown }
+                    if (typeof j.detail === "string") msg = j.detail
+                } catch {
+                    /* ignore */
+                }
+                setChallengeSaveError(msg)
             }
         } finally {
             setIsSubmitting(false)
@@ -443,10 +484,13 @@ export function SystemConfig() {
             instructionsDocumentUrl: "",
         })
         setEditingId(null)
+        setEditMissionStartBaseline("")
+        setChallengeSaveError(null)
     }
 
     const startEdit = (c: Challenge) => {
         setEditingId(c.id)
+        setChallengeSaveError(null)
 
         // Fix for datetime-local input: force local format YYYY-MM-DDTHH:mm
         let formattedTime = ""
@@ -465,6 +509,7 @@ export function SystemConfig() {
             formattedEnd = endFromStartAndDuration(formattedTime, c.duration_minutes || 60)
         }
 
+        setEditMissionStartBaseline(formattedTime)
         setChallengeForm({
             title: c.title,
             description: c.description,
@@ -872,6 +917,14 @@ export function SystemConfig() {
                                         Mission end must be after mission start — duration not updated until fixed.
                                     </p>
                                 )}
+                                {missionStartInPastNotAllowed && (
+                                    <p className="text-[9px] font-bold text-amber-500/90">
+                                        Mission start cannot be in the past. Pick a future time, or clear start to leave the schedule unset.
+                                    </p>
+                                )}
+                                {challengeSaveError && (
+                                    <p className="text-[9px] font-bold text-red-400/90">{challengeSaveError}</p>
+                                )}
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1019,7 +1072,14 @@ export function SystemConfig() {
                                     {editingId && (
                                         <Button variant="outline" size="sm" onClick={resetForm} className="h-8">Cancel</Button>
                                     )}
-                                    <Button disabled={isSubmitting} size="sm" type="submit" className="h-9 px-8 font-black uppercase tracking-widest shadow-lg shadow-primary/20">
+                                    <Button
+                                        disabled={
+                                            isSubmitting || missionScheduleInvalid || missionStartInPastNotAllowed
+                                        }
+                                        size="sm"
+                                        type="submit"
+                                        className="h-9 px-8 font-black uppercase tracking-widest shadow-lg shadow-primary/20"
+                                    >
                                         {editingId ? "Update Deployment" : "Activate Mission"}
                                     </Button>
                                 </div>

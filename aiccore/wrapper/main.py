@@ -240,6 +240,7 @@ def _challenge_start_times_equivalent(a: Optional[datetime], b: Optional[datetim
         return False
     au = _optional_dt_utc(a)
     bu = _optional_dt_utc(b)
+    assert au is not None and bu is not None
     return abs((au - bu).total_seconds()) < 1.0
 
 
@@ -256,6 +257,7 @@ def _reject_new_past_challenge_start(
     if _challenge_start_times_equivalent(new_start, previous_start):
         return
     st_utc = _optional_dt_utc(new_start)
+    assert st_utc is not None
     now_utc = datetime.now(timezone.utc)
     if st_utc < now_utc - _CHALLENGE_START_MIN_LEAD:
         raise HTTPException(
