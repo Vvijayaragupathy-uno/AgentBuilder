@@ -603,7 +603,8 @@ export default function BuilderPage() {
                         </div>
                     </div>
 
-                    {isSubmitted && !isSystemLocked && (
+                    {/* After time's up the build UI locks, but the demo queue can still run — do not hide when isSystemLocked. */}
+                    {(isSubmitted || isSystemLocked) && !isChallengeFinalized && (
                         <div className="w-full max-w-md rounded-xl border border-border/60 bg-card/40 p-4 text-left space-y-3">
                             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                                 <Presentation className="h-4 w-4 text-violet-400 shrink-0" />
