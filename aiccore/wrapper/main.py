@@ -46,8 +46,6 @@ from aiccore.backend.models import (
 )
 from aiccore.backend.demo_ceremony import (
     reset_demo_state,
-    try_open_demo_gate,
-    force_open_demo_gate,
     get_demo_status,
     get_mosaic_snapshot_for_session,
     join_demo_queue,
@@ -55,6 +53,7 @@ from aiccore.backend.demo_ceremony import (
     remove_session_from_demo_queue,
     ensure_demo_playback_if_gate_open_idle,
 )
+from aiccore.backend.demo_gate import DemoGateReason, open_demo_gate_force, open_demo_gate_try
 from aiccore.backend.middleware import AICCoreEventMiddleware
 from aiccore.backend.eraser import (
     purge_langflow_workspace,
@@ -83,13 +82,14 @@ from aiccore.backend.security import (
     participant_password_needs_upgrade,
 )
 from aiccore.backend.session_rules import can_submit_session
+from aiccore.backend.challenge_time import (
+    challenge_in_scheduled_build_window,
+    challenge_start_time_utc,
+)
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, update, delete, or_, text
 import random
 import re
-import threading
-
-
 class HTTPOnlyMount(Mount):
     """``Mount`` matches both HTTP and WebSocket; ``StaticFiles`` only supports HTTP.
 
@@ -210,88 +210,12 @@ def expire_stale_builder_sessions_db(db_session: Session) -> list[str]:
     return expired
 
 
-def challenge_start_time_utc(c: Challenge) -> Optional[datetime]:
-    """Challenge.start_time normalized to UTC for comparisons, or None."""
-    if c.start_time is None:
-        return None
-    st = c.start_time
-    if st.tzinfo is None:
-        return st.replace(tzinfo=timezone.utc)
-    return st.astimezone(timezone.utc)
-
-
 def _optional_dt_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
-
-
-def challenge_is_live_build_window(c: Challenge, now: datetime) -> bool:
-    """
-    True when this mission counts as "live build" for leaderboard status:
-    challenge must be active, not finalized, AND (no start_time OR now >= start_time in UTC).
-    Matches builder page: before start_time → waiting, not "building" in the arena sense.
-    """
-    if not c.is_active or bool(c.is_finalized):
-        return False
-    st_utc = challenge_start_time_utc(c)
-    if st_utc is None:
-        return True
-    return now >= st_utc
-
-
-_AUTO_ACTIVATE_LOCK = threading.Lock()
-
-
-def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
-    """
-    Scheduled go-live (no admin toggle required):
-    If **no** challenge is currently active, activate the earliest due mission
-    (not finalized, start_time set, start_time <= now UTC). Returns MISSION_LIVE
-    payload dict or None.
-
-    If something is already active, does nothing — handoff stays manual.
-    Reduces double-activation under multi-worker with a short process lock (best-effort).
-    """
-    now_utc = datetime.now(timezone.utc)
-    bind = db_session.bind
-    dialect = getattr(bind, "dialect", None) if bind is not None else None
-    if dialect is not None and dialect.name == "postgresql":
-        db_session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": 91_030_221})
-    with _AUTO_ACTIVATE_LOCK:
-        active_n = (
-            db_session.execute(
-                select(func.count(Challenge.id)).where(Challenge.is_active == True)
-            ).scalar()
-            or 0
-        )
-        if active_n > 0:
-            return None
-
-        stmt = (
-            select(Challenge)
-            .where(
-                Challenge.is_active == False,
-                Challenge.is_finalized == False,
-                Challenge.start_time.isnot(None),
-            )
-            .order_by(Challenge.start_time.asc())
-        )
-        candidates = db_session.execute(stmt).scalars().all()
-        for c in candidates:
-            st_utc = challenge_start_time_utc(c)
-            if st_utc is not None and st_utc <= now_utc:
-                c.is_active = True
-                c.is_registration_open = False
-                db_session.commit()
-                return {
-                    "challenge_id": str(c.id),
-                    "title": c.title,
-                    "start_time": c.start_time.isoformat() if c.start_time else None,
-                }
-    return None
 
 
 def heal_duplicate_active_challenges(db_session: Session) -> int:
@@ -585,11 +509,14 @@ def create_aiccore_app():
     async def startup_event():
         from aiccore.backend.sync import sync_to_cloud
         from aiccore.backend.broadcast import broadcast_manager
+        from aiccore.backend.mission_automation_loop import mission_automation_background_loop
         import asyncio
 
         await broadcast_manager.start()
         asyncio.create_task(sync_to_cloud())
         print("☁️ Cloud Sync: Background worker active.")
+        asyncio.create_task(mission_automation_background_loop())
+        print("⏱️ Mission automation: background loop active (auto-finalize / activate / stale sessions).")
 
     @app.on_event("shutdown")
     async def shutdown_broadcast():
@@ -1036,8 +963,7 @@ def create_aiccore_app():
     ):
         """TV + builder poll. Optional session_id adds my_position in queue (1-based)."""
         with Session(engine) as db_session:
-            expire_stale_builder_sessions_db(db_session)
-            demo_opened = try_open_demo_gate(db_session)
+            demo_opened = open_demo_gate_try(db_session, DemoGateReason.DEMO_STATUS_POLL)
             st = get_demo_status(db_session)
         if demo_opened:
             await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
@@ -1071,7 +997,7 @@ def create_aiccore_app():
         playback_started = False
         with Session(engine) as db2:
             expire_stale_builder_sessions_db(db2)
-            demo_opened = try_open_demo_gate(db2)
+            demo_opened = open_demo_gate_try(db2, DemoGateReason.DEMO_QUEUE_JOIN)
         with Session(engine) as db3:
             playback_started = ensure_demo_playback_if_gate_open_idle(db3)
         await broadcast_manager.broadcast({"type": "DEMO_QUEUE_UPDATE", "data": out})
@@ -1149,7 +1075,7 @@ def create_aiccore_app():
         demo_opened = False
         with Session(engine) as gate_session:
             expire_stale_builder_sessions_db(gate_session)
-            demo_opened = try_open_demo_gate(gate_session)
+            demo_opened = open_demo_gate_try(gate_session, DemoGateReason.SESSION_DEACTIVATE)
         if demo_opened:
             await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
         await broadcast_manager.broadcast({"type": "DEMO_QUEUE_UPDATE", "data": {"event": "deactivated", "session_id": str(session_id)}})
@@ -1297,7 +1223,7 @@ def create_aiccore_app():
                 demo_opened = False
                 with Session(engine) as db2:
                     expire_stale_builder_sessions_db(db2)
-                    demo_opened = try_open_demo_gate(db2)
+                    demo_opened = open_demo_gate_try(db2, DemoGateReason.LEGACY_SUBMIT)
                 if demo_opened:
                     await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
                 return {"submission_id": str(new_submission.id), "status": "submitted"}
@@ -1333,7 +1259,7 @@ def create_aiccore_app():
             demo_opened = False
             with Session(engine) as db2:
                 expire_stale_builder_sessions_db(db2)
-                demo_opened = try_open_demo_gate(db2)
+                demo_opened = open_demo_gate_try(db2, DemoGateReason.WORKSPACE_SUBMIT)
             if demo_opened:
                 await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
             res = JSONResponse(content={"status": "success", "submission_id": sub_id})
@@ -1459,14 +1385,10 @@ def create_aiccore_app():
     @app.get("/api/v1/aiccore/leaderboard")
     async def get_leaderboard():
         from aiccore.backend.models import ChallengeRegistration
-        mission_live_payload = None
-        mission_end_payload = None
         leaderboard = []
         with Session(engine) as db_session:
-            from ..backend.demo_ceremony import maybe_auto_finalize_challenge
+            # Stale-session expiry only; mission finalize/activate run on background loop.
             expire_stale_builder_sessions_db(db_session)
-            mission_end_payload = maybe_auto_finalize_challenge(db_session)
-            mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             user_stmt = select(User).order_by(User.created_at.desc())
             all_users = db_session.execute(user_stmt).scalars().all()
             
@@ -1542,7 +1464,7 @@ def create_aiccore_app():
                     else:
                         sess_challenge = challenges_obj_map.get(active_session.challenge_id) if active_session.challenge_id else None
                         if sess_challenge is not None:
-                            if challenge_is_live_build_window(sess_challenge, now_utc):
+                            if challenge_in_scheduled_build_window(sess_challenge, now_utc):
                                 status = "PARTICIPATING"
                             else:
                                 status = "CHECKED_IN"
@@ -1589,23 +1511,6 @@ def create_aiccore_app():
             # Sort by winner (desc), then score (desc), then status tier
             status_rank = {"SUBMITTED": 4, "PARTICIPATING": 3, "CHECKED_IN": 2, "REGISTERED": 1}
             leaderboard.sort(key=lambda x: (x["is_winner"], x["score"], status_rank.get(x["status"], 0)), reverse=True)
-
-        if mission_end_payload:
-            await broadcast_manager.broadcast({
-                "type": "MISSION_ENDED",
-                "data": {
-                    "challenge_id": mission_end_payload["challenge_id"],
-                    "title": mission_end_payload.get("title", ""),
-                },
-            })
-        if mission_live_payload:
-            await broadcast_manager.broadcast({
-                "type": "MISSION_LIVE",
-                "data": mission_live_payload,
-            })
-            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
-        elif mission_end_payload:
-            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
 
         return leaderboard
 
@@ -1682,7 +1587,7 @@ def create_aiccore_app():
         demo_opened = False
         if was_active and not now_active:
             with Session(engine) as db2:
-                demo_opened = force_open_demo_gate(db2)
+                demo_opened = open_demo_gate_force(db2, DemoGateReason.MISSION_DEACTIVATED)
 
         if now_active and not was_active:
             await broadcast_manager.broadcast({
@@ -1858,7 +1763,7 @@ def create_aiccore_app():
             db_session.commit()
         demo_opened = False
         with Session(engine) as db2:
-            demo_opened = force_open_demo_gate(db2)
+            demo_opened = open_demo_gate_force(db2, DemoGateReason.SYSTEM_FINALIZE)
         await broadcast_manager.broadcast({
             "type": "SYSTEM_FINALIZE",
             "locked": True,
@@ -1902,13 +1807,7 @@ def create_aiccore_app():
 
     @app.get("/api/v1/aiccore/system/status")
     async def get_system_status():
-        mission_live_payload = None
-        mission_end_payload = None
         with Session(engine) as db_session:
-            from ..backend.demo_ceremony import maybe_auto_finalize_challenge
-            expire_stale_builder_sessions_db(db_session)
-            mission_end_payload = maybe_auto_finalize_challenge(db_session)
-            mission_live_payload = maybe_auto_activate_due_challenges(db_session)
             locked = is_arena_locked_db(db_session)
             # Read-only: if >1 active (race), report the canonical mission (oldest by created_at).
             # DB heal runs on challenge toggle, not on this GET.
@@ -1922,7 +1821,7 @@ def create_aiccore_app():
             now_utc = datetime.now(timezone.utc)
             mission_build_window_open = bool(
                 active_challenge
-                and challenge_is_live_build_window(active_challenge, now_utc)
+                and challenge_in_scheduled_build_window(active_challenge, now_utc)
             )
             mission_build_ends_at: Optional[str] = None
             if (
@@ -1951,23 +1850,6 @@ def create_aiccore_app():
                 "mission_build_ends_at": mission_build_ends_at,
                 "server_time": now_utc.isoformat(),
             }
-
-        if mission_end_payload:
-            await broadcast_manager.broadcast({
-                "type": "MISSION_ENDED",
-                "data": {
-                    "challenge_id": mission_end_payload["challenge_id"],
-                    "title": mission_end_payload.get("title", ""),
-                },
-            })
-        if mission_live_payload:
-            await broadcast_manager.broadcast({
-                "type": "MISSION_LIVE",
-                "data": mission_live_payload,
-            })
-            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
-        elif mission_end_payload:
-            await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
 
         return result
 

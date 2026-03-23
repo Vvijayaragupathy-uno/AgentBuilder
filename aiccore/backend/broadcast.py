@@ -27,10 +27,13 @@ class BroadcastManager:
 
     async def broadcast(self, message: dict) -> None:
         self.pool_counter += 1
+        data = dict(message)
+        if "kind" not in data:
+            data["kind"] = data.get("type") or data.get("event_type") or "legacy"
         pooled_msg = {
             "id": self.pool_counter,
             "timestamp": time.time(),
-            "data": message
+            "data": data,
         }
         self.message_pool.append(pooled_msg)
         if len(self.message_pool) > self.max_pool_size:

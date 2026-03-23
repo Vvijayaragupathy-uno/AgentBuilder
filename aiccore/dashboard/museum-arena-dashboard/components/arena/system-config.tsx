@@ -28,7 +28,8 @@ import {
     Trophy,
     Download,
     FileText,
-    Image as ImageIcon
+    Image as ImageIcon,
+    MonitorPlay,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -142,6 +143,49 @@ export function SystemConfig() {
     const [isBroadcastOpen, setIsBroadcastOpen] = useState(false)
     const [broadcastMessage, setBroadcastMessage] = useState("")
     const [catalogDetailChallengeId, setCatalogDetailChallengeId] = useState<string | null>(null)
+
+    /** Facilitator: live demo queue (same API as TV). */
+    const [demoStatus, setDemoStatus] = useState<{
+        gate_open: boolean
+        queue_length: number
+        cursor: number
+        tv_mode?: string
+        segment_seconds?: number
+        queue: { session_id: string; nickname: string; station_id: string | null }[]
+        presenting: {
+            session_id: string
+            nickname: string
+            station_id: string | null
+        } | null
+    } | null>(null)
+    const [demoAdvancing, setDemoAdvancing] = useState(false)
+
+    const fetchDemoStatus = async () => {
+        try {
+            const apiBase = getApiBase()
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/demo/status`)
+            if (res.ok) setDemoStatus(await res.json())
+        } catch {
+            /* ignore */
+        }
+    }
+
+    useEffect(() => {
+        void fetchDemoStatus()
+        const id = setInterval(() => void fetchDemoStatus(), 4000)
+        return () => clearInterval(id)
+    }, [])
+
+    const handleDemoAdvance = async () => {
+        setDemoAdvancing(true)
+        try {
+            const apiBase = getApiBase()
+            const res = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/demo/next`, { method: "POST" })
+            if (res.ok) await fetchDemoStatus()
+        } finally {
+            setDemoAdvancing(false)
+        }
+    }
 
     // New/Edit challenge form
     const [challengeForm, setChallengeForm] = useState({
@@ -491,6 +535,7 @@ export function SystemConfig() {
         <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 overflow-x-hidden">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
+                <div className="flex flex-col gap-4 min-w-0">
                 {/* System Master Control */}
                 <Card className="glass border-primary/20 bg-primary/5">
                     <CardHeader>
@@ -559,6 +604,73 @@ export function SystemConfig() {
                         </div>
                     </CardContent>
                 </Card>
+
+                <Card className="glass border-violet-500/20 bg-violet-500/5">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-base">
+                            <MonitorPlay className="h-5 w-5 text-violet-400" />
+                            Demo ceremony
+                        </CardTitle>
+                        <CardDescription className="text-[11px]">
+                            Queue and advance full-screen TV demos (same data as <code className="text-[10px]">/demo/status</code>).
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-3">
+                        {demoStatus == null ? (
+                            <p className="text-xs text-muted-foreground">Loading demo state…</p>
+                        ) : (
+                            <>
+                                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                    <Badge variant={demoStatus.gate_open ? "default" : "secondary"} className="text-[10px]">
+                                        Gate {demoStatus.gate_open ? "open" : "closed"}
+                                    </Badge>
+                                    {demoStatus.tv_mode && (
+                                        <Badge variant="outline" className="text-[10px] font-mono">
+                                            {demoStatus.tv_mode}
+                                        </Badge>
+                                    )}
+                                    <span className="text-muted-foreground">
+                                        Queue {demoStatus.queue_length} · segment {demoStatus.segment_seconds ?? "—"}s
+                                    </span>
+                                </div>
+                                {demoStatus.presenting && (
+                                    <div className="rounded-lg border border-violet-500/25 bg-violet-950/40 px-3 py-2 text-xs">
+                                        <span className="font-semibold text-violet-200">On screen: </span>
+                                        {demoStatus.presenting.nickname}
+                                        <span className="text-muted-foreground ml-1">
+                                            ({demoStatus.presenting.station_id ?? "—"})
+                                        </span>
+                                    </div>
+                                )}
+                                {demoStatus.queue.length > 0 && (
+                                    <ul className="max-h-28 overflow-y-auto text-[11px] space-y-1 border border-white/5 rounded-md p-2 bg-black/20">
+                                        {demoStatus.queue.map((q, i) => (
+                                            <li key={q.session_id} className="flex justify-between gap-2 truncate">
+                                                <span className="text-muted-foreground w-5 shrink-0">{i + 1}.</span>
+                                                <span className="truncate font-medium">{q.nickname}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={demoAdvancing || !demoStatus.gate_open}
+                                    onClick={handleDemoAdvance}
+                                    className="w-full gap-2 bg-violet-600/20 border-violet-500/30 text-violet-200 hover:bg-violet-600/30"
+                                >
+                                    <Zap className={cn("h-3.5 w-3.5", demoAdvancing && "animate-pulse")} />
+                                    {demoAdvancing ? "Advancing…" : "Advance to next presenter"}
+                                </Button>
+                                <p className="text-[9px] text-muted-foreground/70 leading-tight">
+                                    Requires an open gate and an active queue. Auto-advance also runs on segment timer.
+                                </p>
+                            </>
+                        )}
+                    </CardContent>
+                </Card>
+                </div>
 
                 {/* Event Creation Form */}
                 <Card className="glass lg:col-span-2">
