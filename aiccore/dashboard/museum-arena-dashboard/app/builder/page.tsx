@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut, PlayCircle, ExternalLink, Presentation } from "lucide-react"
-import { LANGFLOW_TEACH_WATCH_URL } from "@/lib/langflow-teach"
+import { MAKERSPACE_GUIDE_VIDEO_URL } from "@/lib/langflow-teach"
 import {
     applyServerTimeFromIso,
     cn,
@@ -705,14 +705,14 @@ export default function BuilderPage() {
 
                 <div className="flex items-center gap-2">
                     <a
-                        href={LANGFLOW_TEACH_WATCH_URL}
+                        href={MAKERSPACE_GUIDE_VIDEO_URL}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
                     >
                         <PlayCircle className="h-3 w-3 shrink-0" />
-                        <span className="hidden sm:inline">Langflow tutorial</span>
-                        <span className="sm:hidden">Video</span>
+                        <span className="hidden sm:inline">Makerspace guide</span>
+                        <span className="sm:hidden">Guide</span>
                     </a>
 
                     {timeLeft !== null ? (

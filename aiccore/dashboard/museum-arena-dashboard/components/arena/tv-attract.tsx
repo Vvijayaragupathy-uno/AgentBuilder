@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   Puzzle,
   Zap,
@@ -13,11 +13,7 @@ import {
   PlayCircle,
 } from "lucide-react"
 import { cn, skewedNow } from "@/lib/utils"
-import {
-  LANGFLOW_TEACH_CLIP_END_SEC,
-  LANGFLOW_TEACH_CLIP_START_SEC,
-  LANGFLOW_TEACH_VIDEO_ID,
-} from "@/lib/langflow-teach"
+import { MAKERSPACE_GUIDE_VIDEO_PATH } from "@/lib/langflow-teach"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import type { Challenge } from "./tv-display"
 
@@ -258,52 +254,75 @@ function NextSlide({ challenge }: { challenge: Challenge }) {
   )
 }
 
-// ── Langflow teach — right-column embed only (not in carousel) ─
+// ── Makerspace guide — right-column video only (not in carousel) ─
 
-function langflowTeachEmbedSrc() {
-  return (
-    `https://www.youtube.com/embed/${LANGFLOW_TEACH_VIDEO_ID}` +
-    `?start=${LANGFLOW_TEACH_CLIP_START_SEC}` +
-    `&end=${LANGFLOW_TEACH_CLIP_END_SEC}` +
-    "&autoplay=1" +
-    "&mute=1" +
-    "&playsinline=1" +
-    "&rel=0" +
-    "&modestbranding=1" +
-    "&iv_load_policy=3"
-  )
-}
+const GUIDE_VIDEO_VOLUME = 0.88
 
-/** Always-on tutorial video in the attract right rail */
-function LangflowTeachSidebarEmbed() {
-  const src = langflowTeachEmbedSrc()
+/** Local clip: plays once through, fixed level; click anywhere once if the browser blocks autoplay-with-sound. */
+function MakerspaceGuideSidebarEmbed() {
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+
+    el.volume = GUIDE_VIDEO_VOLUME
+    el.defaultMuted = false
+    el.muted = false
+
+    const tryPlay = () => {
+      void el.play().catch(() => {
+        /* autoplay policy — first user gesture retries below */
+      })
+    }
+
+    tryPlay()
+    if (el.readyState < 2) {
+      el.addEventListener("canplay", tryPlay, { once: true })
+    }
+
+    const onFirstPointer = () => {
+      el.muted = false
+      el.volume = GUIDE_VIDEO_VOLUME
+      void el.play().catch(() => {})
+    }
+    window.addEventListener("pointerdown", onFirstPointer, { once: true })
+
+    return () => {
+      el.removeEventListener("canplay", tryPlay)
+      window.removeEventListener("pointerdown", onFirstPointer)
+    }
+  }, [])
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="shrink-0 space-y-1 text-center px-1">
         <span className="text-[11px] font-black uppercase tracking-[0.32em] text-primary flex items-center justify-center gap-2">
           <PlayCircle className="h-3.5 w-3.5 shrink-0" />
-          Langflow walkthrough
+          AI makerspace guide
         </span>
         <h2 className="text-[22px] font-black uppercase tracking-tight leading-tight text-foreground">
-          Watch the tutorial
+          The floor, in one reel
         </h2>
         <p className="text-[12px] text-muted-foreground font-medium leading-snug">
-          Canvas to running flow — one continuous clip.
+          A full walkthrough of the builder — watch, listen, then grab a seat.
         </p>
       </div>
 
       <div className="relative min-h-[min(52vh,560px)] flex-1 w-full rounded-2xl overflow-hidden ring-2 ring-primary/30 shadow-[0_0_48px_-10px_rgba(250,204,21,0.4)] bg-black">
-        <iframe
-          title="Langflow tutorial walkthrough"
-          src={src}
-          className="absolute inset-0 h-full w-full min-h-[280px]"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
+        <video
+          ref={videoRef}
+          className="absolute inset-0 h-full w-full min-h-[280px] object-contain bg-black"
+          src={MAKERSPACE_GUIDE_VIDEO_PATH}
+          playsInline
+          preload="auto"
+          autoPlay
+          controls={false}
         />
       </div>
 
       <p className="shrink-0 text-[10px] text-white/35 font-semibold uppercase tracking-wider text-center">
-        Unmute on this display if you want sound
+        Sound at {Math.round(GUIDE_VIDEO_VOLUME * 100)}% — tap the screen once if playback is silent (browser autoplay rules).
       </p>
     </div>
   )
@@ -499,7 +518,7 @@ function MeshBackground() {
   )
 }
 
-// ── Right rail: always-on Langflow tutorial + stats ───────────────────────────
+// ── Right rail: always-on makerspace guide video + stats ──────────────────────
 
 function LivePanel({ challenges }: { challenges: Challenge[] }) {
   const upcoming = challenges.filter(isPromotableOnAttract).slice(0, 2)
@@ -510,7 +529,7 @@ function LivePanel({ challenges }: { challenges: Challenge[] }) {
 
       {/* ── YouTube tutorial (primary — former “How a flow connects” area) ── */}
       <div className="flex-1 min-h-0 flex flex-col px-4 pt-5 pb-2">
-        <LangflowTeachSidebarEmbed />
+        <MakerspaceGuideSidebarEmbed />
       </div>
 
       {/* ── Stats ── */}
@@ -620,7 +639,7 @@ function LiveClock() {
 // ── Main Attract Component ────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 4 core slides + optional "Coming Up Next" + one spotlight per promotable challenge (Langflow video is fixed in the right rail)
+  // 4 core slides + optional "Coming Up Next" + one spotlight per promotable challenge (guide video is fixed in the right rail)
   const spotlightChallenges = challenges.filter(isPromotableOnAttract)
   const upcoming = useUpcomingAttractChallenge(challenges)
   const showNextSlide = Boolean(upcoming?.start_time)
