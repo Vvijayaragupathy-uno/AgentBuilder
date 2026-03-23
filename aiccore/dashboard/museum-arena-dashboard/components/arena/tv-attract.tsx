@@ -200,62 +200,48 @@ function ChallengesSlide({ challenges }: { challenges: Challenge[] }) {
   )
 }
 
-// ── Slide 5 — Coming Up Next / Tips ──────────────────────────────────────────
-
-function NextSlide({ challenges }: { challenges: Challenge[] }) {
+/** Next promotable challenge with a future start time (for countdown slide). */
+function useUpcomingAttractChallenge(challenges: Challenge[]): Challenge | undefined {
   const [now, setNow] = useState(skewedNow)
-  const upcoming = challenges.find(
-    c =>
-      isPromotableOnAttract(c) &&
-      Boolean(c.start_time) &&
-      new Date(c.start_time!).getTime() > now,
+  useEffect(() => {
+    const id = setInterval(() => setNow(skewedNow()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return useMemo(
+    () =>
+      challenges.find(
+        c =>
+          isPromotableOnAttract(c) &&
+          Boolean(c.start_time) &&
+          new Date(c.start_time!).getTime() > now,
+      ),
+    [challenges, now],
   )
+}
 
+// ── Coming Up Next (only when a future challenge exists; no tips fallback) ───
+
+function NextSlide({ challenge }: { challenge: Challenge }) {
+  const [now, setNow] = useState(skewedNow)
   useEffect(() => {
     const id = setInterval(() => setNow(skewedNow()), 1000)
     return () => clearInterval(id)
   }, [])
 
-  if (!upcoming || !upcoming.start_time) {
-    const tips = [
-      "Connect a Prompt → LLM → Output to build your first AI",
-      "Use a Chat Input node to make your flow conversational",
-      "Add a Text Splitter to process long documents with ease",
-      "Combine multiple LLM calls for smarter, multi-step agents",
-    ]
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-10 px-20 text-center">
-        <div className="space-y-2">
-          <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">Builder Tips</span>
-          <h2 className="text-[64px] font-black uppercase tracking-tighter leading-none text-foreground">
-            Pro Moves
-          </h2>
-        </div>
-        <div className="space-y-4 w-full max-w-4xl">
-          {tips.map((tip, i) => (
-            <div key={i} className="glass rounded-2xl px-8 py-5 ring-1 ring-white/5 flex items-center gap-5 text-left">
-              <span className="text-[32px] font-black font-mono text-primary/30 w-10 shrink-0">{i + 1}</span>
-              <p className="text-[22px] font-bold text-foreground">{tip}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  const diffMs   = Math.max(0, new Date(upcoming.start_time).getTime() - now)
+  const start = challenge.start_time!
+  const diffMs = Math.max(0, new Date(start).getTime() - now)
   const totalSec = Math.floor(diffMs / 1000)
-  const mins     = Math.floor(totalSec / 60)
-  const secs     = totalSec % 60
+  const mins = Math.floor(totalSec / 60)
+  const secs = totalSec % 60
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-10 px-16 text-center">
       <div className="space-y-3">
         <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">Coming Up Next</span>
         <h2 className="text-[68px] font-black uppercase tracking-tighter leading-none text-foreground">
-          {upcoming.title}
+          {challenge.title}
         </h2>
-        <p className="text-[22px] text-muted-foreground max-w-3xl mx-auto">{upcoming.description}</p>
+        <p className="text-[22px] text-muted-foreground max-w-3xl mx-auto">{challenge.description}</p>
       </div>
 
       <div className="glass rounded-3xl px-16 py-8 ring-1 ring-primary/30 glow-amber">
@@ -634,29 +620,35 @@ function LiveClock() {
 // ── Main Attract Component ────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 5 intro slides + one spotlight per promotable challenge (Langflow video is fixed in the right rail)
+  // 4 core slides + optional "Coming Up Next" + one spotlight per promotable challenge (Langflow video is fixed in the right rail)
   const spotlightChallenges = challenges.filter(isPromotableOnAttract)
-  const TOTAL = 5 + spotlightChallenges.length
+  const upcoming = useUpcomingAttractChallenge(challenges)
+  const showNextSlide = Boolean(upcoming?.start_time)
+  const TOTAL = 4 + (showNextSlide ? 1 : 0) + spotlightChallenges.length
   const slideDurationsMs = useMemo(() => {
     const base = [
       SLIDE_DURATION,
       SLIDE_DURATION,
       SLIDE_DURATION,
       SLIDE_DURATION,
-      SLIDE_DURATION,
     ]
+    const next = showNextSlide ? [SLIDE_DURATION] : []
     const spots = spotlightChallenges.map(() => SLIDE_DURATION)
-    return [...base, ...spots]
-  }, [spotlightChallenges.length])
+    return [...base, ...next, ...spots]
+  }, [showNextSlide, spotlightChallenges.length])
 
   const [current, setCurrent] = useState(0)
   const [opacity, setOpacity] = useState(1)
-  const dwellMs = slideDurationsMs[current] ?? SLIDE_DURATION
+  const safeCurrent = TOTAL > 0 ? Math.min(current, TOTAL - 1) : 0
+  const dwellMs = slideDurationsMs[safeCurrent] ?? SLIDE_DURATION
 
   const advance = useCallback(() => {
     setOpacity(0)
     setTimeout(() => {
-      setCurrent(s => (s + 1) % TOTAL)
+      setCurrent(s => {
+        const from = TOTAL > 0 ? Math.min(s, TOTAL - 1) : 0
+        return (from + 1) % TOTAL
+      })
       setOpacity(1)
     }, TRANSITION_MS)
   }, [TOTAL])
@@ -667,17 +659,23 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
     return () => clearTimeout(id)
   }, [current, advance, dwellMs])
 
-  const goTo = useCallback((i: number) => {
-    setOpacity(0)
-    setTimeout(() => { setCurrent(i); setOpacity(1) }, TRANSITION_MS)
-  }, [])
+  const goTo = useCallback(
+    (i: number) => {
+      setOpacity(0)
+      setTimeout(() => {
+        setCurrent(TOTAL > 0 ? Math.min(Math.max(i, 0), TOTAL - 1) : 0)
+        setOpacity(1)
+      }, TRANSITION_MS)
+    },
+    [TOTAL],
+  )
 
   const slides = [
     <HookSlide       key="hook" />,
     <WhatSlide       key="what" />,
     <HowSlide        key="how" />,
     <ChallengesSlide key="challenges" challenges={challenges} />,
-    <NextSlide       key="next"       challenges={challenges} />,
+    ...(showNextSlide && upcoming ? [<NextSlide key="next" challenge={upcoming} />] : []),
     // One dedicated spotlight per challenge
     ...spotlightChallenges.map((c, i) => (
       <ChallengeSpotlightSlide
@@ -727,7 +725,7 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
           className="relative z-10 flex-1"
           style={{ opacity, transition: `opacity ${TRANSITION_MS}ms ease` }}
         >
-          {slides[current]}
+          {slides[safeCurrent]}
         </div>
 
         {/* Progress dots + bar — leave room for ticker at bottom */}
@@ -739,14 +737,14 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
                 onClick={() => goTo(i)}
                 className={cn(
                   "rounded-full transition-all duration-300",
-                  i === current ? "w-7 h-2 bg-primary" : "w-2 h-2 bg-white/20 hover:bg-white/40",
+                  i === safeCurrent ? "w-7 h-2 bg-primary" : "w-2 h-2 bg-white/20 hover:bg-white/40",
                 )}
               />
             ))}
           </div>
           <div className="w-48 h-0.5 bg-white/10 rounded-full overflow-hidden">
             <div
-              key={current}
+              key={safeCurrent}
               className="h-full bg-primary/60 rounded-full origin-left"
               style={{ animation: `tv-progress-fill ${dwellMs}ms linear forwards` }}
             />
