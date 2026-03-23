@@ -54,8 +54,11 @@ RUN pip install --no-cache-dir --upgrade pip
 # Vendored Langflow backend (matches your monorepo; overrides any PyPI langflow-base)
 COPY langflow/src/lfx /app/_vendor/lfx
 COPY langflow/src/backend/base /app/_vendor/langflow-base
+# langflow-base declares Ollama under optional extra [ollama]; default install skips it.
+# Railway builds from this Dockerfile — install here so ChatOllama / OllamaEmbeddings always import.
 RUN pip install --no-cache-dir /app/_vendor/lfx && \
-    pip install --no-cache-dir /app/_vendor/langflow-base
+    pip install --no-cache-dir /app/_vendor/langflow-base && \
+    pip install --no-cache-dir "langchain-ollama==0.3.10"
 
 COPY aiccore /app/aiccore
 COPY requirements.txt /app/requirements.txt

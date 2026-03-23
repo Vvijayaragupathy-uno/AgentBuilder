@@ -54,6 +54,8 @@ langchain-experimental
 langchain-openai
 langchain-anthropic
 langchain-google-genai
+# Ollama LLM/embeddings (lfx ChatOllama / OllamaEmbeddings); matches langflow-base optional ollama extra
+langchain-ollama==0.3.10
 
 # 4. Data & Utilities 
 pandas
