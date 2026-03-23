@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from .challenge_time import challenge_start_time_utc
+from .challenge_time import challenge_would_be_in_build_window_if_activated
 from .demo_ceremony import maybe_auto_finalize_challenge
 from .models import Challenge
 
@@ -20,9 +20,10 @@ _AUTO_ACTIVATE_LOCK = threading.Lock()
 
 def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
     """
-    If **no** challenge is currently active, activate the earliest due mission
-    (not finalized, start_time set, start_time <= now UTC). Returns MISSION_LIVE
-    payload dict or None.
+    If **no** challenge is currently active, activate the earliest scheduled candidate
+    whose **build window still includes now** (not finalized, ``start_time`` set).
+    Skips missions that have not started yet or are already past ``start + duration``.
+    Returns MISSION_LIVE payload dict or None.
     """
     now_utc = datetime.now(timezone.utc)
     bind = db_session.bind
@@ -50,16 +51,16 @@ def maybe_auto_activate_due_challenges(db_session: Session) -> Optional[dict]:
         )
         candidates = db_session.execute(stmt).scalars().all()
         for c in candidates:
-            st_utc = challenge_start_time_utc(c)
-            if st_utc is not None and st_utc <= now_utc:
-                c.is_active = True
-                c.is_registration_open = False
-                db_session.commit()
-                return {
-                    "challenge_id": str(c.id),
-                    "title": c.title,
-                    "start_time": c.start_time.isoformat() if c.start_time else None,
-                }
+            if not challenge_would_be_in_build_window_if_activated(c, now_utc):
+                continue
+            c.is_active = True
+            c.is_registration_open = False
+            db_session.commit()
+            return {
+                "challenge_id": str(c.id),
+                "title": c.title,
+                "start_time": c.start_time.isoformat() if c.start_time else None,
+            }
     return None
 
 

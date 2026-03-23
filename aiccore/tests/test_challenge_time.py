@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from aiccore.backend.challenge_time import (
     challenge_in_scheduled_build_window,
+    challenge_would_be_in_build_window_if_activated,
     mission_build_window_phase,
 )
 from aiccore.backend.models import Challenge
@@ -74,6 +75,14 @@ def test_mission_build_window_phase_none_and_before_after():
 def test_mission_build_window_phase_open_ended_no_start():
     c = _ch(start_time=None, duration_minutes=60)
     assert mission_build_window_phase(c, datetime.now(timezone.utc)) == "open"
+
+
+def test_would_be_in_window_if_activated_for_inactive_row():
+    start = datetime(2025, 8, 1, 15, 0, tzinfo=timezone.utc)
+    c = _ch(start_time=start, duration_minutes=20, is_active=False)
+    assert challenge_would_be_in_build_window_if_activated(c, start + timedelta(minutes=5)) is True
+    assert challenge_would_be_in_build_window_if_activated(c, start - timedelta(seconds=1)) is False
+    assert challenge_would_be_in_build_window_if_activated(c, start + timedelta(minutes=20)) is False
 
 
 def test_phase_open_matches_scheduled_build_window():

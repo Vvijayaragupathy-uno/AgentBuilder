@@ -101,8 +101,16 @@ export default function BuilderPage() {
             setInstructionText(
                 typeof status.instructions_text === "string" ? status.instructions_text : null,
             )
-            setHasActiveChallenge(!!status.active_challenge)
-            if (status.active_challenge && status.duration_minutes != null) {
+            const liveMissionId =
+                typeof status.active_challenge_id === "string" && status.active_challenge_id.trim()
+                    ? status.active_challenge_id.trim()
+                    : null
+            setHasActiveChallenge(!!liveMissionId)
+            const durationFromServer =
+                typeof status.duration_minutes === "number" && Number.isFinite(status.duration_minutes)
+                    ? status.duration_minutes
+                    : 60
+            if (liveMissionId) {
                 if (status.start_time) {
                     try {
                         localStorage.removeItem(SESSION_BUILD_START_MS_KEY)
@@ -111,7 +119,7 @@ export default function BuilderPage() {
                     }
                     setChallengeInfo({
                         start_time: status.start_time,
-                        duration: status.duration_minutes,
+                        duration: durationFromServer,
                         mode: "mission",
                         isFinalized: !!status.is_finalized,
                         missionBuildEndsAt:
@@ -149,7 +157,7 @@ export default function BuilderPage() {
                     }
                     setChallengeInfo({
                         start_time: new Date(Number(stored)).toISOString(),
-                        duration: status.duration_minutes,
+                        duration: durationFromServer,
                         mode: "per_seat",
                         isFinalized: !!status.is_finalized,
                         missionBuildEndsAt: null,

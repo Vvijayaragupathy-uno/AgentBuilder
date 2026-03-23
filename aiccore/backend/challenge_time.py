@@ -63,6 +63,27 @@ def challenge_in_scheduled_build_window(c: Challenge, now: datetime) -> bool:
     return True
 
 
+def challenge_would_be_in_build_window_if_activated(c: Challenge, now: datetime) -> bool:
+    """
+    True if an **inactive** scheduled row would currently be inside its build window
+    after activation (same clock as :func:`challenge_in_scheduled_build_window` but
+    ignores ``is_active``). Used by auto-activate so we never turn on a mission that is
+    already past its scheduled end.
+    """
+    if bool(c.is_finalized):
+        return False
+    if c.start_time is None:
+        return True
+    st_utc = _to_utc_aware(c.start_time)
+    now_utc = _to_utc_aware(now) if now.tzinfo is None else now.astimezone(timezone.utc)
+    if now_utc < st_utc:
+        return False
+    dur_m = int(c.duration_minutes or 0)
+    if dur_m > 0 and now_utc >= st_utc + timedelta(minutes=dur_m):
+        return False
+    return True
+
+
 def mission_build_window_phase(c: Optional[Challenge], now: datetime) -> MissionBuildWindowPhase:
     """
     UI-facing phase for scheduled vs per-seat missions. Aligns with ``challenge_in_scheduled_build_window``

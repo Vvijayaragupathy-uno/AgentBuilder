@@ -82,6 +82,7 @@ from aiccore.backend.security import (
     participant_password_needs_upgrade,
 )
 from aiccore.backend.session_rules import can_submit_session
+from aiccore.backend.mission_automation import run_mission_automation
 from aiccore.backend.challenge_time import (
     challenge_in_scheduled_build_window,
     challenge_start_time_utc,
@@ -975,6 +976,8 @@ def create_aiccore_app():
     ):
         """TV + builder poll. Optional session_id adds my_position in queue (1-based)."""
         with Session(engine) as db_session:
+            # Finalize / activate before opening demo gate so gate logic sees ended missions.
+            run_mission_automation(db_session)
             demo_opened = open_demo_gate_try(db_session, DemoGateReason.DEMO_STATUS_POLL)
             st = get_demo_status(db_session)
         if demo_opened:
@@ -1820,6 +1823,8 @@ def create_aiccore_app():
     @app.get("/api/v1/aiccore/system/status")
     async def get_system_status():
         with Session(engine) as db_session:
+            # Align DB with wall clock before reads so builder/TV don’t lag the background tick.
+            run_mission_automation(db_session)
             locked = is_arena_locked_db(db_session)
             # Read-only: if >1 active (race), report the canonical mission (oldest by created_at).
             # DB heal runs on challenge toggle, not on this GET.

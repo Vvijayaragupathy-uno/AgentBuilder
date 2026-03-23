@@ -509,8 +509,9 @@ def _repair_demo_cursor_if_needed(db: Session) -> None:
 
 def get_demo_status(db: Session) -> Dict[str, Any]:
     """
-    Demo queue + cursor snapshot for TV. Scheduled finalize/activate run on the background
-    mission automation loop (not on GET).
+    Demo queue + cursor snapshot for TV. Call :func:`run_mission_automation` in the HTTP
+    handler *before* this so the DB matches wall time; do not finalize here (avoids ordering
+    bugs with demo gate open vs finalize).
     """
     advance_demo_if_expired(db)
     _repair_demo_cursor_if_needed(db)
