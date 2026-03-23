@@ -493,10 +493,16 @@ export default function BuilderPage() {
     }
 
     const isChallengeFinalized = challengeInfo?.isFinalized === true
+    /** Server phase (when present) — only `"open"` allows submit for scheduled missions. */
+    const missionPhaseBlocksSubmit =
+        challengeInfo?.mode === "mission" &&
+        typeof missionBuildPhase === "string" &&
+        missionBuildPhase !== "open"
     /** Scheduled mission: Submit only while server reports the build window open (or legacy client window). */
     const missionSubmitBlocked =
         challengeInfo?.mode === "mission" &&
-        (serverBuildWindowOpen === false ||
+        (missionPhaseBlocksSubmit ||
+            serverBuildWindowOpen === false ||
             (serverBuildWindowOpen === null &&
                 challengeInfo.start_time &&
                 (() => {

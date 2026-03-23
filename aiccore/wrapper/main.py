@@ -241,7 +241,8 @@ def heal_duplicate_active_challenges(db_session: Session) -> int:
 
 
 def _ensure_session_mission_allows_submit(db_session: Session, session_obj: AICSession) -> None:
-    """Reject API submits when the mission is finalized, inactive, or missing."""
+    """Reject API submits when the mission is finalized, inactive, missing, or outside the build window."""
+    now_utc = datetime.now(timezone.utc)
     if session_obj.challenge_id is not None:
         ch = db_session.get(Challenge, session_obj.challenge_id)
         if not ch:
@@ -254,6 +255,11 @@ def _ensure_session_mission_allows_submit(db_session: Session, session_obj: AICS
                 status_code=409,
                 detail="This mission has ended; submissions are closed",
             )
+        if not challenge_in_scheduled_build_window(ch, now_utc):
+            raise HTTPException(
+                status_code=409,
+                detail="Submissions are only accepted during the mission build window",
+            )
         return
     live = db_session.execute(
         select(Challenge)
@@ -264,6 +270,11 @@ def _ensure_session_mission_allows_submit(db_session: Session, session_obj: AICS
         raise HTTPException(
             status_code=409,
             detail="No live mission to submit to",
+        )
+    if not challenge_in_scheduled_build_window(live, now_utc):
+        raise HTTPException(
+            status_code=409,
+            detail="Submissions are only accepted during the mission build window",
         )
 
 
