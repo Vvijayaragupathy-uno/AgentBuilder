@@ -220,7 +220,6 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
   const timer = useCountdown(challenge, missionEndFromServer)
   const [congrats, setCongrats] = useState<{ nickname: string; until: number } | null>(null)
   const [demo, setDemo] = useState<DemoStatusPayload | null>(null)
-  const [demoHydrated, setDemoHydrated] = useState(false)
   const wsRetryRef = useRef(1000)
 
   const loadDemo = useCallback(async () => {
@@ -238,10 +237,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
         }
       }
       const res = await fetch(`${getApiBase()}/api/v1/aiccore/demo/status`)
-      if (res.ok) {
-        setDemo(await res.json())
-        setDemoHydrated(true)
-      }
+      if (res.ok) setDemo(await res.json())
     } catch { /* ignore */ }
   }, [challenge.id])
 
@@ -316,13 +312,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
 
   const showCongrats = Boolean(congrats && skewedNow() < congrats.until)
   const presenting = demo?.gate_open && demo.presenting
-  /**
-   * Server is source of truth. Do not default to build_mosaic before the first demo/status
-   * response — that showed a false “Build” mosaic while the mission was between_rounds.
-   */
-  const tvMode: TVLiveMode = demoHydrated
-    ? (demo?.tv_mode ?? (presenting ? "demo_fullscreen" : "between_rounds"))
-    : "between_rounds"
+  const tvMode: TVLiveMode = demo?.tv_mode ?? (presenting ? "demo_fullscreen" : "build_mosaic")
 
   /** During full-screen demo, show this slot’s countdown — not the mission build clock (avoids “two timers”). */
   const [demoSlotClock, setDemoSlotClock] = useState<string | null>(null)

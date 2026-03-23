@@ -154,9 +154,6 @@ class DemoQueueEntry(Base):
     session_id: Mapped[UUID] = mapped_column(
         ForeignKey(f"{AICCORE_SCHEMA}.session.id"), unique=True
     )
-    submission_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(f"{AICCORE_SCHEMA}.submission.id"), nullable=True, index=True
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

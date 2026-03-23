@@ -163,7 +163,6 @@ def _ensure_schema_migrations():
             "ALTER TABLE aiccore.session ADD COLUMN IF NOT EXISTS langflow_workspace_folder_id UUID",
             "ALTER TABLE aiccore.session ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
             "UPDATE aiccore.session SET last_seen_at = COALESCE(last_seen_at, start_time) WHERE last_seen_at IS NULL",
-            "ALTER TABLE aiccore.demo_queue_entry ADD COLUMN IF NOT EXISTS submission_id UUID REFERENCES aiccore.submission(id)",
         ):
             try:
                 with engine.begin() as conn:
@@ -223,14 +222,6 @@ def _ensure_schema_migrations():
                 with engine.connect() as conn:
                     conn.execute(text("ALTER TABLE session ADD COLUMN last_seen_at TEXT"))
                     conn.execute(text("UPDATE session SET last_seen_at = COALESCE(last_seen_at, start_time)"))
-                    conn.commit()
-            except Exception:
-                pass
-        dq_cols = _col_names("demo_queue_entry")
-        if dq_cols and "submission_id" not in dq_cols:
-            try:
-                with engine.connect() as conn:
-                    conn.execute(text("ALTER TABLE demo_queue_entry ADD COLUMN submission_id TEXT"))
                     conn.commit()
             except Exception:
                 pass

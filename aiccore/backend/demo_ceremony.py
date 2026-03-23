@@ -22,7 +22,6 @@ from .models import (
     Event,
 )
 from .session_rules import can_join_demo_queue
-from .challenge_time import challenge_in_scheduled_build_window
 
 def _demo_segment_seconds() -> int:
     raw = os.getenv("AICCORE_DEMO_SEGMENT_SECONDS", "90")
@@ -64,6 +63,26 @@ def _active_canonical_challenge(db: Session) -> Optional[Challenge]:
     ).scalars().first()
 
 
+def _mission_still_in_build_phase(ch: Optional[Challenge], now_utc: datetime) -> bool:
+    """
+    True while builders may still be working on the mission clock (for TV mode).
+    After scheduled end (start + duration), returns False so TV can show "between rounds"
+    even if the challenge row is still active until finalize.
+    """
+    if not ch or not ch.is_active or ch.is_finalized:
+        return False
+    if ch.start_time is None:
+        return True
+    st_utc = _to_utc_aware(ch.start_time)
+    if now_utc < st_utc:
+        return False
+    dur_m = int(ch.duration_minutes or 0)
+    if dur_m > 0:
+        if now_utc >= st_utc + timedelta(minutes=dur_m):
+            return False
+    return True
+
+
 def _compute_tv_mode(
     *,
     presenting: Optional[Dict[str, Any]],
@@ -78,7 +97,7 @@ def _compute_tv_mode(
     """
     if presenting:
         return "demo_fullscreen"
-    if live_challenge and challenge_in_scheduled_build_window(live_challenge, now_utc):
+    if _mission_still_in_build_phase(live_challenge, now_utc):
         return "build_mosaic"
     return "between_rounds"
 
@@ -411,20 +430,6 @@ def snapshot_to_preview(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
-def _latest_submission_id_for_session(db: Session, session_id: UUID) -> Optional[UUID]:
-    sub = (
-        db.execute(
-            select(Submission)
-            .where(Submission.session_id == session_id)
-            .order_by(Submission.submitted_at.desc())
-            .limit(1)
-        )
-        .scalars()
-        .first()
-    )
-    return sub.id if sub else None
-
-
 def join_demo_queue(db: Session, session_id: UUID) -> dict:
     sess = db.get(AICSession, session_id)
     if not sess:
@@ -444,8 +449,7 @@ def join_demo_queue(db: Session, session_id: UUID) -> dict:
         q = ordered_queue_rows(db)
         pos = next((i for i, r in enumerate(q) if r.session_id == session_id), 0)
         return {"status": "already_queued", "position": pos + 1, "total": len(q)}
-    sub_id = _latest_submission_id_for_session(db, session_id)
-    db.add(DemoQueueEntry(session_id=session_id, submission_id=sub_id))
+    db.add(DemoQueueEntry(session_id=session_id))
     db.commit()
     q = ordered_queue_rows(db)
     pos = next((i for i, r in enumerate(q) if r.session_id == session_id), len(q) - 1)
@@ -508,11 +512,7 @@ def _repair_demo_cursor_if_needed(db: Session) -> None:
 
 
 def get_demo_status(db: Session) -> Dict[str, Any]:
-    """
-    Demo queue + cursor snapshot for TV. Call :func:`run_mission_automation` in the HTTP
-    handler *before* this so the DB matches wall time; do not finalize here (avoids ordering
-    bugs with demo gate open vs finalize).
-    """
+    maybe_auto_finalize_challenge(db)
     advance_demo_if_expired(db)
     _repair_demo_cursor_if_needed(db)
     row = get_or_create_arena_row(db)
@@ -526,7 +526,6 @@ def get_demo_status(db: Session) -> Dict[str, Any]:
                     "session_id": str(r.session_id),
                     "nickname": s.nickname,
                     "station_id": s.station_id,
-                    "submission_id": str(r.submission_id) if r.submission_id else None,
                 }
             )
     presenting = None
