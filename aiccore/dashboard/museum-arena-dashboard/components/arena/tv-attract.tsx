@@ -258,7 +258,7 @@ function NextSlide({ challenge }: { challenge: Challenge }) {
 
 const GUIDE_VIDEO_VOLUME = 0.88
 
-/** Local clip: plays once through, fixed level; click anywhere once if the browser blocks autoplay-with-sound. */
+/** Local clip: loops continuously, fixed level; click anywhere once if the browser blocks autoplay-with-sound. */
 function MakerspaceGuideSidebarEmbed() {
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -315,6 +315,7 @@ function MakerspaceGuideSidebarEmbed() {
           className="absolute inset-0 h-full w-full min-h-[280px] object-contain bg-black"
           src={MAKERSPACE_GUIDE_VIDEO_PATH}
           playsInline
+          loop
           preload="auto"
           autoPlay
           controls={false}
