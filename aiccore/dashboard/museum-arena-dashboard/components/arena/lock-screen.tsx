@@ -158,10 +158,9 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
 
     const inputClass = "h-11 w-full rounded-lg bg-secondary/60 px-4 text-sm border border-border focus:border-primary focus:outline-none transition-colors"
 
-    const challengesForRegister =
-        arenaClosed === true
-            ? challenges.filter(c => !c.is_active && c.is_finalized !== true)
-            : challenges
+    // Must match server: POST /users → ensure_requested_challenge_registration (and list_challenges
+    // already folds is_registration_open to false while a mission is live or finalized).
+    const challengesForRegister = challenges.filter(c => c.is_registration_open === true)
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background p-4">
@@ -354,9 +353,22 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
 
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-muted-foreground">Choose a Challenge</label>
-                                    {arenaClosed === true && challengesForRegister.length === 0 ? (
+                                    {challengesForRegister.length === 0 ? (
                                         <p className="text-[11px] text-muted-foreground leading-relaxed rounded-lg border border-border bg-secondary/30 px-3 py-2">
-                                            No upcoming missions open for registration while the arena is closed. Check back when staff opens registration.
+                                            {arenaClosed === true ? (
+                                                <>
+                                                    No mission is accepting sign-ups right now. Staff must either{" "}
+                                                    <span className="font-medium text-foreground/90">open registration</span> on an upcoming
+                                                    (not live) challenge, or{" "}
+                                                    <span className="font-medium text-foreground/90">unlock the arena</span> so PIN entry works
+                                                    for the live round.
+                                                </>
+                                            ) : (
+                                                <>
+                                                    Nothing is open for new sign-ups. The live round uses PIN only after you’re registered; if
+                                                    this is the next event, ask staff to enable registration on that challenge.
+                                                </>
+                                            )}
                                         </p>
                                     ) : (
                                     <div className="flex flex-col gap-1.5 max-h-[130px] overflow-y-auto">
@@ -397,7 +409,7 @@ export function LockScreen({ onUnlock, prefillPin, onPrefillConsumed }: LockScre
                                     !username ||
                                     !selectedChallenge ||
                                     !password ||
-                                    (arenaClosed === true && challengesForRegister.length === 0)
+                                    challengesForRegister.length === 0
                                 }
                                 className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-opacity disabled:opacity-40 hover:opacity-90"
                             >
