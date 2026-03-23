@@ -269,6 +269,13 @@ function MakerspaceGuideSidebarEmbed() {
     el.volume = GUIDE_VIDEO_VOLUME
     el.defaultMuted = false
     el.muted = false
+    el.loop = true
+
+    const onEnded = () => {
+      el.currentTime = 0
+      void el.play().catch(() => {})
+    }
+    el.addEventListener("ended", onEnded)
 
     const tryPlay = () => {
       void el.play().catch(() => {
@@ -289,6 +296,7 @@ function MakerspaceGuideSidebarEmbed() {
     window.addEventListener("pointerdown", onFirstPointer, { once: true })
 
     return () => {
+      el.removeEventListener("ended", onEnded)
       el.removeEventListener("canplay", tryPlay)
       window.removeEventListener("pointerdown", onFirstPointer)
     }
@@ -305,7 +313,7 @@ function MakerspaceGuideSidebarEmbed() {
           The floor, in one reel
         </h2>
         <p className="text-[12px] text-muted-foreground font-medium leading-snug">
-          A full walkthrough of the builder — watch, listen, then grab a seat.
+          A full walkthrough of the builder — loops continuously while this screen is up.
         </p>
       </div>
 
