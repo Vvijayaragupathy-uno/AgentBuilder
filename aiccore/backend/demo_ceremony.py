@@ -159,42 +159,113 @@ def ensure_demo_playback_if_gate_open_idle(db: Session) -> bool:
     return True
 
 
-def maybe_auto_finalize_challenge(db: Session) -> Optional[dict]:
-    """
-    Automatic end-of-mission build phase:
-    If a challenge is active, not finalized, has start_time, and duration_minutes > 0,
-    and (start_time + duration) <= now UTC, deactivate it (is_active=False), set
-    is_finalized=True, open the demo gate — matching manual finalize semantics so the
-    next scheduled mission can auto-activate.
-    """
-    now_utc = datetime.now(timezone.utc)
-    ch = db.execute(
+def _canonical_live_challenge_row(db: Session) -> Optional[Challenge]:
+    return db.execute(
         select(Challenge)
         .where(Challenge.is_active == True, Challenge.is_finalized == False)
         .order_by(Challenge.created_at.asc())
     ).scalars().first()
 
-    if not ch or not ch.start_time:
+
+def _finalize_challenge_and_open_demo(
+    db: Session, ch: Challenge, *, auto_end_reason: str, ended_at: datetime
+) -> dict:
+    ch.is_active = False
+    ch.is_finalized = True
+    ch.build_phase_ended_at = ended_at
+    ch.build_phase_end_reason = auto_end_reason
+    force_open_demo_gate(db)
+    db.commit()
+    return {
+        "challenge_id": str(ch.id),
+        "title": ch.title,
+        "status": "finalized",
+        "auto_ended": True,
+        "auto_end_reason": auto_end_reason,
+        "build_phase_ended_at": ended_at.isoformat(),
+    }
+
+
+def maybe_auto_finalize_challenge(db: Session) -> Optional[dict]:
+    """
+    End the canonical live challenge when **either** condition is true. If **both** are true,
+    pick the reason that happened **first in real time**:
+    - ``schedule``: scheduled end instant (start_time + duration)
+    - ``all_submitted``: latest submission timestamp on this challenge once everyone active has submitted
+
+    Stores ``build_phase_ended_at`` / ``build_phase_end_reason`` on the challenge row.
+    """
+    now_utc = datetime.now(timezone.utc)
+    ch = _canonical_live_challenge_row(db)
+    if not ch:
         return None
 
-    dur = int(ch.duration_minutes or 0)
-    if dur <= 0:
+    schedule_hit = False
+    expires_at: Optional[datetime] = None
+    if ch.start_time is not None:
+        dur = int(ch.duration_minutes or 0)
+        if dur > 0:
+            st_utc = _to_utc_aware(ch.start_time)
+            expires_at = st_utc + timedelta(minutes=dur)
+            schedule_hit = now_utc >= expires_at
+
+    pending = (
+        db.execute(
+            select(func.count(AICSession.id)).where(
+                AICSession.challenge_id == ch.id,
+                AICSession.is_active == True,
+                AICSession.is_submitted == False,
+            )
+        ).scalar()
+        or 0
+    )
+    sub_n = (
+        db.execute(
+            select(func.count(Submission.id))
+            .join(AICSession, Submission.session_id == AICSession.id)
+            .where(AICSession.challenge_id == ch.id)
+        ).scalar()
+        or 0
+    )
+    all_submitted_hit = pending == 0 and sub_n >= 1
+
+    if not schedule_hit and not all_submitted_hit:
         return None
 
-    st_utc = _to_utc_aware(ch.start_time)
-    expires_at = st_utc + timedelta(minutes=dur)
-    if now_utc >= expires_at:
-        ch.is_active = False
-        ch.is_finalized = True
-        force_open_demo_gate(db)
-        db.commit()
-        return {
-            "challenge_id": str(ch.id),
-            "title": ch.title,
-            "status": "finalized",
-            "auto_ended": True,
-        }
-    return None
+    t_all: Optional[datetime] = None
+    if all_submitted_hit:
+        raw_max = db.execute(
+            select(func.max(Submission.submitted_at))
+            .join(AICSession, Submission.session_id == AICSession.id)
+            .where(AICSession.challenge_id == ch.id)
+        ).scalar()
+        if raw_max is not None:
+            t_all = _to_utc_aware(raw_max)
+
+    if schedule_hit and not all_submitted_hit:
+        reason = "schedule"
+        ended_at = expires_at if expires_at is not None else now_utc
+    elif all_submitted_hit and not schedule_hit:
+        reason = "all_submitted"
+        ended_at = t_all if t_all is not None else now_utc
+    else:
+        # Both true — pick the earlier real-world instant when both timestamps exist.
+        if expires_at is None:
+            reason = "all_submitted"
+            ended_at = t_all if t_all is not None else now_utc
+        elif t_all is None:
+            reason = "schedule"
+            ended_at = expires_at
+        elif expires_at <= t_all:
+            reason = "schedule"
+            ended_at = expires_at
+        else:
+            reason = "all_submitted"
+            ended_at = t_all
+
+    return _finalize_challenge_and_open_demo(
+        db, ch, auto_end_reason=reason, ended_at=ended_at
+    )
 
 
 def try_open_demo_gate(db: Session) -> bool:
@@ -246,6 +317,18 @@ def try_open_demo_gate(db: Session) -> bool:
     if queue_n > 0:
         return force_open_demo_gate(db)
     return False
+
+
+def finalize_or_open_demo_gate(db: Session) -> tuple[Optional[dict], bool]:
+    """
+    Call after a successful submit (or on poll): run auto-finalize first so the last submit
+    closes the mission immediately with correct timestamps; otherwise try opening the demo gate.
+    Returns (mission_end_payload | None, broadcast_demo_gate_open).
+    """
+    payload = maybe_auto_finalize_challenge(db)
+    if payload:
+        return payload, True
+    return None, try_open_demo_gate(db)
 
 
 def advance_demo_if_expired(db: Session) -> None:

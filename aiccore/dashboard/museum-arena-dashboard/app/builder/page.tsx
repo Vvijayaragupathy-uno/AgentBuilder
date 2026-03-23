@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { LockScreen } from "@/components/arena/lock-screen"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
-import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut, PlayCircle, ExternalLink } from "lucide-react"
+import { Rocket, Trophy, CheckCircle2, Megaphone, X, FileText, Clock, LogOut, PlayCircle, ExternalLink, Presentation } from "lucide-react"
 import { LANGFLOW_TEACH_WATCH_URL } from "@/lib/langflow-teach"
 import {
     applyServerTimeFromIso,
@@ -63,6 +63,14 @@ export default function BuilderPage() {
     const [langflowMisconfigured, setLangflowMisconfigured] = useState(false)
     /** After Start Over, server issues a new one-time PIN (old PIN was consumed at unlock). */
     const [lockScreenPrefillPin, setLockScreenPrefillPin] = useState<string | null>(null)
+    /** Optional TV demo queue — only people who tap in get a slot (facilitator still controls playback). */
+    const [demoTvQueue, setDemoTvQueue] = useState<{
+        inQueue: boolean
+        position?: number
+        total?: number
+        error: string | null
+        joining: boolean
+    }>({ inQueue: false, error: null, joining: false })
 
     useEffect(() => {
         setLangflowMisconfigured(isLangflowIframeMisconfigured())
@@ -183,6 +191,7 @@ export default function BuilderPage() {
         }
 
         setIsSubmitted(false)
+        setDemoTvQueue({ inQueue: false, error: null, joining: false })
     }
 
     const handleReset = async () => {
@@ -223,7 +232,79 @@ export default function BuilderPage() {
         setHasActiveChallenge(false)
         setChallengeInfo(null)
         autoSubmitFiredRef.current = false
+        setDemoTvQueue({ inQueue: false, error: null, joining: false })
     }
+
+    useEffect(() => {
+        if (!session?.id || !isSubmitted) return
+        let cancelled = false
+        const poll = async () => {
+            try {
+                const r = await fetch(
+                    `${getApiBase()}/api/v1/aiccore/demo/status?session_id=${encodeURIComponent(session.id)}`,
+                )
+                if (!r.ok || cancelled) return
+                const j = await r.json()
+                const pos = typeof j.my_position === "number" ? j.my_position : undefined
+                const inList =
+                    Array.isArray(j.queue) &&
+                    j.queue.some((q: { session_id?: string }) => q.session_id === session.id)
+                const qlen =
+                    typeof j.queue_length === "number"
+                        ? j.queue_length
+                        : Array.isArray(j.queue)
+                          ? j.queue.length
+                          : undefined
+                setDemoTvQueue(prev => ({
+                    ...prev,
+                    inQueue: Boolean(pos ?? inList),
+                    position: pos,
+                    total: qlen,
+                }))
+            } catch {
+                /* ignore */
+            }
+        }
+        void poll()
+        const id = setInterval(poll, 4000)
+        return () => {
+            cancelled = true
+            clearInterval(id)
+        }
+    }, [session?.id, isSubmitted])
+
+    const handleJoinTvDemoQueue = useCallback(async () => {
+        if (!session) return
+        setDemoTvQueue(prev => ({ ...prev, joining: true, error: null }))
+        try {
+            const r = await fetch(`${getApiBase()}/api/v1/aiccore/session/${session.id}/demo-queue`, {
+                method: "POST",
+                credentials: "include",
+                headers: sessionAuthHeaders(session),
+            })
+            const j = await r.json().catch(() => ({}))
+            if (!r.ok) {
+                const d = typeof j.detail === "string" ? j.detail : `Could not join (${r.status})`
+                setDemoTvQueue(prev => ({ ...prev, joining: false, error: d }))
+                return
+            }
+            const p = typeof j.position === "number" ? j.position : undefined
+            const t = typeof j.total === "number" ? j.total : undefined
+            setDemoTvQueue(prev => ({
+                ...prev,
+                joining: false,
+                inQueue: true,
+                position: p ?? prev.position,
+                total: t ?? prev.total,
+            }))
+        } catch {
+            setDemoTvQueue(prev => ({
+                ...prev,
+                joining: false,
+                error: "Network error — try again.",
+            }))
+        }
+    }, [session])
 
     useEffect(() => {
         if (!session || isSubmitted) return
@@ -521,6 +602,44 @@ export default function BuilderPage() {
                             </div>
                         </div>
                     </div>
+
+                    {isSubmitted && !isSystemLocked && (
+                        <div className="w-full max-w-md rounded-xl border border-border/60 bg-card/40 p-4 text-left space-y-3">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                                <Presentation className="h-4 w-4 text-violet-400 shrink-0" />
+                                <span>TV demo (optional)</span>
+                            </div>
+                            {demoTvQueue.inQueue ? (
+                                <p className="text-sm text-muted-foreground leading-relaxed">
+                                    You offered to present. When the host starts playback, your build may appear
+                                    full-screen on the TV.
+                                    {demoTvQueue.position != null && demoTvQueue.total != null
+                                        ? ` Queue: ${demoTvQueue.position} of ${demoTvQueue.total}.`
+                                        : demoTvQueue.position != null
+                                          ? ` Spot: ${demoTvQueue.position}.`
+                                          : ""}
+                                </p>
+                            ) : (
+                                <>
+                                    <p className="text-xs text-muted-foreground leading-relaxed">
+                                        Only builders who opt in are queued for the big screen. After demos, the host
+                                        reviews submissions and sets scores / winners.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        disabled={demoTvQueue.joining}
+                                        onClick={() => void handleJoinTvDemoQueue()}
+                                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-4 py-2.5 text-sm font-semibold text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+                                    >
+                                        {demoTvQueue.joining ? "Joining…" : "Offer to present on TV"}
+                                    </button>
+                                </>
+                            )}
+                            {demoTvQueue.error ? (
+                                <p className="text-xs text-rose-400">{demoTvQueue.error}</p>
+                            ) : null}
+                        </div>
+                    )}
 
                     {showProminentStartOver ? (
                         <>

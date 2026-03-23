@@ -47,6 +47,11 @@ class Challenge(Base):
     location: Mapped[str] = mapped_column(String, default="Main Arena")
     is_registration_open: Mapped[bool] = mapped_column(Boolean, default=True)
     is_finalized: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When the build phase ended (auto or admin) — for audit and “first event” semantics.
+    build_phase_ended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    build_phase_end_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     starter_assets_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     banner_image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # Optional TV + builder briefing (separate from short description / starter kit URL).

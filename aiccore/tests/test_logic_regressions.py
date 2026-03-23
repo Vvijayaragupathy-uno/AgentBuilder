@@ -10,7 +10,10 @@ from fastapi import HTTPException
 from sqlalchemy import ForeignKey, String, Uuid, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
-from aiccore.backend.demo_ceremony import _latest_snapshot_for_session, maybe_auto_finalize_challenge
+from aiccore.backend.demo_ceremony import (
+    _latest_snapshot_for_session,
+    maybe_auto_finalize_challenge,
+)
 from aiccore.backend.eraser import (
     _prepare_manifest_for_restore,
     _submission_lookup_requires_folder_scope,
@@ -26,7 +29,15 @@ from aiccore.backend.security import (
     session_token_max_age_seconds,
 )
 from aiccore.backend.session_presence import expire_stale_sessions
-from aiccore.backend.models import Base, Challenge, Event, Participant, Session as AICSession
+from aiccore.backend.models import (
+    ArenaState,
+    Base,
+    Challenge,
+    Event,
+    Participant,
+    Session as AICSession,
+    Submission,
+)
 
 
 class _LFBase(DeclarativeBase):
@@ -343,9 +354,12 @@ def test_maybe_auto_finalize_deactivates_and_skips_zero_duration():
 
     assert out is not None
     assert out["challenge_id"] == str(challenge_id)
+    assert out.get("auto_end_reason") == "schedule"
     assert row is not None
     assert row.is_finalized is True
     assert row.is_active is False
+    assert row.build_phase_end_reason == "schedule"
+    assert row.build_phase_ended_at is not None
 
     zero_dur = uuid4()
     with Session(engine) as db:
@@ -367,6 +381,200 @@ def test_maybe_auto_finalize_deactivates_and_skips_zero_duration():
         z = db.get(Challenge, zero_dur)
     assert z.is_active is True
     assert z.is_finalized is False
+
+
+def test_maybe_auto_finalize_all_submitted_single_builder():
+    """Whichever first: when everyone active on the mission has submitted, close the challenge in DB."""
+    engine = _test_engine()
+    Base.metadata.create_all(engine)
+
+    ch_id = uuid4()
+    user_id = uuid4()
+    sess_id = uuid4()
+    sub_id = uuid4()
+    with Session(engine) as db:
+        db.add(
+            Participant(
+                id=user_id,
+                username="solo_u",
+                nickname="Solo",
+                honors={},
+            )
+        )
+        db.add(
+            Challenge(
+                id=ch_id,
+                title="Solo mission",
+                description="d",
+                is_active=True,
+                is_finalized=False,
+                is_registration_open=False,
+                start_time=None,
+                duration_minutes=60,
+            )
+        )
+        db.add(
+            AICSession(
+                id=sess_id,
+                user_id=user_id,
+                nickname="Solo",
+                station_id="s1",
+                challenge_id=ch_id,
+                is_active=True,
+                is_submitted=True,
+            )
+        )
+        db.add(
+            Submission(
+                id=sub_id,
+                session_id=sess_id,
+                flow_snapshot={"nodes": [], "edges": []},
+            )
+        )
+        db.commit()
+
+    with Session(engine) as db:
+        out = maybe_auto_finalize_challenge(db)
+        row = db.get(Challenge, ch_id)
+        arena = db.get(ArenaState, 1)
+
+    assert out is not None
+    assert out.get("auto_end_reason") == "all_submitted"
+    assert row is not None
+    assert row.is_finalized is True
+    assert row.is_active is False
+    assert arena is not None
+    assert arena.demo_gate_open is True
+    assert row.build_phase_end_reason == "all_submitted"
+    assert row.build_phase_ended_at is not None
+
+
+def test_maybe_auto_finalize_both_schedule_and_submitted_picks_earlier_instant():
+    """If clock and all-submitted are both true, reason matches the earlier of expire vs last submit."""
+    engine = _test_engine()
+    Base.metadata.create_all(engine)
+
+    ch_id = uuid4()
+    user_id = uuid4()
+    sess_id = uuid4()
+    sub_id = uuid4()
+    past_start = datetime.now(timezone.utc) - timedelta(hours=2)
+    # Expires at past_start + 30m — well before "now" and before a "late" submission timestamp below.
+    with Session(engine) as db:
+        db.add(
+            Participant(
+                id=user_id,
+                username="both_u",
+                nickname="Both",
+                honors={},
+            )
+        )
+        db.add(
+            Challenge(
+                id=ch_id,
+                title="Both",
+                description="d",
+                is_active=True,
+                is_finalized=False,
+                is_registration_open=False,
+                start_time=past_start,
+                duration_minutes=30,
+            )
+        )
+        db.add(
+            AICSession(
+                id=sess_id,
+                user_id=user_id,
+                nickname="Both",
+                station_id="s1",
+                challenge_id=ch_id,
+                is_active=True,
+                is_submitted=True,
+            )
+        )
+        late_submit = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.add(
+            Submission(
+                id=sub_id,
+                session_id=sess_id,
+                flow_snapshot={"nodes": [], "edges": []},
+                submitted_at=late_submit,
+            )
+        )
+        db.commit()
+
+    with Session(engine) as db:
+        out = maybe_auto_finalize_challenge(db)
+        row = db.get(Challenge, ch_id)
+
+    assert out is not None
+    assert out.get("auto_end_reason") == "schedule"
+    assert row is not None
+    assert row.build_phase_end_reason == "schedule"
+
+
+def test_maybe_auto_finalize_both_true_last_submit_before_schedule_end_prefers_submitted():
+    """Last submit before scheduled end, but wall clock past end — 'all_submitted' wins on timeline."""
+    engine = _test_engine()
+    Base.metadata.create_all(engine)
+
+    ch_id = uuid4()
+    user_id = uuid4()
+    sess_id = uuid4()
+    sub_id = uuid4()
+    now = datetime.now(timezone.utc)
+    past_start = now - timedelta(hours=5)
+    # 4h duration → scheduled end was 1h ago; submit was 2h ago (still before that end).
+    with Session(engine) as db:
+        db.add(
+            Participant(
+                id=user_id,
+                username="early_u",
+                nickname="Early",
+                honors={},
+            )
+        )
+        db.add(
+            Challenge(
+                id=ch_id,
+                title="Early sub",
+                description="d",
+                is_active=True,
+                is_finalized=False,
+                is_registration_open=False,
+                start_time=past_start,
+                duration_minutes=240,
+            )
+        )
+        db.add(
+            AICSession(
+                id=sess_id,
+                user_id=user_id,
+                nickname="Early",
+                station_id="s1",
+                challenge_id=ch_id,
+                is_active=True,
+                is_submitted=True,
+            )
+        )
+        db.add(
+            Submission(
+                id=sub_id,
+                session_id=sess_id,
+                flow_snapshot={"nodes": [], "edges": []},
+                submitted_at=now - timedelta(hours=2),
+            )
+        )
+        db.commit()
+
+    with Session(engine) as db:
+        out = maybe_auto_finalize_challenge(db)
+        row = db.get(Challenge, ch_id)
+
+    assert out is not None
+    assert out.get("auto_end_reason") == "all_submitted"
+    assert row is not None
+    assert row.build_phase_end_reason == "all_submitted"
 
 
 def test_requested_challenge_registration_rejects_closed_or_full_challenge():

@@ -47,6 +47,7 @@ from aiccore.backend.models import (
 from aiccore.backend.demo_ceremony import (
     reset_demo_state,
     try_open_demo_gate,
+    finalize_or_open_demo_gate,
     force_open_demo_gate,
     get_demo_status,
     get_mosaic_snapshot_for_session,
@@ -1294,10 +1295,24 @@ def create_aiccore_app():
                     "type": "SUBMISSION_UPDATE",
                     "data": {"session_id": str(req.session_id)}
                 })
+                mission_end: Optional[Dict[str, Any]] = None
                 demo_opened = False
                 with Session(engine) as db2:
                     expire_stale_builder_sessions_db(db2)
-                    demo_opened = try_open_demo_gate(db2)
+                    mission_end, demo_opened = finalize_or_open_demo_gate(db2)
+                if mission_end:
+                    await broadcast_manager.broadcast(
+                        {
+                            "type": "MISSION_ENDED",
+                            "data": {
+                                "challenge_id": mission_end["challenge_id"],
+                                "title": mission_end.get("title", ""),
+                                "auto_end_reason": mission_end.get("auto_end_reason"),
+                                "build_phase_ended_at": mission_end.get("build_phase_ended_at"),
+                            },
+                        }
+                    )
+                    await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
                 if demo_opened:
                     await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
                 return {"submission_id": str(new_submission.id), "status": "submitted"}
@@ -1330,10 +1345,24 @@ def create_aiccore_app():
         from aiccore.backend.eraser import submit_workspace_as_flow
         try:
             sub_id = await submit_workspace_as_flow(session_id)
+            mission_end: Optional[Dict[str, Any]] = None
             demo_opened = False
             with Session(engine) as db2:
                 expire_stale_builder_sessions_db(db2)
-                demo_opened = try_open_demo_gate(db2)
+                mission_end, demo_opened = finalize_or_open_demo_gate(db2)
+            if mission_end:
+                await broadcast_manager.broadcast(
+                    {
+                        "type": "MISSION_ENDED",
+                        "data": {
+                            "challenge_id": mission_end["challenge_id"],
+                            "title": mission_end.get("title", ""),
+                            "auto_end_reason": mission_end.get("auto_end_reason"),
+                            "build_phase_ended_at": mission_end.get("build_phase_ended_at"),
+                        },
+                    }
+                )
+                await broadcast_manager.broadcast({"type": "LEADERBOARD_UPDATE", "data": {}})
             if demo_opened:
                 await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
             res = JSONResponse(content={"status": "success", "submission_id": sub_id})
@@ -1852,9 +1881,12 @@ def create_aiccore_app():
             active_challenges = db_session.execute(
                 select(Challenge).where(Challenge.is_active == True)
             ).scalars().all()
+            now_f = datetime.now(timezone.utc)
             for c in active_challenges:
                 c.is_active = False
                 c.is_finalized = True
+                c.build_phase_ended_at = now_f
+                c.build_phase_end_reason = "admin"
             db_session.commit()
         demo_opened = False
         with Session(engine) as db2:

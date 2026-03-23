@@ -160,6 +160,8 @@ def _ensure_schema_migrations():
             "ALTER TABLE aiccore.arena_state ADD COLUMN IF NOT EXISTS demo_segment_ends_at TIMESTAMPTZ",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_text TEXT",
             "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS instructions_document_url VARCHAR",
+            "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS build_phase_ended_at TIMESTAMPTZ",
+            "ALTER TABLE aiccore.challenge ADD COLUMN IF NOT EXISTS build_phase_end_reason VARCHAR",
             "ALTER TABLE aiccore.session ADD COLUMN IF NOT EXISTS langflow_workspace_folder_id UUID",
             "ALTER TABLE aiccore.session ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
             "UPDATE aiccore.session SET last_seen_at = COALESCE(last_seen_at, start_time) WHERE last_seen_at IS NULL",
@@ -200,6 +202,11 @@ def _ensure_schema_migrations():
                 (
                     "instructions_document_url",
                     "ALTER TABLE challenge ADD COLUMN instructions_document_url VARCHAR",
+                ),
+                ("build_phase_ended_at", "ALTER TABLE challenge ADD COLUMN build_phase_ended_at TEXT"),
+                (
+                    "build_phase_end_reason",
+                    "ALTER TABLE challenge ADD COLUMN build_phase_end_reason VARCHAR",
                 ),
             ):
                 if col not in ch_cols:
