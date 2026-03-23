@@ -85,6 +85,7 @@ from aiccore.backend.session_rules import can_submit_session
 from aiccore.backend.challenge_time import (
     challenge_in_scheduled_build_window,
     challenge_start_time_utc,
+    mission_build_window_phase,
 )
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, update, delete, or_, text
@@ -1823,6 +1824,7 @@ def create_aiccore_app():
                 active_challenge
                 and challenge_in_scheduled_build_window(active_challenge, now_utc)
             )
+            mission_phase = mission_build_window_phase(active_challenge, now_utc)
             mission_build_ends_at: Optional[str] = None
             if (
                 active_challenge
@@ -1847,6 +1849,7 @@ def create_aiccore_app():
                 "duration_minutes": active_challenge.duration_minutes if active_challenge else None,
                 "start_time": active_challenge.start_time.isoformat() if active_challenge and active_challenge.start_time else None,
                 "mission_build_window_open": mission_build_window_open,
+                "mission_build_window_phase": mission_phase,
                 "mission_build_ends_at": mission_build_ends_at,
                 "server_time": now_utc.isoformat(),
             }

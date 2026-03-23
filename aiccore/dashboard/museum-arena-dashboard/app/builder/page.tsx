@@ -55,7 +55,10 @@ export default function BuilderPage() {
     } | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [hasActiveChallenge, setHasActiveChallenge] = useState(false)
+    /** True only before scheduled start — not after the build window ends (see missionBuildPhase). */
     const [isBeforeStart, setIsBeforeStart] = useState(false)
+    /** From GET system/status — distinguishes before_start vs after_end vs open. */
+    const [missionBuildPhase, setMissionBuildPhase] = useState<string | null>(null)
     /** Server truth for scheduled missions — avoids disabled Submit when client clock ≠ UTC start instant. */
     const [serverBuildWindowOpen, setServerBuildWindowOpen] = useState<boolean | null>(null)
     const [submitError, setSubmitError] = useState<string | null>(null)
@@ -116,15 +119,28 @@ export default function BuilderPage() {
                                 ? status.mission_build_ends_at
                                 : null,
                     })
+                    if (typeof status.mission_build_window_phase === "string") {
+                        setMissionBuildPhase(status.mission_build_window_phase)
+                        setIsBeforeStart(status.mission_build_window_phase === "before_start")
+                    } else {
+                        setMissionBuildPhase(null)
+                    }
                     if (typeof status.mission_build_window_open === "boolean") {
                         setServerBuildWindowOpen(status.mission_build_window_open)
-                        setIsBeforeStart(!status.mission_build_window_open)
+                        if (typeof status.mission_build_window_phase !== "string") {
+                            const startMs = new Date(status.start_time).getTime()
+                            const open = status.mission_build_window_open
+                            setIsBeforeStart(!open && skewedNow() < startMs)
+                        }
                     } else {
                         setServerBuildWindowOpen(null)
-                        setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
+                        if (typeof status.mission_build_window_phase !== "string") {
+                            setIsBeforeStart(skewedNow() < new Date(status.start_time).getTime())
+                        }
                     }
                 } else {
                     setServerBuildWindowOpen(null)
+                    setMissionBuildPhase(null)
                     let stored = localStorage.getItem(SESSION_BUILD_START_MS_KEY)
                     if (!stored) {
                         const n = skewedNow()
@@ -143,6 +159,7 @@ export default function BuilderPage() {
             } else {
                 setChallengeInfo(null)
                 setServerBuildWindowOpen(null)
+                setMissionBuildPhase(null)
                 setTimeLeft(null)
                 setInstructionText(null)
                 setInstructionFrameUrl(null)
@@ -219,6 +236,7 @@ export default function BuilderPage() {
         setIsSubmitted(false)
         setSubmitError(null)
         setServerBuildWindowOpen(null)
+        setMissionBuildPhase(null)
         setIsBeforeStart(false)
         setHasActiveChallenge(false)
         setChallengeInfo(null)
@@ -422,8 +440,12 @@ export default function BuilderPage() {
             const now = skewedNow()
 
             if (challengeInfo.mode === "mission") {
+                // `mission_build_window_open === false` means both "before start" and "after end";
+                // only treat as before start when `now` is still before the scheduled start instant.
                 const beforeStart =
-                    serverBuildWindowOpen === null ? now < start : !serverBuildWindowOpen
+                    serverBuildWindowOpen === null
+                        ? now < start
+                        : serverBuildWindowOpen === false && now < start
                 if (beforeStart) {
                     setIsBeforeStart(true)
                     setTimeLeft(null)
@@ -471,6 +493,20 @@ export default function BuilderPage() {
     }
 
     const isChallengeFinalized = challengeInfo?.isFinalized === true
+    /** Scheduled mission: Submit only while server reports the build window open (or legacy client window). */
+    const missionSubmitBlocked =
+        challengeInfo?.mode === "mission" &&
+        (serverBuildWindowOpen === false ||
+            (serverBuildWindowOpen === null &&
+                challengeInfo.start_time &&
+                (() => {
+                    const startMs = new Date(challengeInfo.start_time).getTime()
+                    const endMs = challengeInfo.missionBuildEndsAt
+                        ? new Date(challengeInfo.missionBuildEndsAt).getTime()
+                        : startMs + challengeInfo.duration * 60 * 1000
+                    const t = skewedNow()
+                    return t < startMs || t >= endMs
+                })()))
     /** Mission / round is over on the server — "Start over" is misleading; offer sign-out only. */
     const missionRoundEnded =
         isChallengeFinalized ||
@@ -595,7 +631,16 @@ export default function BuilderPage() {
                         <span className="sm:hidden">Video</span>
                     </a>
 
-                    {timeLeft !== null ? (
+                    {missionBuildPhase === "after_end" || missionBuildPhase === "finalized" ? (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 text-rose-400 text-xs font-medium">
+                            <Clock className="h-3 w-3" />
+                            <span>
+                                {missionBuildPhase === "finalized"
+                                    ? "Challenge finalized"
+                                    : "Build window ended"}
+                            </span>
+                        </div>
+                    ) : timeLeft !== null ? (
                         <div className={cn(
                             "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border",
                             timeLeft < 300
@@ -605,7 +650,7 @@ export default function BuilderPage() {
                             <Clock className="h-3 w-3" />
                             <span>{formatTime(timeLeft)}</span>
                         </div>
-                    ) : isBeforeStart ? (
+                    ) : missionBuildPhase === "before_start" || (missionBuildPhase === null && isBeforeStart) ? (
                         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-400 text-xs font-medium">
                             <Clock className="h-3 w-3" />
                             <span>Not started yet</span>
@@ -625,10 +670,16 @@ export default function BuilderPage() {
 
                     <button
                         onClick={handleSubmit}
-                        disabled={isSubmitting || isSubmitted || isSystemLocked || isBeforeStart || !hasActiveChallenge}
+                        disabled={
+                            isSubmitting ||
+                            isSubmitted ||
+                            isSystemLocked ||
+                            missionSubmitBlocked ||
+                            !hasActiveChallenge
+                        }
                         className={cn(
                             "flex items-center gap-2 rounded-lg px-5 py-1.5 text-sm font-semibold transition-all active:scale-95",
-                            (isSubmitting || isBeforeStart || !hasActiveChallenge || isSystemLocked)
+                            (isSubmitting || missionSubmitBlocked || !hasActiveChallenge || isSystemLocked)
                                 ? "bg-muted cursor-not-allowed opacity-40 text-muted-foreground"
                                 : "bg-primary text-primary-foreground hover:opacity-90"
                         )}

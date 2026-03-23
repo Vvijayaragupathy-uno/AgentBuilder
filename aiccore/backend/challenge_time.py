@@ -6,9 +6,18 @@ and demo_ceremony so builder / TV / leaderboard do not disagree on “build stil
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from .models import Challenge
+
+MissionBuildWindowPhase = Literal[
+    "no_active_mission",
+    "inactive",
+    "finalized",
+    "before_start",
+    "open",
+    "after_end",
+]
 
 
 def challenge_start_time_utc(c: Challenge) -> Optional[datetime]:
@@ -52,3 +61,26 @@ def challenge_in_scheduled_build_window(c: Challenge, now: datetime) -> bool:
         if now_utc >= st_utc + timedelta(minutes=dur_m):
             return False
     return True
+
+
+def mission_build_window_phase(c: Optional[Challenge], now: datetime) -> MissionBuildWindowPhase:
+    """
+    UI-facing phase for scheduled vs per-seat missions. Aligns with ``challenge_in_scheduled_build_window``
+    but distinguishes **before_start** vs **after_end** when the build window is closed.
+    """
+    if c is None:
+        return "no_active_mission"
+    if not c.is_active:
+        return "inactive"
+    if bool(c.is_finalized):
+        return "finalized"
+    if c.start_time is None:
+        return "open"
+    st_utc = _to_utc_aware(c.start_time)
+    now_utc = _to_utc_aware(now) if now.tzinfo is None else now.astimezone(timezone.utc)
+    if now_utc < st_utc:
+        return "before_start"
+    dur_m = int(c.duration_minutes or 0)
+    if dur_m > 0 and now_utc >= st_utc + timedelta(minutes=dur_m):
+        return "after_end"
+    return "open"

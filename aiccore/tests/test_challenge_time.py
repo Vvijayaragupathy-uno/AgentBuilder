@@ -4,7 +4,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from aiccore.backend.challenge_time import challenge_in_scheduled_build_window
+from aiccore.backend.challenge_time import (
+    challenge_in_scheduled_build_window,
+    mission_build_window_phase,
+)
 from aiccore.backend.models import Challenge
 
 
@@ -56,3 +59,18 @@ def test_finalized_never_in_window():
     start = datetime(2020, 1, 1, 12, 0, tzinfo=timezone.utc)
     c = _ch(start_time=start, duration_minutes=60, is_finalized=True)
     assert challenge_in_scheduled_build_window(c, datetime(2020, 1, 1, 12, 30, tzinfo=timezone.utc)) is False
+
+
+def test_mission_build_window_phase_none_and_before_after():
+    assert mission_build_window_phase(None, datetime.now(timezone.utc)) == "no_active_mission"
+
+    start = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+    c = _ch(start_time=start, duration_minutes=30)
+    assert mission_build_window_phase(c, start - timedelta(minutes=1)) == "before_start"
+    assert mission_build_window_phase(c, start + timedelta(minutes=15)) == "open"
+    assert mission_build_window_phase(c, start + timedelta(minutes=30)) == "after_end"
+
+
+def test_mission_build_window_phase_open_ended_no_start():
+    c = _ch(start_time=None, duration_minutes=60)
+    assert mission_build_window_phase(c, datetime.now(timezone.utc)) == "open"
