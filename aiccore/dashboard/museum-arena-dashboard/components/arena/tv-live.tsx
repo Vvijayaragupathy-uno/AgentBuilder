@@ -507,7 +507,7 @@ export function TVLive({ challenge }: { challenge: Challenge }) {
                   ? "Next"
                   : tvMode === "between_rounds"
                     ? "Between"
-                    : "Build"}
+                    : "Current challenge"}
           </span>
           <span className={cn(
             "shrink-0 text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full ring-1",

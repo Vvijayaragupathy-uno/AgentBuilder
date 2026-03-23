@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import {
     Settings,
     Plus,
@@ -28,7 +28,9 @@ import {
     Trophy,
     Download,
     FileText,
-    Image as ImageIcon
+    Image as ImageIcon,
+    Tv,
+    SkipForward,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -142,6 +144,19 @@ export function SystemConfig() {
     const [isBroadcastOpen, setIsBroadcastOpen] = useState(false)
     const [broadcastMessage, setBroadcastMessage] = useState("")
     const [catalogDetailChallengeId, setCatalogDetailChallengeId] = useState<string | null>(null)
+
+    /** TV demo ceremony — mirrors GET /demo/status + admin actions */
+    const [demoStatus, setDemoStatus] = useState<{
+        gate_open: boolean
+        queue_length: number
+        cursor: number
+        tv_mode?: string
+        demo_phase?: string | null
+        presenting_nickname?: string | null
+    } | null>(null)
+    const [demoStatusLoading, setDemoStatusLoading] = useState(false)
+    const [demoActionLoading, setDemoActionLoading] = useState<"open" | "advance" | null>(null)
+    const [demoPanelError, setDemoPanelError] = useState<string | null>(null)
 
     // New/Edit challenge form
     const [challengeForm, setChallengeForm] = useState({
@@ -487,6 +502,86 @@ export function SystemConfig() {
         }
     }
 
+    const refreshDemoStatus = useCallback(async () => {
+        const apiBase = getApiBase()
+        setDemoStatusLoading(true)
+        setDemoPanelError(null)
+        try {
+            const r = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/demo/status`)
+            if (!r.ok) {
+                setDemoPanelError(`Demo status failed (${r.status})`)
+                return
+            }
+            const j = await r.json()
+            const nick =
+                j.presenting && typeof j.presenting.nickname === "string"
+                    ? j.presenting.nickname
+                    : null
+            setDemoStatus({
+                gate_open: Boolean(j.gate_open),
+                queue_length: typeof j.queue_length === "number" ? j.queue_length : 0,
+                cursor: typeof j.cursor === "number" ? j.cursor : -1,
+                tv_mode: typeof j.tv_mode === "string" ? j.tv_mode : undefined,
+                demo_phase: j.demo_phase ?? null,
+                presenting_nickname: nick,
+            })
+        } catch {
+            setDemoPanelError("Could not load demo status")
+        } finally {
+            setDemoStatusLoading(false)
+        }
+    }, [])
+
+    useEffect(() => {
+        void refreshDemoStatus()
+        const id = window.setInterval(() => void refreshDemoStatus(), 10_000)
+        return () => clearInterval(id)
+    }, [refreshDemoStatus])
+
+    const handleDemoOpenGate = async () => {
+        const apiBase = getApiBase()
+        setDemoActionLoading("open")
+        setDemoPanelError(null)
+        try {
+            const r = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/demo/open-gate`, {
+                method: "POST",
+            })
+            const j = await r.json().catch(() => ({}))
+            if (!r.ok) {
+                const d = typeof j.detail === "string" ? j.detail : `Open gate failed (${r.status})`
+                setDemoPanelError(d)
+                return
+            }
+            await refreshDemoStatus()
+        } catch {
+            setDemoPanelError("Network error opening demo gate")
+        } finally {
+            setDemoActionLoading(null)
+        }
+    }
+
+    const handleDemoAdvance = async () => {
+        const apiBase = getApiBase()
+        setDemoActionLoading("advance")
+        setDemoPanelError(null)
+        try {
+            const r = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/demo/next`, {
+                method: "POST",
+            })
+            const j = await r.json().catch(() => ({}))
+            if (!r.ok) {
+                const d = typeof j.detail === "string" ? j.detail : `Advance failed (${r.status})`
+                setDemoPanelError(d)
+                return
+            }
+            await refreshDemoStatus()
+        } catch {
+            setDemoPanelError("Network error advancing demo")
+        } finally {
+            setDemoActionLoading(null)
+        }
+    }
+
     return (
         <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12 overflow-x-hidden">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -555,6 +650,97 @@ export function SystemConfig() {
                             )}
                             <p className="text-[9px] text-muted-foreground/50 text-center leading-tight">
                                 Removes stale Langflow workflows from the mosaic display
+                            </p>
+                        </div>
+
+                        <div className="border-t border-white/10 pt-3 mt-1 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <Tv className="h-4 w-4 text-violet-400 shrink-0" />
+                                    <span className="text-xs font-bold uppercase tracking-tighter truncate">
+                                        TV demo queue
+                                    </span>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-[10px]"
+                                    disabled={demoStatusLoading}
+                                    onClick={() => void refreshDemoStatus()}
+                                >
+                                    {demoStatusLoading ? "…" : "Refresh"}
+                                </Button>
+                            </div>
+                            {demoStatus ? (
+                                <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-[10px] text-muted-foreground space-y-1">
+                                    <p>
+                                        <span className="text-foreground/90 font-semibold">Gate:</span>{" "}
+                                        {demoStatus.gate_open ? "Open" : "Closed"}
+                                        {" · "}
+                                        <span className="text-foreground/90 font-semibold">Queue:</span>{" "}
+                                        {demoStatus.queue_length}
+                                        {" · "}
+                                        <span className="text-foreground/90 font-semibold">Cursor:</span>{" "}
+                                        {demoStatus.cursor}
+                                    </p>
+                                    {(demoStatus.tv_mode || demoStatus.demo_phase) && (
+                                        <p>
+                                            {demoStatus.tv_mode ? (
+                                                <>
+                                                    <span className="text-foreground/90 font-semibold">TV mode:</span>{" "}
+                                                    {demoStatus.tv_mode}
+                                                </>
+                                            ) : null}
+                                            {demoStatus.demo_phase ? (
+                                                <>
+                                                    {demoStatus.tv_mode ? " · " : null}
+                                                    <span className="text-foreground/90 font-semibold">Phase:</span>{" "}
+                                                    {demoStatus.demo_phase}
+                                                </>
+                                            ) : null}
+                                        </p>
+                                    )}
+                                    {demoStatus.presenting_nickname ? (
+                                        <p>
+                                            <span className="text-foreground/90 font-semibold">On screen:</span>{" "}
+                                            {demoStatus.presenting_nickname}
+                                        </p>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <p className="text-[10px] text-muted-foreground">Loading demo status…</p>
+                            )}
+                            {demoPanelError ? (
+                                <p className="text-[10px] text-rose-400">{demoPanelError}</p>
+                            ) : null}
+                            <div className="grid grid-cols-1 gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={demoActionLoading !== null}
+                                    onClick={() => void handleDemoOpenGate()}
+                                    className="w-full justify-start gap-2 bg-violet-500/10 border-violet-500/25 text-violet-200 hover:bg-violet-500/20"
+                                >
+                                    <Tv className="h-3.5 w-3.5 shrink-0" />
+                                    {demoActionLoading === "open" ? "Opening…" : "Open demo gate"}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={demoActionLoading !== null}
+                                    onClick={() => void handleDemoAdvance()}
+                                    className="w-full justify-start gap-2 border-white/10 hover:bg-white/5"
+                                >
+                                    <SkipForward className="h-3.5 w-3.5 shrink-0" />
+                                    {demoActionLoading === "advance" ? "Advancing…" : "Advance presenter"}
+                                </Button>
+                            </div>
+                            <p className="text-[9px] text-muted-foreground/60 leading-tight">
+                                Open gate starts the ceremony when builders have joined the queue (after submit). Advance skips
+                                to the next lineup / prep / present step. Requires presenters in the queue.
                             </p>
                         </div>
                     </CardContent>

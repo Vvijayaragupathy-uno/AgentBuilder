@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
-  Brain,
+  Puzzle,
   Zap,
   Layers,
   Cpu,
@@ -11,17 +11,12 @@ import {
   Users,
   Rocket,
   PlayCircle,
-  MessageSquare,
-  FileText,
-  Database,
-  Send,
 } from "lucide-react"
 import { cn, skewedNow } from "@/lib/utils"
 import {
   LANGFLOW_TEACH_CLIP_END_SEC,
   LANGFLOW_TEACH_CLIP_START_SEC,
   LANGFLOW_TEACH_VIDEO_ID,
-  langflowTeachSlideDurationMs,
 } from "@/lib/langflow-teach"
 import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
 import type { Challenge } from "./tv-display"
@@ -40,7 +35,7 @@ function isPromotableOnAttract(c: Challenge): boolean {
 
 function HookSlide() {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-16 text-center">
+    <div className="flex flex-col items-center justify-center h-full gap-10 px-10 md:px-14 text-center max-w-[min(96vw,1400px)] mx-auto w-full">
       <div className="relative">
         <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl scale-[2]" />
         <div
@@ -70,13 +65,13 @@ function HookSlide() {
 function WhatSlide() {
   const features = [
     { icon: Layers, label: "Drag & Drop",  desc: "Connect components visually"      },
-    { icon: Brain,  label: "Web-grounded",  desc: "Live search and current answers from the open web — built for 2026, not a 2023 snapshot" },
+    { icon: Puzzle, label: "Visual logic", desc: "Wire prompts, tools, and steps on the canvas — full agents without a single script" },
     { icon: Zap,    label: "No Code",       desc: "Build without writing a line"      },
     { icon: Cpu,    label: "Live Agents",   desc: "See them think in real time"       },
   ]
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-12 px-16 text-center">
+    <div className="flex flex-col items-center justify-center h-full gap-12 px-10 md:px-14 text-center max-w-[min(96vw,1500px)] mx-auto w-full">
       <div className="space-y-3">
         <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">What Is This?</span>
         <h2 className="text-[68px] font-black uppercase tracking-tighter leading-none text-foreground">
@@ -87,7 +82,7 @@ function WhatSlide() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-5 w-full max-w-4xl">
+      <div className="grid grid-cols-4 gap-5 w-full max-w-6xl">
         {features.map(({ icon: Icon, label, desc }) => (
           <div key={label} className="glass rounded-2xl p-6 flex flex-col items-center gap-3 ring-1 ring-white/5">
             <div className="h-14 w-14 rounded-xl bg-primary/15 ring-1 ring-primary/30 flex items-center justify-center">
@@ -106,14 +101,14 @@ function WhatSlide() {
 
 function HowSlide() {
   const steps = [
-    { num: "01", label: "Join the makerspace", desc: "Use a kiosk or tablet in the room to get started" },
+    { num: "01", label: "Join the makerspace", desc: "Use a laptop or tablet in the room to get started" },
     { num: "02", label: "Register",           desc: "Enter your name to get a builder code"      },
-    { num: "03", label: "Build your AI",      desc: "Connect nodes to create an intelligent flow" },
+    { num: "03", label: "Current challenge",  desc: "Build your flow for the mission running in the room" },
     { num: "04", label: "Submit",             desc: "Hit submit before time runs out"             },
   ]
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-20">
+    <div className="flex flex-col items-center justify-center h-full gap-10 px-10 md:px-16 max-w-[min(96vw,1200px)] mx-auto w-full">
       <div className="text-center space-y-2">
         <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">How To Participate</span>
         <h2 className="text-[64px] font-black uppercase tracking-tighter leading-none text-foreground">
@@ -121,7 +116,7 @@ function HowSlide() {
         </h2>
       </div>
 
-      <div className="w-full max-w-4xl space-y-4">
+      <div className="w-full max-w-5xl space-y-4">
         {steps.map((step, i) => (
           <div key={step.num} className="flex items-center gap-6 glass rounded-2xl px-8 py-5 ring-1 ring-white/5">
             <span className="text-[42px] font-black font-mono text-primary/30 w-16 shrink-0">{step.num}</span>
@@ -159,7 +154,7 @@ function ChallengesSlide({ challenges }: { challenges: Challenge[] }) {
                                "text-rose-400   bg-rose-400/10   ring-rose-400/20"
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-16">
+    <div className="flex flex-col items-center justify-center h-full gap-10 px-10 md:px-14 max-w-[min(96vw,1500px)] mx-auto w-full">
       <div className="text-center space-y-2">
         <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">Available Challenges</span>
         <h2 className="text-[60px] font-black uppercase tracking-tighter leading-none text-foreground">
@@ -167,7 +162,7 @@ function ChallengesSlide({ challenges }: { challenges: Challenge[] }) {
         </h2>
       </div>
 
-      <div className="grid grid-cols-2 gap-5 w-full max-w-5xl">
+      <div className="grid grid-cols-2 gap-5 w-full max-w-7xl">
         {visible.map(c => (
           <div key={c.id} className="glass rounded-2xl p-7 ring-1 ring-white/5 flex flex-col gap-4">
             <div className="flex items-start justify-between gap-4">
@@ -271,16 +266,16 @@ function NextSlide({ challenges }: { challenges: Challenge[] }) {
       </div>
 
       <p className="text-[18px] font-bold text-muted-foreground uppercase tracking-wider">
-        Register at a kiosk before the challenge starts
+        Register at a laptop before the challenge starts
       </p>
     </div>
   )
 }
 
-// ── Langflow teach — one carousel slide, single continuous embed (no chapter iframe swaps) ─
+// ── Langflow teach — right-column embed only (not in carousel) ─
 
-function LangflowTeachPlaylistSlide() {
-  const src =
+function langflowTeachEmbedSrc() {
+  return (
     `https://www.youtube.com/embed/${LANGFLOW_TEACH_VIDEO_ID}` +
     `?start=${LANGFLOW_TEACH_CLIP_START_SEC}` +
     `&end=${LANGFLOW_TEACH_CLIP_END_SEC}` +
@@ -290,35 +285,38 @@ function LangflowTeachPlaylistSlide() {
     "&rel=0" +
     "&modestbranding=1" +
     "&iv_load_policy=3"
+  )
+}
 
+/** Always-on tutorial video in the attract right rail */
+function LangflowTeachSidebarEmbed() {
+  const src = langflowTeachEmbedSrc()
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-6 px-14 pt-10 pb-6">
-      <div className="text-center space-y-2">
-        <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary flex items-center justify-center gap-2">
-          <PlayCircle className="h-4 w-4" />
-          Learn Langflow — full walkthrough
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="shrink-0 space-y-1 text-center px-1">
+        <span className="text-[11px] font-black uppercase tracking-[0.32em] text-primary flex items-center justify-center gap-2">
+          <PlayCircle className="h-3.5 w-3.5 shrink-0" />
+          Langflow walkthrough
         </span>
-        <h2 className="text-[52px] font-black uppercase tracking-tighter leading-none text-foreground">
+        <h2 className="text-[22px] font-black uppercase tracking-tight leading-tight text-foreground">
           Watch the tutorial
         </h2>
-        <p className="text-[20px] text-muted-foreground font-medium max-w-2xl mx-auto">
-          From the canvas to running your flow — one continuous clip.
+        <p className="text-[12px] text-muted-foreground font-medium leading-snug">
+          Canvas to running flow — one continuous clip.
         </p>
       </div>
 
-      <div
-        className="relative w-full max-w-5xl aspect-video rounded-2xl overflow-hidden ring-2 ring-primary/25 shadow-[0_0_60px_-12px_rgba(250,204,21,0.35)] bg-black"
-      >
+      <div className="relative min-h-[min(52vh,560px)] flex-1 w-full rounded-2xl overflow-hidden ring-2 ring-primary/30 shadow-[0_0_48px_-10px_rgba(250,204,21,0.4)] bg-black">
         <iframe
           title="Langflow tutorial walkthrough"
           src={src}
-          className="absolute inset-0 h-full w-full"
+          className="absolute inset-0 h-full w-full min-h-[280px]"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
         />
       </div>
 
-      <p className="text-[14px] text-white/35 font-semibold uppercase tracking-wider">
+      <p className="shrink-0 text-[10px] text-white/35 font-semibold uppercase tracking-wider text-center">
         Unmute on this display if you want sound
       </p>
     </div>
@@ -341,14 +339,14 @@ function ChallengeSpotlightSlide({ challenge, index, total }: {
                                     { text: "text-rose-400",    bg: "bg-rose-400/10",    ring: "ring-rose-400/30",    glow: "rgba(248,113,113,0.12)" }
 
   const steps = [
-    "Open registration on a kiosk in the room",
+    "Open registration on a laptop in the room",
     "Enter your name to get a builder code",
-    `Build your AI flow — you have ${challenge.duration_minutes} min`,
+    `Current challenge — ${challenge.duration_minutes} min to build`,
     "Hit Submit before the timer ends",
   ]
 
   return (
-    <div className="flex flex-col justify-center h-full px-16 gap-8">
+    <div className="flex flex-col justify-center h-full px-10 md:px-14 gap-8 max-w-[min(96vw,1500px)] mx-auto w-full">
 
       {/* Top meta row */}
       <div className="flex items-center gap-4">
@@ -468,7 +466,7 @@ function ChallengeSpotlightSlide({ challenge, index, total }: {
           "text-[12px] font-black uppercase tracking-wider",
           isOpen ? "text-emerald-400" : "text-white/35",
         )}>
-          {isOpen ? "Registration Open — join at a kiosk now" : "Coming Soon"}
+          {isOpen ? "Registration Open — join at a laptop now" : "Coming Soon"}
         </span>
       </div>
     </div>
@@ -515,186 +513,22 @@ function MeshBackground() {
   )
 }
 
-// ── Flow diagram (readable on TV sidebar: icons + left-to-right pipeline) ──
-
-type FlowStage = {
-  id: string
-  title: string
-  desc: string
-  icon: typeof MessageSquare
-  iconClass: string
-  iconWrap: string
-  ring: string
-  emphasize?: boolean
-}
-
-const FLOW_STAGES: FlowStage[] = [
-  {
-    id: "input",
-    title: "Chat input",
-    desc: "What the visitor types",
-    icon: MessageSquare,
-    iconClass: "text-sky-300",
-    iconWrap: "bg-sky-500/15 ring-sky-400/25",
-    ring: "ring-sky-400/20",
-  },
-  {
-    id: "prompt",
-    title: "Prompt",
-    desc: "Rules & context for the model",
-    icon: FileText,
-    iconClass: "text-violet-300",
-    iconWrap: "bg-violet-500/15 ring-violet-400/25",
-    ring: "ring-violet-400/20",
-  },
-  {
-    id: "llm",
-    title: "Language model",
-    desc: "Any model you choose",
-    icon: Cpu,
-    iconClass: "text-primary",
-    iconWrap: "bg-primary/20 ring-primary/35",
-    ring: "ring-primary/30",
-    emphasize: true,
-  },
-  {
-    id: "memory",
-    title: "Memory",
-    desc: "Optional chat history",
-    icon: Database,
-    iconClass: "text-cyan-300",
-    iconWrap: "bg-cyan-500/15 ring-cyan-400/25",
-    ring: "ring-cyan-400/20",
-  },
-  {
-    id: "output",
-    title: "Output",
-    desc: "Answer to the user",
-    icon: Send,
-    iconClass: "text-emerald-300",
-    iconWrap: "bg-emerald-500/15 ring-emerald-400/25",
-    ring: "ring-emerald-400/20",
-  },
-]
-
-function FlowConnector({ index }: { index: number }) {
-  const stagger = 0.88 + index * 0.1
-  return (
-    <div
-      className="tv-flow-connector flex shrink-0 flex-col items-center justify-center gap-1 px-0.5"
-      style={{ animationDelay: `${stagger}s` }}
-      aria-hidden
-    >
-      <div className="relative h-[3px] w-7 overflow-hidden rounded-full bg-white/[0.07] ring-1 ring-white/[0.06]">
-        <div
-          className="tv-flow-beam absolute inset-y-0 w-[55%] rounded-full bg-gradient-to-r from-transparent via-primary to-transparent opacity-95 shadow-[0_0_12px_hsl(var(--primary)/0.5)]"
-          style={{ animationDelay: `${index * 0.32}s` }}
-        />
-      </div>
-      <ArrowRight
-        className="tv-flow-arrow h-3.5 w-3.5 text-primary"
-        strokeWidth={2.5}
-        style={{ animationDelay: `${0.35 + index * 0.2}s` }}
-      />
-    </div>
-  )
-}
-
-function AnimatedFlow() {
-  return (
-    <div className="relative flex h-full w-full min-h-0 flex-col justify-center overflow-hidden px-2 pb-1 pt-7">
-      <div
-        className="tv-flow-ambient pointer-events-none absolute left-1/2 top-1/2 z-0 h-32 w-[min(124%,520px)] rounded-[100%] bg-primary/[0.09] blur-[40px]"
-        aria-hidden
-      />
-      <div className="relative z-[1] flex min-h-0 w-full items-center justify-center">
-        {FLOW_STAGES.map((stage, i) => {
-          const Icon = stage.icon
-          const loopDelay = `${0.88 + i * 0.07}s`
-          const iconAnimDelay = `${0.15 + i * 0.06}s`
-          const iconDuration = `${2.4 + i * 0.22}s`
-          return (
-            <Fragment key={stage.id}>
-              <div
-                className="tv-flow-card-shell flex min-w-0 flex-1 flex-col items-stretch justify-center"
-                style={{ animationDelay: `${i * 0.08}s` }}
-              >
-                <div
-                  className={cn(
-                    "relative flex w-full flex-col items-center rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.09] to-white/[0.02] px-1.5 py-2.5 text-center shadow-lg shadow-black/25 ring-1 backdrop-blur-sm",
-                    stage.ring,
-                    stage.emphasize && "border-primary/30 from-primary/[0.12] to-primary/[0.02]",
-                    stage.emphasize ? "tv-flow-card-loop--llm" : "tv-flow-card-loop",
-                  )}
-                  style={{ animationDelay: loopDelay }}
-                >
-                  <div
-                    className={cn(
-                      "relative mb-1.5 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl ring-1",
-                      stage.iconWrap,
-                    )}
-                  >
-                    {stage.emphasize && (
-                      <div
-                        className="tv-flow-llm-halo pointer-events-none absolute inset-[-40%] animate-[spin_7s_linear_infinite] bg-[conic-gradient(from_0deg,transparent,hsl(var(--primary)/0.45),transparent)] opacity-40"
-                        aria-hidden
-                      />
-                    )}
-                    <Icon
-                      className={cn(
-                        "relative z-[1] h-4 w-4 tv-flow-icon-loop",
-                        stage.iconClass,
-                      )}
-                      strokeWidth={2.2}
-                      style={{
-                        animationDelay: iconAnimDelay,
-                        animationDuration: iconDuration,
-                      }}
-                    />
-                  </div>
-                  <p className="text-[11px] font-bold leading-tight text-white/90 sm:text-[12px]">
-                    {stage.title}
-                  </p>
-                  <p className="mt-1 line-clamp-2 text-[9px] leading-snug text-white/45 sm:text-[10px]">
-                    {stage.desc}
-                  </p>
-                </div>
-              </div>
-              {i < FLOW_STAGES.length - 1 && <FlowConnector index={i} />}
-            </Fragment>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── Right Live Panel (replaces video) ────────────────────────────────────────
+// ── Right rail: always-on Langflow tutorial + stats ───────────────────────────
 
 function LivePanel({ challenges }: { challenges: Challenge[] }) {
   const upcoming = challenges.filter(isPromotableOnAttract).slice(0, 2)
   const totalRegistered = challenges.reduce((sum, c) => sum + (c.registration_count ?? 0), 0)
 
   return (
-    <div className="w-[36%] shrink-0 flex flex-col border-l border-white/8 bg-black/20 backdrop-blur-sm relative z-10">
+    <div className="w-[min(46vw,760px)] min-w-[300px] shrink-0 flex flex-col border-l border-white/8 bg-black/20 backdrop-blur-sm relative z-10 min-h-0">
 
-      {/* ── Animated flow diagram (top ~40%) ── */}
-      <div className="relative shrink-0" style={{ height: "40%" }}>
-        <div className="absolute top-2 left-0 right-0 z-10 flex flex-col items-center gap-0.5 px-2">
-          <span className="text-[11px] font-black uppercase tracking-[0.28em] text-white/40">
-            How a flow connects
-          </span>
-          <span className="text-[9px] font-medium tracking-wide text-white/22">
-            Inputs → model → answer
-          </span>
-        </div>
-        <AnimatedFlow />
-        {/* Fade bottom edge into panel */}
-        <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
+      {/* ── YouTube tutorial (primary — former “How a flow connects” area) ── */}
+      <div className="flex-1 min-h-0 flex flex-col px-4 pt-5 pb-2">
+        <LangflowTeachSidebarEmbed />
       </div>
 
       {/* ── Stats ── */}
-      <div className="flex items-center gap-3 px-5 pb-4">
+      <div className="shrink-0 flex items-center gap-3 px-5 pb-3">
         <div className="flex-1 glass rounded-xl px-3 py-3 text-center ring-1 ring-white/8">
           <p className="text-[28px] font-black text-primary">{challenges.length}</p>
           <p className="text-[10px] font-bold text-muted-foreground/55 uppercase tracking-wider">Challenges</p>
@@ -707,7 +541,7 @@ function LivePanel({ challenges }: { challenges: Challenge[] }) {
 
       {/* ── Upcoming challenges ── */}
       {upcoming.length > 0 && (
-        <div className="flex-1 flex flex-col gap-2.5 px-5 pb-4 overflow-hidden">
+        <div className="shrink-0 flex flex-col gap-2.5 px-5 pb-3 overflow-hidden">
           <p className="text-[11px] font-black uppercase tracking-[0.3em] text-white/30">Coming Up</p>
           {upcoming.map(c => (
             <div key={c.id} className="glass rounded-xl px-4 py-3.5 ring-1 ring-white/8 flex flex-col gap-1.5">
@@ -735,8 +569,8 @@ function LivePanel({ challenges }: { challenges: Challenge[] }) {
       )}
 
       {/* ── CTA ── */}
-      <div className="mt-auto mx-5 mb-12 glass rounded-xl px-4 py-5 ring-1 ring-primary/25 text-center">
-        <p className="text-[15px] font-black uppercase tracking-wider text-primary">Register at a kiosk</p>
+      <div className="shrink-0 mt-auto mx-5 mb-12 glass rounded-xl px-4 py-4 ring-1 ring-primary/25 text-center">
+        <p className="text-[15px] font-black uppercase tracking-wider text-primary">Register at a laptop</p>
         <p className="text-[12px] text-muted-foreground/55 mt-1">Get your code and join the challenge</p>
       </div>
     </div>
@@ -749,7 +583,7 @@ function MarqueeTicker({ challenges }: { challenges: Challenge[] }) {
   const items = [
     `Welcome to ${AICCORE_MAKERSPACE}`,
     `${challenges.length || "—"} challenge${challenges.length !== 1 ? "s" : ""} available today`,
-    "Visit a kiosk in the room to register and participate",
+    "Visit a laptop in the room to register and participate",
     "Build intelligent AI flows with Langflow — no coding needed",
     "Each student designs and runs a real AI agent live",
     ...challenges.map(c => `Challenge: ${c.title}`),
@@ -800,9 +634,9 @@ function LiveClock() {
 // ── Main Attract Component ────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 5 intro slides + 1 Langflow teach slide (single video) + one spotlight per promotable challenge
+  // 5 intro slides + one spotlight per promotable challenge (Langflow video is fixed in the right rail)
   const spotlightChallenges = challenges.filter(isPromotableOnAttract)
-  const TOTAL = 5 + 1 + spotlightChallenges.length
+  const TOTAL = 5 + spotlightChallenges.length
   const slideDurationsMs = useMemo(() => {
     const base = [
       SLIDE_DURATION,
@@ -811,9 +645,8 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
       SLIDE_DURATION,
       SLIDE_DURATION,
     ]
-    const langflow = [langflowTeachSlideDurationMs()]
     const spots = spotlightChallenges.map(() => SLIDE_DURATION)
-    return [...base, ...langflow, ...spots]
+    return [...base, ...spots]
   }, [spotlightChallenges.length])
 
   const [current, setCurrent] = useState(0)
@@ -845,7 +678,6 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
     <HowSlide        key="how" />,
     <ChallengesSlide key="challenges" challenges={challenges} />,
     <NextSlide       key="next"       challenges={challenges} />,
-    <LangflowTeachPlaylistSlide key="langflow-teach" />,
     // One dedicated spotlight per challenge
     ...spotlightChallenges.map((c, i) => (
       <ChallengeSpotlightSlide
@@ -865,8 +697,8 @@ export function TVAttract({ challenges }: { challenges: Challenge[] }) {
       {/* Animated mesh — full canvas behind everything */}
       <MeshBackground />
 
-      {/* ── Left: slide area (68%) ── */}
-      <div className="flex-1 relative flex flex-col overflow-hidden">
+      {/* ── Left: full-height carousel (complements fixed YouTube on the right) ── */}
+      <div className="flex-1 min-w-0 relative flex flex-col overflow-hidden">
 
         {/* Top bar */}
         <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-8 pt-5">

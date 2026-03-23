@@ -1090,6 +1090,29 @@ def create_aiccore_app():
         )
         return result
 
+    @app.post("/api/v1/aiccore/demo/open-gate")
+    async def demo_admin_open_gate(request: Request):
+        """Force-open the demo gate and kick off lineup/playback when the queue is non-empty."""
+        _require_admin_request(request)
+        demo_opened = False
+        playback_started = False
+        with Session(engine) as db_session:
+            demo_opened = force_open_demo_gate(db_session)
+        with Session(engine) as db2:
+            playback_started = ensure_demo_playback_if_gate_open_idle(db2)
+        with Session(engine) as db3:
+            st = get_demo_status(db3)
+        if demo_opened or playback_started:
+            await broadcast_manager.broadcast({"type": "DEMO_GATE_OPEN"})
+        await broadcast_manager.broadcast(
+            {"type": "DEMO_QUEUE_UPDATE", "data": {"event": "admin_open_gate"}}
+        )
+        return {
+            **st,
+            "admin_gate_just_opened": demo_opened,
+            "admin_playback_kickstarted": playback_started,
+        }
+
     @app.post("/api/v1/aiccore/session/{session_id}/deactivate")
     async def deactivate_session(session_id: UUID, request: Request):
         """Called by the builder page when the user exits (logs out / starts over).

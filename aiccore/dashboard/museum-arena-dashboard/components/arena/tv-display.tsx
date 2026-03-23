@@ -91,12 +91,88 @@ function ToastLayer({ toasts }: { toasts: TVToast[] }) {
   )
 }
 
-// ── Results Mode ─────────────────────────────────────────────────────────────
-
 const CONFETTI_COLORS = [
   "#f59e0b", "#10b981", "#3b82f6", "#ec4899",
   "#8b5cf6", "#ef4444", "#f97316", "#06b6d4",
 ]
+
+/** Shown on top of TV live (build + demo) when host marks a winner — results screen may still be minutes away. */
+const LIVE_WINNER_OVERLAY_MS = 14_000
+
+function TVLiveWinnerBanner({ winner, missionTitle }: { winner: TVStudent; missionTitle: string }) {
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 36 }, (_, i) => ({
+        id: i,
+        x: (i * 2.7 + Math.sin(i) * 18 + 100) % 100,
+        color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+        w: 6 + (i % 4) * 2,
+        h: 5 + (i % 3) * 2,
+        dur: 2.5 + (i % 8) * 0.25,
+        delay: (i % 14) * 0.08,
+      })),
+    [],
+  )
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[88] flex flex-col items-center justify-start pt-6 md:pt-10 px-6">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        {confetti.map(c => (
+          <div
+            key={c.id}
+            className="absolute top-0 rounded-sm"
+            style={{
+              left: `${c.x}%`,
+              width: c.w,
+              height: c.h,
+              backgroundColor: c.color,
+              opacity: 0,
+              animation: `tv-confetti-fall ${c.dur}s ease-in ${c.delay}s forwards`,
+            }}
+          />
+        ))}
+      </div>
+      <div
+        className={cn(
+          "relative w-full max-w-4xl rounded-2xl border border-amber-500/35 bg-gradient-to-b from-amber-950/95 via-black/90 to-black/85",
+          "px-8 py-6 shadow-2xl shadow-amber-900/20 ring-2 ring-amber-400/25 backdrop-blur-md",
+          "animate-in fade-in slide-in-from-top-4 duration-500",
+        )}
+      >
+        <p className="text-center text-[11px] font-black uppercase tracking-[0.35em] text-amber-400/90 mb-2">
+          Winner announced
+        </p>
+        <p className="text-center text-[13px] font-semibold text-muted-foreground/90 mb-4 truncate px-2">
+          {missionTitle}
+        </p>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-5">
+          <div className="relative shrink-0">
+            <div className="absolute inset-0 rounded-full bg-amber-400/30 blur-xl scale-150" />
+            <div className="relative h-20 w-20 rounded-full bg-amber-400/15 ring-4 ring-amber-400/45 flex items-center justify-center">
+              <span className="text-3xl font-black text-amber-400">
+                {winner.nickname.slice(0, 2).toUpperCase()}
+              </span>
+            </div>
+            <Crown className="absolute -top-3 left-1/2 -translate-x-1/2 h-7 w-7 text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.75)]" />
+          </div>
+          <div className="text-center sm:text-left min-w-0">
+            <p className="text-[clamp(1.75rem,5vw,2.75rem)] font-black uppercase tracking-tight text-amber-400 leading-none">
+              {winner.nickname}
+            </p>
+            <p className="text-[14px] font-bold text-muted-foreground uppercase tracking-widest mt-2">
+              Winner · {winner.score.toLocaleString()} pts
+            </p>
+            <p className="text-[12px] text-muted-foreground/75 mt-2 max-w-md">
+              Full podium appears when this round moves to the results screen after demos.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Results Mode ─────────────────────────────────────────────────────────────
 
 function TVResults({
   challenge,
@@ -124,6 +200,15 @@ function TVResults({
   const declaredWinner = leaderboard.find(s => s.is_winner)
   const podium = leaderboard.slice(0, 3)
   const winnerStingRef = useRef(false)
+  const prevWinnerIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const wid = declaredWinner?.id ?? null
+    if (wid !== prevWinnerIdRef.current) {
+      winnerStingRef.current = false
+      prevWinnerIdRef.current = wid
+    }
+  }, [declaredWinner?.id])
 
   useEffect(() => {
     if (!declaredWinner || winnerStingRef.current) return
@@ -264,11 +349,17 @@ function TVDisplayInner() {
   const [resultsCountdown, setResultsCountdown] = useState(90)
   const [nextChallenge, setNextChallenge]       = useState<Challenge | null>(null)
   const [toasts, setToasts]                     = useState<TVToast[]>([])
+  const [liveWinnerShown, setLiveWinnerShown]   = useState<TVStudent | null>(null)
 
   const prevActiveRef      = useRef<Challenge | null>(null)
   const toastIdRef         = useRef(0)
   const knownSessionsRef   = useRef<Set<string>>(new Set())
   const warnedChallengesRef = useRef<Set<string>>(new Set())
+  const modeRef            = useRef<TVMode>(mode)
+  const forcedModeRef      = useRef<TVMode | null>(forcedMode)
+  const liveStingPlayedIdRef = useRef<string | null>(null)
+  /** After auto-dismiss, do not re-show the same winner until leaderboard clears `is_winner` or host picks someone else. */
+  const liveOverlayDismissedIdRef = useRef<string | null>(null)
 
   const addToast = useCallback((message: string, icon: TVToast["icon"]) => {
     const id = `t${toastIdRef.current++}`
@@ -283,6 +374,69 @@ function TVDisplayInner() {
     } catch { /* network error — return empty */ }
     return []
   }, [])
+
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
+
+  useEffect(() => {
+    forcedModeRef.current = forcedMode
+  }, [forcedMode])
+
+  const applyLiveWinnerLeaderboard = useCallback((lb: TVStudent[]) => {
+    const cur = forcedModeRef.current ?? modeRef.current
+    if (cur !== "live") {
+      liveOverlayDismissedIdRef.current = null
+      setLiveWinnerShown(null)
+      return
+    }
+    const w = lb.find(s => s.is_winner)
+    if (!w) {
+      liveOverlayDismissedIdRef.current = null
+      setLiveWinnerShown(null)
+      return
+    }
+    if (w.id === liveOverlayDismissedIdRef.current) {
+      return
+    }
+    setLiveWinnerShown(prev => (prev?.id === w.id ? prev : w))
+  }, [])
+
+  useEffect(() => {
+    if (!liveWinnerShown) {
+      liveStingPlayedIdRef.current = null
+      return
+    }
+    if (liveStingPlayedIdRef.current !== liveWinnerShown.id) {
+      liveStingPlayedIdRef.current = liveWinnerShown.id
+      playTVSting("winner", 0.42)
+    }
+    const t = window.setTimeout(() => {
+      liveOverlayDismissedIdRef.current = liveWinnerShown.id
+      setLiveWinnerShown(null)
+    }, LIVE_WINNER_OVERLAY_MS)
+    return () => clearTimeout(t)
+  }, [liveWinnerShown])
+
+  useEffect(() => {
+    if ((forcedMode ?? mode) !== "live") {
+      liveOverlayDismissedIdRef.current = null
+      setLiveWinnerShown(null)
+      return
+    }
+    let cancelled = false
+    const tick = async () => {
+      const lb = await fetchLeaderboard()
+      if (cancelled) return
+      applyLiveWinnerLeaderboard(lb)
+    }
+    void tick()
+    const id = window.setInterval(tick, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [mode, forcedMode, fetchLeaderboard, applyLiveWinnerLeaderboard])
 
   const pollChallenges = useCallback(async () => {
     try {
@@ -453,6 +607,16 @@ function TVDisplayInner() {
           if (msg.type === "MISSION_LIVE" || msg.type === "DEMO_GATE_OPEN") {
             void pollChallengesRef.current()
           }
+
+          if (msg.type === "LEADERBOARD_UPDATE") {
+            void fetchLeaderboard().then(lb => {
+              applyLiveWinnerLeaderboard(lb)
+              const cur = forcedModeRef.current ?? modeRef.current
+              if (cur === "results") {
+                setResultsLB(lb)
+              }
+            })
+          }
         })
 
         if (newLastId > lastEventId) {
@@ -475,7 +639,7 @@ function TVDisplayInner() {
       destroyed = true
       if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [addToast, lastEventId])
+  }, [addToast, lastEventId, fetchLeaderboard, applyLiveWinnerLeaderboard])
 
   const current = forcedMode ?? mode
 
@@ -491,7 +655,12 @@ function TVDisplayInner() {
       )}
 
       {current === "live" && liveChallenge && (
-        <TVLive challenge={liveChallenge} />
+        <>
+          <TVLive challenge={liveChallenge} />
+          {liveWinnerShown ? (
+            <TVLiveWinnerBanner winner={liveWinnerShown} missionTitle={liveChallenge.title} />
+          ) : null}
+        </>
       )}
 
       {current === "live" && !liveChallenge && (

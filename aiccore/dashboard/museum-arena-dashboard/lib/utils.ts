@@ -94,7 +94,7 @@ export function getOrCreateBuilderStationId(): string {
 
 /**
  * Human label for leaderboard / mosaic "station" column.
- * Registered kiosk IDs stay as-is; browser seat IDs (`ws-…`) shorten; legacy "0" shows as unassigned.
+ * Registered laptop IDs stay as-is; browser seat IDs (`ws-…`) shorten; legacy "0" shows as unassigned.
  */
 export function formatBuilderSeatLabel(raw: string | null | undefined): string {
   const s = (raw ?? "").trim()

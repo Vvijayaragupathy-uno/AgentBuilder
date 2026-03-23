@@ -119,7 +119,7 @@ export function StationStatus() {
 
     const onlineCount = stations.filter(s => s.status !== "maintenance" && s.status !== "offline").length
     const totalCount = stations.length
-    /** Registered kiosk PCs only — browser builders do not appear here until something calls POST /stations/register. */
+    /** Registered laptop PCs only — browser builders do not appear here until something calls POST /stations/register. */
     const pulseLabel =
         totalCount === 0
             ? "STANDBY"
@@ -155,14 +155,14 @@ export function StationStatus() {
                         Station Status
                     </h2>
                     <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest max-w-xl">
-                        Kiosk PCs that register with the API and send heartbeats. Browser-only builders use a virtual seat ID and still show on Live / Leaderboard.
+                        Laptop PCs that register with the API and send heartbeats. Browser-only builders use a virtual seat ID and still show on Live / Leaderboard.
                     </p>
                 </div>
                 <div className="glass px-6 py-3 rounded-2xl border-primary/20 flex items-center gap-6">
                     <div className="flex flex-col">
                         <span
                             className="text-[10px] font-black uppercase tracking-widest text-muted-foreground"
-                            title="STANDBY = no kiosk rows in the database yet. Builders in the browser are tracked separately."
+                            title="STANDBY = no laptop rows in the database yet. Builders in the browser are tracked separately."
                         >
                             System Pulse
                         </span>
@@ -178,9 +178,9 @@ export function StationStatus() {
                     <div className="flex flex-col">
                         <span
                             className="text-[10px] font-black uppercase tracking-widest text-muted-foreground"
-                            title="Registered kiosk stations that are not offline or in maintenance"
+                            title="Registered laptop stations that are not offline or in maintenance"
                         >
-                            Kiosk units
+                            Laptop units
                         </span>
                         <span className="text-xl font-black">{onlineCount} / {totalCount}</span>
                         {activeBuilderCount != null && activeBuilderCount > 0 && (
