@@ -329,10 +329,6 @@ function MakerspaceGuideSidebarEmbed() {
           controls={false}
         />
       </div>
-
-      <p className="shrink-0 text-[10px] text-white/35 font-semibold uppercase tracking-wider text-center">
-        Sound at {Math.round(GUIDE_VIDEO_VOLUME * 100)}% — tap the screen once if playback is silent (browser autoplay rules).
-      </p>
     </div>
   )
 }
