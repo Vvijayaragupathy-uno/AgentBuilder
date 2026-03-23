@@ -229,6 +229,41 @@ def _optional_dt_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+# Small grace so "start now" / form lag does not false-reject against server clock.
+_CHALLENGE_START_MIN_LEAD = timedelta(seconds=90)
+
+
+def _challenge_start_times_equivalent(a: Optional[datetime], b: Optional[datetime]) -> bool:
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    au = _optional_dt_utc(a)
+    bu = _optional_dt_utc(b)
+    return abs((au - bu).total_seconds()) < 1.0
+
+
+def _reject_new_past_challenge_start(
+    new_start: Optional[datetime],
+    previous_start: Optional[datetime],
+) -> None:
+    """
+    Block scheduling a mission start in the past.
+    On PATCH, allow unchanged start_time (even if already past) so other fields can be fixed.
+    """
+    if new_start is None:
+        return
+    if _challenge_start_times_equivalent(new_start, previous_start):
+        return
+    st_utc = _optional_dt_utc(new_start)
+    now_utc = datetime.now(timezone.utc)
+    if st_utc < now_utc - _CHALLENGE_START_MIN_LEAD:
+        raise HTTPException(
+            status_code=400,
+            detail="Challenge start time must be in the future, or leave start unset.",
+        )
+
+
 def challenge_is_live_build_window(c: Challenge, now: datetime) -> bool:
     """
     True when this mission counts as "live build" for leaderboard status:
@@ -1762,6 +1797,7 @@ def create_aiccore_app():
     @app.post("/api/v1/aiccore/challenges")
     async def create_challenge(req: ChallengeRequest, request: Request):
         _require_admin_request(request)
+        _reject_new_past_challenge_start(req.start_time, None)
         with Session(engine) as db_session:
             new_challenge = Challenge(
                 title=req.title,
@@ -1790,6 +1826,7 @@ def create_aiccore_app():
             c = db_session.get(Challenge, challenge_id)
             if not c:
                 raise HTTPException(status_code=404, detail="Challenge not found")
+            _reject_new_past_challenge_start(req.start_time, c.start_time)
             c.title = req.title
             c.description = req.description
             if req.complexity_level is not None:
