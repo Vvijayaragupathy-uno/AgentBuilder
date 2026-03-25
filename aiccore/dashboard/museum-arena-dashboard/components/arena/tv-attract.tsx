@@ -27,6 +27,47 @@ function isPromotableOnAttract(c: Challenge): boolean {
   return c.is_registration_open === true
 }
 
+/**
+ * Keep the display awake while the attract screen is active (best-effort).
+ * Notes:
+ * - This helps prevent dim/blank/sleep.
+ * - It usually cannot override OS "lock screen" policies for idle sign-in.
+ */
+function useScreenWakeLock(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return
+    if (typeof navigator === "undefined") return
+
+    const wakeLock = (navigator as any)?.wakeLock
+    if (!wakeLock?.request) return
+
+    let sentinel: any = null
+    let cancelled = false
+
+    const request = async () => {
+      try {
+        sentinel = await wakeLock.request("screen")
+        sentinel?.addEventListener?.("release", () => {
+          if (cancelled) return
+          // Re-acquire after release (tab visibility / OS policy can drop it).
+          setTimeout(() => {
+            if (!cancelled) void request().catch(() => {})
+          }, 1000)
+        })
+      } catch {
+        // Autoplay policies / browser support can prevent wake lock; ignore silently.
+      }
+    }
+
+    void request()
+
+    return () => {
+      cancelled = true
+      if (sentinel) void sentinel.release().catch(() => {})
+    }
+  }, [enabled])
+}
+
 // ── Slide 1 — Hook ────────────────────────────────────────────────────────────
 
 function HookSlide() {
@@ -645,6 +686,7 @@ function LiveClock() {
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
   // 4 core slides + optional "Coming Up Next" + one spotlight per promotable challenge (guide video is fixed in the right rail)
+  useScreenWakeLock(true)
   const spotlightChallenges = challenges.filter(isPromotableOnAttract)
   const upcoming = useUpcomingAttractChallenge(challenges)
   const showNextSlide = Boolean(upcoming?.start_time)
