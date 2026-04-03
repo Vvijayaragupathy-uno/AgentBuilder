@@ -107,7 +107,7 @@ export function ChallengesCatalog({ onSelectChallenge }: { onSelectChallenge?: (
                                     <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                                         <div className="flex items-center gap-1.5 text-primary">
                                             <Calendar className="h-3 w-3" />
-                                            <span>{c.start_time ? new Date(c.start_time).toLocaleDateString([], { month: "short", day: "numeric" }) : "TBD"}</span>
+                                            <span>{c.start_time ? new Date(c.start_time).toLocaleDateString([], { month: "short", day: "numeric" }) + " · " + new Date(c.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "TBD"}</span>
                                         </div>
                                         <div className="flex items-center gap-1.5">
                                             <MapPin className="h-3 w-3 text-primary" />
@@ -126,7 +126,7 @@ export function ChallengesCatalog({ onSelectChallenge }: { onSelectChallenge?: (
                                 </div>
 
                                 <Button
-                                    className="mt-1 w-full h-9 text-[10px] font-black uppercase tracking-widest gap-2 bg-white/5 border border-white/10 hover:bg-primary hover:text-white transition-all"
+                                    className="mt-1 w-full h-9 text-[10px] font-black uppercase tracking-widest gap-2 bg-white/5 border border-white/10 text-foreground hover:bg-primary hover:text-white transition-all"
                                     onClick={() => onSelectChallenge?.(c.id)}
                                 >
                                     View Details <ArrowRight className="h-3 w-3" />

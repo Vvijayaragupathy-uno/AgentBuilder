@@ -274,9 +274,6 @@ export function Leaderboard({
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
           </div>
           <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Live</span>
-          {updatedLabel && (
-            <span className="font-mono text-[10px] text-muted-foreground/50 tabular-nums">{updatedLabel}</span>
-          )}
         </div>
       </div>
 

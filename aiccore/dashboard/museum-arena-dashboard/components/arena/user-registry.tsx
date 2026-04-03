@@ -41,6 +41,7 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [newUsername, setNewUsername] = useState("")
     const [newNickname, setNewNickname] = useState("")
+    const [newPin, setNewPin] = useState("")
 
     const fetchUsers = async () => {
         setIsLoading(true)
@@ -87,19 +88,20 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
     }
 
     const handleCreateUser = async () => {
-        if (!newUsername || !newNickname) return
+        if (!newUsername || !newNickname || !newPin) return
 
         try {
             const apiBase = getApiBase()
             const response = await fetchWithCredentials(`${apiBase}/api/v1/aiccore/users`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username: newUsername, nickname: newNickname }),
+                body: JSON.stringify({ username: newUsername, nickname: newNickname, password: newPin }),
             })
             if (response.ok) {
                 setIsDialogOpen(false)
                 setNewUsername("")
                 setNewNickname("")
+                setNewPin("")
                 await fetchUsers()
             }
         } catch (error) {
@@ -147,7 +149,7 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
                         <DialogHeader>
                             <DialogTitle>New Contestant</DialogTitle>
                             <DialogDescription>
-                                Register a new student for the arena. A 4-digit unlock code will be generated automatically.
+                                Register a new student for the arena. Set their Security PIN and share it with them — they'll need it to get new unlock codes. A 4-digit unlock code will be generated automatically.
                             </DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
@@ -165,6 +167,15 @@ export function UserRegistry({ refreshKey }: { refreshKey?: number }) {
                                     placeholder="e.g. Peter Parker"
                                     value={newNickname}
                                     onChange={(e) => setNewNickname(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">Security PIN</label>
+                                <Input
+                                    type="password"
+                                    placeholder="Set a PIN to share with the contestant"
+                                    value={newPin}
+                                    onChange={(e) => setNewPin(e.target.value)}
                                 />
                             </div>
                         </div>

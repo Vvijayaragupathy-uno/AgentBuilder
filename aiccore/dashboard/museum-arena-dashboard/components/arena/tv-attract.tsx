@@ -1,66 +1,63 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import {
-  Puzzle,
-  Zap,
-  Layers,
-  Cpu,
-  ArrowRight,
-  Clock,
-  Users,
-  Rocket,
-  PlayCircle,
-} from "lucide-react"
-import { cn, skewedNow } from "@/lib/utils"
-import { MAKERSPACE_GUIDE_VIDEO_PATH } from "@/lib/langflow-teach"
-import { AiccoreLogo, AICCORE_MAKERSPACE } from "@/components/arena/aiccore-logo"
+import { useState, useEffect, useRef, useMemo, CSSProperties } from "react"
 import type { Challenge } from "./tv-display"
+import { getApiBase, skewedNow, applyServerTimeFromIso } from "@/lib/utils"
+import { MAKERSPACE_GUIDE_VIDEO_PATH } from "@/lib/langflow-teach"
 
-const SLIDE_DURATION = 10_000  // ms each slide stays (default)
-const TRANSITION_MS  = 600     // fade duration
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-/** Matches catalog “open” missions — avoids showing closed/finalized rows as “Coming Up” on the TV. */
-function isPromotableOnAttract(c: Challenge): boolean {
-  if (c.is_active) return false
-  if (c.is_finalized === true) return false
-  return c.is_registration_open === true
+interface SystemStatus {
+  is_active: boolean
+  mission_build_ends_at: string | null
+  duration_minutes: number | null
+  server_time: string | null
 }
 
-/**
- * Keep the display awake while the attract screen is active (best-effort).
- * Notes:
- * - This helps prevent dim/blank/sleep.
- * - It usually cannot override OS "lock screen" policies for idle sign-in.
- */
+interface TickerEvent {
+  id: string
+  text: string
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const C = {
+  gold:      "#f0c040",
+  goldDim:   "#c49a20",
+  bgDeep:    "#0c0d14",
+  bgSurface: "#10111a",
+  border:    "#1e2030",
+  textPrim:  "#f0eee6",
+  textMuted: "#6a6a72",
+  textDim:   "#3a3a42",
+  green:     "#3ecf5a",
+  mono:      "'IBM Plex Mono', monospace",
+} as const
+
+// Default slide durations: hook holds longer, others rotate quickly
+const SLIDE_DURATIONS = [16_000, 8_000, 8_000, 8_000] // ms
+
+const MAX_TICKER = 20
+
+// ── Screen wake lock (keep display on while attract is active) ────────────────
+
 function useScreenWakeLock(enabled: boolean) {
   useEffect(() => {
-    if (!enabled) return
-    if (typeof navigator === "undefined") return
-
+    if (!enabled || typeof navigator === "undefined") return
     const wakeLock = (navigator as any)?.wakeLock
     if (!wakeLock?.request) return
-
     let sentinel: any = null
     let cancelled = false
-
     const request = async () => {
       try {
         sentinel = await wakeLock.request("screen")
         sentinel?.addEventListener?.("release", () => {
           if (cancelled) return
-          // Re-acquire after release (tab visibility / OS policy can drop it).
-          setTimeout(() => {
-            if (!cancelled) void request().catch(() => {})
-          }, 1000)
+          setTimeout(() => { if (!cancelled) void request().catch(() => {}) }, 1_000)
         })
-      } catch {
-        // Autoplay policies / browser support can prevent wake lock; ignore silently.
-      }
+      } catch { /* browser policy — ignore silently */ }
     }
-
     void request()
-
     return () => {
       cancelled = true
       if (sentinel) void sentinel.release().catch(() => {})
@@ -68,761 +65,566 @@ function useScreenWakeLock(enabled: boolean) {
   }, [enabled])
 }
 
+// ── Countdown hook ────────────────────────────────────────────────────────────
+
+function useCountdown(endsAt: string | null, totalMinutes: number | null) {
+  const [secsLeft, setSecsLeft] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!endsAt) { setSecsLeft(null); return }
+    const end = new Date(endsAt).getTime()
+    const update = () => setSecsLeft(Math.max(0, Math.floor((end - skewedNow()) / 1000)))
+    update()
+    const id = setInterval(update, 1_000)
+    return () => clearInterval(id)
+  }, [endsAt])
+
+  const totalSecs = totalMinutes != null ? totalMinutes * 60 : null
+  const pct = (totalSecs && secsLeft != null)
+    ? Math.round((secsLeft / totalSecs) * 100)
+    : null
+
+  return { secsLeft, pct }
+}
+
+// ── Shared sub-styles ─────────────────────────────────────────────────────────
+
+const monoLabel: CSSProperties = {
+  fontSize: 9, fontWeight: 600, letterSpacing: "0.16em",
+  color: C.textMuted, textTransform: "uppercase",
+  fontFamily: C.mono, marginBottom: 2,
+}
+
+const metaKey: CSSProperties = {
+  fontSize: 9, letterSpacing: "0.12em", color: C.textMuted,
+  textTransform: "uppercase", marginBottom: 3, fontFamily: C.mono,
+}
+
+const metaVal: CSSProperties = {
+  fontSize: 14, fontWeight: 500, color: C.textPrim, fontFamily: C.mono,
+}
+
 // ── Slide 1 — Hook ────────────────────────────────────────────────────────────
 
 function HookSlide() {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-10 md:px-14 text-center max-w-[min(96vw,1400px)] mx-auto w-full">
-      <div className="relative">
-        <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl scale-[2]" />
-        <div
-          className="relative h-24 w-24 rounded-3xl bg-primary/15 ring-2 ring-primary/40 flex items-center justify-center overflow-hidden"
-          style={{ animation: "tv-float 3s ease-in-out infinite" }}
-        >
-          <AiccoreLogo size={72} className="rounded-2xl shadow-lg shadow-black/20 ring-1 ring-white/15" />
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", height: "100%", padding: "48px 52px" }}>
+      <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1.0, letterSpacing: "-0.03em", color: C.textPrim, marginBottom: 16 }}>
+        STUDENTS<br />ARE<br />
+        <span style={{ color: C.gold }}>BUILDING AI</span><br />
+        HERE.
       </div>
-
-      <div className="space-y-5">
-        <h1 className="text-[88px] font-black uppercase tracking-tighter leading-[0.85] text-foreground">
-          Students are<br />
-          <span className="text-primary">building AI</span><br />
-          here.
-        </h1>
-        <p className="text-[28px] font-bold text-muted-foreground">
-          Watch them create intelligent agents — live.
-        </p>
+      <div style={{ fontSize: 18, fontWeight: 300, color: C.textMuted, lineHeight: 1.5, maxWidth: 480 }}>
+        Come see them build intelligent agents — live.
       </div>
     </div>
   )
 }
 
-// ── Slide 2 — What Is This ────────────────────────────────────────────────────
+// ── Slide 2 — Active Mission (only rendered when a mission is live) ────────────
 
-function WhatSlide() {
-  const features = [
-    { icon: Layers, label: "Drag & Drop",  desc: "Connect components visually"      },
-    { icon: Puzzle, label: "Visual logic", desc: "Wire prompts, tools, and steps on the canvas — full agents without a single script" },
-    { icon: Zap,    label: "No Code",       desc: "Build without writing a line"      },
-    { icon: Cpu,    label: "Live Agents",   desc: "See them think in real time"       },
-  ]
-
+function MissionSlide({ challenge }: { challenge: Challenge }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-12 px-10 md:px-14 text-center max-w-[min(96vw,1500px)] mx-auto w-full">
-      <div className="space-y-3">
-        <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">What Is This?</span>
-        <h2 className="text-[68px] font-black uppercase tracking-tighter leading-none text-foreground">
-          {AICCORE_MAKERSPACE}
-        </h2>
-        <p className="text-[24px] text-muted-foreground font-medium max-w-3xl">
-          A live challenge where students visually assemble AI systems — then watch them run.
-        </p>
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", height: "100%", padding: "48px 52px" }}>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.2em", color: C.gold, textTransform: "uppercase", marginBottom: 14, fontFamily: C.mono }}>
+        Active Mission
       </div>
-
-      <div className="grid grid-cols-4 gap-5 w-full max-w-6xl">
-        {features.map(({ icon: Icon, label, desc }) => (
-          <div key={label} className="glass rounded-2xl p-6 flex flex-col items-center gap-3 ring-1 ring-white/5">
-            <div className="h-14 w-14 rounded-xl bg-primary/15 ring-1 ring-primary/30 flex items-center justify-center">
-              <Icon className="h-7 w-7 text-primary" />
-            </div>
-            <p className="text-[18px] font-black uppercase tracking-wide text-foreground">{label}</p>
-            <p className="text-[13px] text-muted-foreground text-center">{desc}</p>
-          </div>
-        ))}
+      <div style={{ fontSize: 40, fontWeight: 700, color: C.textPrim, lineHeight: 1.1, letterSpacing: "-0.02em", marginBottom: 8 }}>
+        {challenge.title}
       </div>
-    </div>
-  )
-}
-
-// ── Slide 3 — How To Join ─────────────────────────────────────────────────────
-
-function HowSlide() {
-  const steps = [
-    { num: "01", label: "Join the makerspace", desc: "Use a laptop or tablet in the room to get started" },
-    { num: "02", label: "Register",           desc: "Enter your name to get a builder code"      },
-    { num: "03", label: "Current challenge",  desc: "Build your flow for the mission running in the room" },
-    { num: "04", label: "Submit",             desc: "Hit submit before time runs out"             },
-  ]
-
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-10 md:px-16 max-w-[min(96vw,1200px)] mx-auto w-full">
-      <div className="text-center space-y-2">
-        <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">How To Participate</span>
-        <h2 className="text-[64px] font-black uppercase tracking-tighter leading-none text-foreground">
-          Join the Challenge
-        </h2>
-      </div>
-
-      <div className="w-full max-w-5xl space-y-4">
-        {steps.map((step, i) => (
-          <div key={step.num} className="flex items-center gap-6 glass rounded-2xl px-8 py-5 ring-1 ring-white/5">
-            <span className="text-[42px] font-black font-mono text-primary/30 w-16 shrink-0">{step.num}</span>
-            <div className="flex-1">
-              <p className="text-[26px] font-black uppercase tracking-tight text-foreground">{step.label}</p>
-              <p className="text-[16px] text-muted-foreground">{step.desc}</p>
-            </div>
-            {i < steps.length - 1 && <ArrowRight className="h-6 w-6 text-muted-foreground/25 shrink-0" />}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ── Slide 4 — Available Challenges ────────────────────────────────────────────
-
-function ChallengesSlide({ challenges }: { challenges: Challenge[] }) {
-  const visible = challenges.filter(isPromotableOnAttract).slice(0, 4)
-
-  if (visible.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-        <Rocket className="h-16 w-16 text-primary/20 animate-bounce-slow" />
-        <p className="text-[28px] font-bold text-muted-foreground uppercase tracking-widest">
-          Stay tuned for upcoming challenges
-        </p>
-      </div>
-    )
-  }
-
-  const complexityBadge = (level: string) =>
-    level === "Beginner"     ? "text-emerald-400 bg-emerald-400/10 ring-emerald-400/20" :
-    level === "Intermediate" ? "text-amber-400  bg-amber-400/10  ring-amber-400/20"  :
-                               "text-rose-400   bg-rose-400/10   ring-rose-400/20"
-
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-10 md:px-14 max-w-[min(96vw,1500px)] mx-auto w-full">
-      <div className="text-center space-y-2">
-        <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">Available Challenges</span>
-        <h2 className="text-[60px] font-black uppercase tracking-tighter leading-none text-foreground">
-          What Will You Build?
-        </h2>
-      </div>
-
-      <div className="grid grid-cols-2 gap-5 w-full max-w-7xl">
-        {visible.map(c => (
-          <div key={c.id} className="glass rounded-2xl p-7 ring-1 ring-white/5 flex flex-col gap-4">
-            <div className="flex items-start justify-between gap-4">
-              <h3 className="text-[24px] font-black uppercase tracking-tight text-foreground leading-tight">
-                {c.title}
-              </h3>
-              <span className={cn(
-                "shrink-0 text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full ring-1",
-                complexityBadge(c.complexity_level),
-              )}>
-                {c.complexity_level}
-              </span>
-            </div>
-            <p className="text-[15px] text-muted-foreground line-clamp-2 leading-relaxed">
-              {c.description}
-            </p>
-            <div className="flex items-center gap-5 pt-1">
-              {c.start_time && (
-                <div className="flex items-center gap-1.5 text-[13px] font-bold text-muted-foreground">
-                  <Clock className="h-4 w-4 text-primary" />
-                  {new Date(c.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </div>
-              )}
-              {c.max_participants != null && (
-                <div className="flex items-center gap-1.5 text-[13px] font-bold text-muted-foreground">
-                  <Users className="h-4 w-4 text-primary" />
-                  {c.registration_count ?? 0}/{c.max_participants} registered
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/** Next promotable challenge with a future start time (for countdown slide). */
-function useUpcomingAttractChallenge(challenges: Challenge[]): Challenge | undefined {
-  const [now, setNow] = useState(skewedNow)
-  useEffect(() => {
-    const id = setInterval(() => setNow(skewedNow()), 1000)
-    return () => clearInterval(id)
-  }, [])
-  return useMemo(
-    () =>
-      challenges.find(
-        c =>
-          isPromotableOnAttract(c) &&
-          Boolean(c.start_time) &&
-          new Date(c.start_time!).getTime() > now,
-      ),
-    [challenges, now],
-  )
-}
-
-// ── Coming Up Next (only when a future challenge exists; no tips fallback) ───
-
-function NextSlide({ challenge }: { challenge: Challenge }) {
-  const [now, setNow] = useState(skewedNow)
-  useEffect(() => {
-    const id = setInterval(() => setNow(skewedNow()), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  const start = challenge.start_time!
-  const diffMs = Math.max(0, new Date(start).getTime() - now)
-  const totalSec = Math.floor(diffMs / 1000)
-  const mins = Math.floor(totalSec / 60)
-  const secs = totalSec % 60
-
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-10 px-16 text-center">
-      <div className="space-y-3">
-        <span className="text-[14px] font-black uppercase tracking-[0.45em] text-primary">Coming Up Next</span>
-        <h2 className="text-[68px] font-black uppercase tracking-tighter leading-none text-foreground">
-          {challenge.title}
-        </h2>
-        <p className="text-[22px] text-muted-foreground max-w-3xl mx-auto">{challenge.description}</p>
-      </div>
-
-      <div className="glass rounded-3xl px-16 py-8 ring-1 ring-primary/30 glow-amber">
-        <p className="text-[14px] font-black uppercase tracking-[0.4em] text-primary mb-3">Starts In</p>
-        <p className="text-[96px] font-black font-mono text-foreground leading-none tabular-nums">
-          {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
-        </p>
-      </div>
-
-      <p className="text-[18px] font-bold text-muted-foreground uppercase tracking-wider">
-        Register at a laptop before the challenge starts
-      </p>
-    </div>
-  )
-}
-
-// ── Makerspace guide — right-column video only (not in carousel) ─
-
-const GUIDE_VIDEO_VOLUME = 0.88
-
-/** Local clip: loops continuously, fixed level; click anywhere once if the browser blocks autoplay-with-sound. */
-function MakerspaceGuideSidebarEmbed() {
-  const videoRef = useRef<HTMLVideoElement>(null)
-
-  useEffect(() => {
-    const el = videoRef.current
-    if (!el) return
-
-    el.volume = GUIDE_VIDEO_VOLUME
-    el.defaultMuted = false
-    el.muted = false
-    el.loop = true
-
-    const onEnded = () => {
-      el.currentTime = 0
-      void el.play().catch(() => {})
-    }
-    el.addEventListener("ended", onEnded)
-
-    const tryPlay = () => {
-      void el.play().catch(() => {
-        /* autoplay policy — first user gesture retries below */
-      })
-    }
-
-    tryPlay()
-    if (el.readyState < 2) {
-      el.addEventListener("canplay", tryPlay, { once: true })
-    }
-
-    const onFirstPointer = () => {
-      el.muted = false
-      el.volume = GUIDE_VIDEO_VOLUME
-      void el.play().catch(() => {})
-    }
-    window.addEventListener("pointerdown", onFirstPointer, { once: true })
-
-    return () => {
-      el.removeEventListener("ended", onEnded)
-      el.removeEventListener("canplay", tryPlay)
-      window.removeEventListener("pointerdown", onFirstPointer)
-    }
-  }, [])
-
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="shrink-0 space-y-1 text-center px-1">
-        <span className="text-[11px] font-black uppercase tracking-[0.32em] text-primary flex items-center justify-center gap-2">
-          <PlayCircle className="h-3.5 w-3.5 shrink-0" />
-          AI makerspace guide
-        </span>
-        <h2 className="text-[22px] font-black uppercase tracking-tight leading-tight text-foreground">
-          The floor, in one reel
-        </h2>
-        <p className="text-[12px] text-muted-foreground font-medium leading-snug">
-          A full walkthrough of the builder — loops continuously while this screen is up.
-        </p>
-      </div>
-
-      <div className="relative min-h-[min(52vh,560px)] flex-1 w-full rounded-2xl overflow-hidden ring-2 ring-primary/30 shadow-[0_0_48px_-10px_rgba(250,204,21,0.4)] bg-black">
-        <video
-          ref={videoRef}
-          className="absolute inset-0 h-full w-full min-h-[280px] object-contain bg-black"
-          src={MAKERSPACE_GUIDE_VIDEO_PATH}
-          playsInline
-          loop
-          preload="auto"
-          autoPlay
-          controls={false}
-        />
-      </div>
-    </div>
-  )
-}
-
-// ── Slide N+10 — Per-challenge Spotlight ──────────────────────────────────────
-
-function ChallengeSpotlightSlide({ challenge, index, total }: {
-  challenge: Challenge
-  index: number
-  total: number
-}) {
-  const isOpen = challenge.is_registration_open && !challenge.is_active
-
-  const complexity = challenge.complexity_level
-  const accent =
-    complexity === "Beginner"     ? { text: "text-emerald-400", bg: "bg-emerald-400/10", ring: "ring-emerald-400/30", glow: "rgba(52,211,153,0.12)" } :
-    complexity === "Intermediate" ? { text: "text-amber-400",   bg: "bg-amber-400/10",   ring: "ring-amber-400/30",   glow: "rgba(251,191,36,0.12)"  } :
-                                    { text: "text-rose-400",    bg: "bg-rose-400/10",    ring: "ring-rose-400/30",    glow: "rgba(248,113,113,0.12)" }
-
-  const steps = [
-    "Open registration on a laptop in the room",
-    "Enter your name to get a builder code",
-    `Current challenge — ${challenge.duration_minutes} min to build`,
-    "Hit Submit before the timer ends",
-  ]
-
-  return (
-    <div className="flex flex-col justify-center h-full px-10 md:px-14 gap-8 max-w-[min(96vw,1500px)] mx-auto w-full">
-
-      {/* Top meta row */}
-      <div className="flex items-center gap-4">
-        <span className="text-[12px] font-black uppercase tracking-[0.4em] text-white/30">
-          Challenge {index + 1} of {total}
-        </span>
-        <span className="text-white/15">·</span>
-        <span className={cn(
-          "text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full ring-1",
-          accent.text, accent.bg, accent.ring,
-        )}>
-          {complexity}
-        </span>
-        {challenge.duration_minutes && (
-          <>
-            <span className="text-white/15">·</span>
-            <div className="flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5 text-white/30" />
-              <span className="text-[12px] font-bold text-white/40">
-                {challenge.duration_minutes} min
-              </span>
-            </div>
-          </>
-        )}
-        {challenge.max_participants != null && (
-          <>
-            <span className="text-white/15">·</span>
-            <div className="flex items-center gap-1.5">
-              <Users className="h-3.5 w-3.5 text-white/30" />
-              <span className="text-[12px] font-bold text-white/40">
-                {challenge.registration_count ?? 0}/{challenge.max_participants} registered
-              </span>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Hero title + glow */}
-      <div className="relative">
-        <div
-          className="absolute -inset-6 rounded-3xl blur-3xl pointer-events-none"
-          style={{ background: accent.glow }}
-        />
-        <h2
-          className={cn(
-            "relative text-[72px] font-black uppercase tracking-tighter leading-[0.88]",
-            accent.text,
-          )}
-        >
-          {challenge.title}
-        </h2>
-      </div>
-
-      {/* Description */}
-      <p className="text-[22px] text-white/65 leading-relaxed max-w-3xl">
+      <div style={{ fontSize: 15, fontWeight: 300, color: C.textMuted, lineHeight: 1.5, marginBottom: 28, maxWidth: 440 }}>
         {challenge.description}
-      </p>
+      </div>
+      <div style={{ display: "flex", gap: 28, paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
+        <div><div style={metaKey}>Level</div><div style={metaVal}>{challenge.complexity_level}</div></div>
+        <div><div style={metaKey}>Duration</div><div style={metaVal}>{challenge.duration_minutes} min</div></div>
+        {challenge.max_participants != null && (
+          <div>
+            <div style={metaKey}>Capacity</div>
+            <div style={metaVal}>{challenge.registration_count ?? 0} / {challenge.max_participants}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
-      {(challenge.instructions_text?.trim() ||
-        challenge.instructions_document_url ||
-        challenge.starter_assets_url) && (
-        <div className="flex flex-col gap-3 max-w-4xl">
-          <p className="text-[11px] font-black uppercase tracking-[0.4em] text-white/25">
-            Challenge instructions
-          </p>
-          {challenge.instructions_text?.trim() && (
-            <p className="text-[17px] text-white/55 leading-relaxed line-clamp-6 whitespace-pre-wrap">
-              {challenge.instructions_text.trim()}
-            </p>
-          )}
-          {(challenge.instructions_document_url || challenge.starter_assets_url) && (
-            <p className="text-[14px] font-bold text-primary/90">
-              Full brief: open the PDF/DOC from the challenge link —{" "}
-              <span className="text-white/45 font-mono text-[12px] break-all">
-                {(challenge.instructions_document_url || challenge.starter_assets_url)!.replace(/^https?:\/\//, "")}
-              </span>
-            </p>
-          )}
-        </div>
-      )}
+// ── Slide 3 — Features ────────────────────────────────────────────────────────
 
-      {/* Divider */}
-      <div className="h-px bg-white/8 w-full" />
+const FEATURES = [
+  {
+    name: "Drag & Drop",
+    desc: "Connect components visually",
+    svg: <svg viewBox="0 0 24 24" style={{ width: 20, height: 20, stroke: C.gold, fill: "none", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as CSSProperties}><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>,
+  },
+  {
+    name: "Visual Logic",
+    desc: "Wire prompts, tools, and steps on canvas",
+    svg: <svg viewBox="0 0 24 24" style={{ width: 20, height: 20, stroke: C.gold, fill: "none", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as CSSProperties}><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0-4h18"/></svg>,
+  },
+  {
+    name: "No Code",
+    desc: "Build without writing a line",
+    svg: <svg viewBox="0 0 24 24" style={{ width: 20, height: 20, stroke: C.gold, fill: "none", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as CSSProperties}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>,
+  },
+  {
+    name: "Live Agents",
+    desc: "See them think in real time",
+    svg: <svg viewBox="0 0 24 24" style={{ width: 20, height: 20, stroke: C.gold, fill: "none", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as CSSProperties}><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>,
+  },
+]
 
-      {/* How to participate */}
-      <div className="flex flex-col gap-3">
-        <p className="text-[11px] font-black uppercase tracking-[0.4em] text-white/25">
-          How to Participate
-        </p>
-        <div className="grid grid-cols-4 gap-4">
-          {steps.map((step, i) => (
-            <div
-              key={i}
-              className={cn("glass rounded-xl px-4 py-4 ring-1 ring-white/6 flex flex-col gap-2")}
-            >
-              <span className={cn("text-[28px] font-black font-mono", accent.text, "opacity-40")}>
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <p className="text-[14px] font-bold text-white/70 leading-snug">{step}</p>
+function FeaturesSlide() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", height: "100%", padding: "48px 52px" }}>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.2em", color: C.gold, textTransform: "uppercase", marginBottom: 14, fontFamily: C.mono }}>
+        What You&apos;ll Use
+      </div>
+      <div style={{ fontSize: 32, fontWeight: 700, color: C.textPrim, letterSpacing: "-0.02em", marginBottom: 6 }}>
+        Drag. Drop. Deploy.
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 300, color: C.textMuted, marginBottom: 28 }}>
+        Full AI agents without writing a single line of code.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+        {FEATURES.map(f => (
+          <div key={f.name} style={{ background: "rgba(21,22,32,0.65)", backdropFilter: "blur(8px)", border: `1px solid ${C.border}`, borderRadius: 6, padding: "20px 16px", textAlign: "center" }}>
+            <div style={{ width: 36, height: 36, border: `1.5px solid ${C.gold}`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+              {f.svg}
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Registration status badge */}
-      <div className={cn(
-        "self-start flex items-center gap-2.5 px-5 py-2.5 rounded-full ring-1",
-        isOpen
-          ? "bg-emerald-400/10 ring-emerald-400/30"
-          : "bg-white/5 ring-white/10",
-      )}>
-        <div className={cn(
-          "h-2 w-2 rounded-full",
-          isOpen ? "bg-emerald-400 animate-pulse" : "bg-white/25",
-        )} />
-        <span className={cn(
-          "text-[12px] font-black uppercase tracking-wider",
-          isOpen ? "text-emerald-400" : "text-white/35",
-        )}>
-          {isOpen ? "Registration Open — join at a laptop now" : "Coming Soon"}
-        </span>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.textPrim, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>{f.name}</div>
+            <div style={{ fontSize: 11, fontWeight: 300, color: C.textMuted, lineHeight: 1.4 }}>{f.desc}</div>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-// ── Animated Mesh Background ─────────────────────────────────────────────────
+// ── Slide 4 — How to Join ─────────────────────────────────────────────────────
 
-function MeshBackground() {
+const JOIN_STEPS = [
+  { num: "01", title: "Find a Laptop", desc: "Use any device in the room to get started" },
+  { num: "02", title: "Register",      desc: "Enter your name to get a builder code" },
+  { num: "03", title: "Open the Mission", desc: "Build your flow for the mission running in the room" },
+  { num: "04", title: "Submit",        desc: "Hit submit before time runs out — your agent runs live" },
+]
+
+function JoinSlide() {
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {/* Base radial gradient — lifts the centre off pure black */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(ellipse 80% 60% at 35% 50%, rgba(245,158,11,0.07) 0%, transparent 70%), " +
-            "radial-gradient(ellipse 60% 80% at 80% 20%, rgba(59,130,246,0.06) 0%, transparent 70%)",
-        }}
-      />
-      {/* Orb 1 — amber, top-right — bright */}
-      <div
-        className="absolute -top-32 -right-32 w-[800px] h-[800px] rounded-full bg-primary/30 blur-[160px]"
-        style={{ animation: "tv-float 9s ease-in-out infinite" }}
-      />
-      {/* Orb 2 — vivid blue, centre-left */}
-      <div
-        className="absolute top-1/4 -left-48 w-[650px] h-[650px] rounded-full bg-blue-500/22 blur-[130px]"
-        style={{ animation: "tv-float 13s ease-in-out infinite reverse" }}
-      />
-      {/* Orb 3 — amber, bottom-centre */}
-      <div
-        className="absolute -bottom-32 left-1/3 w-[550px] h-[550px] rounded-full bg-primary/18 blur-[110px]"
-        style={{ animation: "tv-float 11s ease-in-out infinite 3s" }}
-      />
-      {/* Orb 4 — teal accent, bottom-right */}
-      <div
-        className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] rounded-full bg-cyan-500/10 blur-[100px]"
-        style={{ animation: "tv-float 15s ease-in-out infinite 1s" }}
-      />
-      {/* Dot grid */}
-      <div className="absolute inset-0 bg-dot-grid opacity-25" />
-    </div>
-  )
-}
-
-// ── Right rail: always-on makerspace guide video + stats ──────────────────────
-
-function LivePanel({ challenges }: { challenges: Challenge[] }) {
-  const upcoming = challenges.filter(isPromotableOnAttract).slice(0, 2)
-  const totalRegistered = challenges.reduce((sum, c) => sum + (c.registration_count ?? 0), 0)
-
-  return (
-    <div className="w-[min(46vw,760px)] min-w-[300px] shrink-0 flex flex-col border-l border-white/8 bg-black/20 backdrop-blur-sm relative z-10 min-h-0">
-
-      {/* ── YouTube tutorial (primary — former “How a flow connects” area) ── */}
-      <div className="flex-1 min-h-0 flex flex-col px-4 pt-5 pb-2">
-        <MakerspaceGuideSidebarEmbed />
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", height: "100%", padding: "48px 52px" }}>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.2em", color: C.gold, textTransform: "uppercase", marginBottom: 14, fontFamily: C.mono }}>
+        How to Participate
       </div>
-
-      {/* ── Stats ── */}
-      <div className="shrink-0 flex items-center gap-3 px-5 pb-3">
-        <div className="flex-1 glass rounded-xl px-3 py-3 text-center ring-1 ring-white/8">
-          <p className="text-[28px] font-black text-primary">{challenges.length}</p>
-          <p className="text-[10px] font-bold text-muted-foreground/55 uppercase tracking-wider">Challenges</p>
-        </div>
-        <div className="flex-1 glass rounded-xl px-3 py-3 text-center ring-1 ring-white/8">
-          <p className="text-[28px] font-black text-emerald-400">{totalRegistered}</p>
-          <p className="text-[10px] font-bold text-muted-foreground/55 uppercase tracking-wider">Registered</p>
-        </div>
+      <div style={{ fontSize: 38, fontWeight: 800, color: C.textPrim, letterSpacing: "-0.02em", lineHeight: 1.05 }}>
+        JOIN THE<br /><span style={{ color: C.gold }}>MISSION</span>
       </div>
-
-      {/* ── Upcoming challenges ── */}
-      {upcoming.length > 0 && (
-        <div className="shrink-0 flex flex-col gap-2.5 px-5 pb-3 overflow-hidden">
-          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-white/30">Coming Up</p>
-          {upcoming.map(c => (
-            <div key={c.id} className="glass rounded-xl px-4 py-3.5 ring-1 ring-white/8 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className={cn(
-                  "text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full ring-1",
-                  c.complexity_level === "Beginner"     ? "text-emerald-400 bg-emerald-400/10 ring-emerald-400/20" :
-                  c.complexity_level === "Intermediate" ? "text-amber-400  bg-amber-400/10  ring-amber-400/20"  :
-                                                          "text-rose-400   bg-rose-400/10   ring-rose-400/20",
-                )}>
-                  {c.complexity_level}
-                </span>
-                {c.registration_count != null && (
-                  <span className="text-[11px] font-mono text-muted-foreground/45">
-                    {c.registration_count}/{c.max_participants}
-                  </span>
-                )}
-              </div>
-              <p className="text-[14px] font-black uppercase tracking-tight text-foreground leading-tight line-clamp-2">
-                {c.title}
-              </p>
+      <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 2 }}>
+        {JOIN_STEPS.map(s => (
+          <div key={s.num} style={{ display: "flex", alignItems: "center", gap: 20, padding: "16px 20px", background: "rgba(21,22,32,0.6)", backdropFilter: "blur(8px)", border: `1px solid ${C.border}`, borderRadius: 6 }}>
+            <span style={{ fontSize: 28, fontWeight: 700, color: C.gold, opacity: 0.4, minWidth: 48, fontFamily: C.mono }}>{s.num}</span>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrim, textTransform: "uppercase", letterSpacing: "0.02em", marginBottom: 2 }}>{s.title}</div>
+              <div style={{ fontSize: 12, fontWeight: 300, color: C.textMuted }}>{s.desc}</div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── CTA ── */}
-      <div className="shrink-0 mt-auto mx-5 mb-12 glass rounded-xl px-4 py-4 ring-1 ring-primary/25 text-center">
-        <p className="text-[15px] font-black uppercase tracking-wider text-primary">Register at a laptop</p>
-        <p className="text-[12px] text-muted-foreground/55 mt-1">Get your code and join the challenge</p>
+            <span style={{ marginLeft: "auto", color: C.textDim, fontSize: 18 }}>→</span>
+          </div>
+        ))}
       </div>
     </div>
   )
 }
 
-// ── Scrolling Ticker ──────────────────────────────────────────────────────────
-
-function MarqueeTicker({ challenges }: { challenges: Challenge[] }) {
-  const items = [
-    `Welcome to ${AICCORE_MAKERSPACE}`,
-    `${challenges.length || "—"} challenge${challenges.length !== 1 ? "s" : ""} available today`,
-    "Visit a laptop in the room to register and participate",
-    "Build intelligent AI flows with Langflow — no coding needed",
-    "Each student designs and runs a real AI agent live",
-    ...challenges.map(c => `Challenge: ${c.title}`),
-  ]
-  const text = items.join("     •     ")
-  // Duplicate text so the scroll loops seamlessly
-  const doubled = `${text}     •     ${text}`
-
-  return (
-    <div className="absolute bottom-0 left-0 right-0 z-30 h-9 flex items-center overflow-hidden border-t border-white/6 bg-black/60 backdrop-blur-sm">
-      {/* Amber left accent */}
-      <div className="shrink-0 flex items-center gap-2 px-4 border-r border-white/10 h-full bg-primary/10">
-        <div
-          className="h-2 w-2 rounded-full bg-primary"
-          style={{ animation: "tv-live-pulse 1.2s ease-in-out infinite" }}
-        />
-        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-primary whitespace-nowrap">
-          Live
-        </span>
-      </div>
-      {/* Scrolling text */}
-      <div className="flex-1 overflow-hidden relative">
-        <div
-          className="flex whitespace-nowrap text-[13px] font-semibold text-white/50 tracking-wide"
-          style={{ animation: `tv-ticker-scroll ${Math.max(40, items.length * 8)}s linear infinite` }}
-        >
-          <span className="pr-8">{doubled}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Live Clock (corner) ───────────────────────────────────────────────────────
-
-function LiveClock() {
-  const [time, setTime] = useState("")
-  useEffect(() => {
-    const tick = () =>
-      setTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [])
-  return <>{time}</>
-}
-
-// ── Main Attract Component ────────────────────────────────────────────────────
+// ── Main Export ───────────────────────────────────────────────────────────────
 
 export function TVAttract({ challenges }: { challenges: Challenge[] }) {
-  // 4 core slides + optional "Coming Up Next" + one spotlight per promotable challenge (guide video is fixed in the right rail)
   useScreenWakeLock(true)
-  const spotlightChallenges = challenges.filter(isPromotableOnAttract)
-  const upcoming = useUpcomingAttractChallenge(challenges)
-  const showNextSlide = Boolean(upcoming?.start_time)
-  const TOTAL = 4 + (showNextSlide ? 1 : 0) + spotlightChallenges.length
-  const slideDurationsMs = useMemo(() => {
-    const base = [
-      SLIDE_DURATION,
-      SLIDE_DURATION,
-      SLIDE_DURATION,
-      SLIDE_DURATION,
-    ]
-    const next = showNextSlide ? [SLIDE_DURATION] : []
-    const spots = spotlightChallenges.map(() => SLIDE_DURATION)
-    return [...base, ...next, ...spots]
-  }, [showNextSlide, spotlightChallenges.length])
 
-  const [current, setCurrent] = useState(0)
-  const [opacity, setOpacity] = useState(1)
-  const safeCurrent = TOTAL > 0 ? Math.min(current, TOTAL - 1) : 0
-  const dwellMs = slideDurationsMs[safeCurrent] ?? SLIDE_DURATION
+  // ── System status (countdown source + live pill) ───────────────────────────
+  const [status, setStatus] = useState<SystemStatus | null>(null)
 
-  const advance = useCallback(() => {
-    setOpacity(0)
-    setTimeout(() => {
-      setCurrent(s => {
-        const from = TOTAL > 0 ? Math.min(s, TOTAL - 1) : 0
-        return (from + 1) % TOTAL
-      })
-      setOpacity(1)
-    }, TRANSITION_MS)
-  }, [TOTAL])
-
-  // Auto-advance timer — per-slide dwell (video segments longer than static slides)
   useEffect(() => {
-    const id = setTimeout(advance, dwellMs)
-    return () => clearTimeout(id)
-  }, [current, advance, dwellMs])
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await fetch(`${getApiBase()}/api/v1/aiccore/system/status`)
+        if (res.ok && !cancelled) {
+          const data: SystemStatus & { server_time: string } = await res.json()
+          applyServerTimeFromIso(data.server_time)
+          setStatus(data)
+        }
+      } catch { /* network error — ignore */ }
+    }
+    void poll()
+    const id = setInterval(poll, 5_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
-  const goTo = useCallback(
-    (i: number) => {
-      setOpacity(0)
-      setTimeout(() => {
-        setCurrent(TOTAL > 0 ? Math.min(Math.max(i, 0), TOTAL - 1) : 0)
-        setOpacity(1)
-      }, TRANSITION_MS)
-    },
-    [TOTAL],
+  // ── Countdown ──────────────────────────────────────────────────────────────
+  const { secsLeft, pct } = useCountdown(
+    status?.mission_build_ends_at ?? null,
+    status?.duration_minutes ?? null,
+  )
+  const isUrgent = secsLeft != null && secsLeft < 300
+  const countdownDisplay = secsLeft != null
+    ? `${String(Math.floor(secsLeft / 60)).padStart(2, "0")}:${String(secsLeft % 60).padStart(2, "0")}`
+    : "--:--"
+
+  // ── Local clock ────────────────────────────────────────────────────────────
+  const [clock, setClock] = useState("")
+  useEffect(() => {
+    const update = () => {
+      const now = new Date()
+      let h = now.getHours()
+      const m = now.getMinutes()
+      const ap = h >= 12 ? "PM" : "AM"
+      h = h % 12 || 12
+      setClock(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ap}`)
+    }
+    update()
+    const id = setInterval(update, 10_000)
+    return () => clearInterval(id)
+  }, [])
+
+  // ── Derived challenge data ─────────────────────────────────────────────────
+  const activeChallenge = useMemo(
+    () => challenges.find(c => c.is_active) ?? null,
+    [challenges],
   )
 
-  const slides = [
-    <HookSlide       key="hook" />,
-    <WhatSlide       key="what" />,
-    <HowSlide        key="how" />,
-    <ChallengesSlide key="challenges" challenges={challenges} />,
-    ...(showNextSlide && upcoming ? [<NextSlide key="next" challenge={upcoming} />] : []),
-    // One dedicated spotlight per challenge
-    ...spotlightChallenges.map((c, i) => (
-      <ChallengeSpotlightSlide
-        key={`spotlight-${c.id}`}
-        challenge={c}
-        index={i}
-        total={spotlightChallenges.length}
-      />
-    )),
+  const pastMissions = useMemo(
+    () => challenges.filter(c => c.is_finalized === true).slice(-3).reverse(),
+    [challenges],
+  )
+
+  // TODO: replace with a dedicated /api/v1/aiccore/stats endpoint for exact
+  // cumulative counts. These are proxy values derived from the challenges list
+  // and may over-count repeat participants across multiple missions.
+  const stats = useMemo(() => {
+    const missionsRun = challenges.filter(c => c.is_finalized === true).length
+    const agentsBuilt = challenges
+      .filter(c => c.is_finalized === true)
+      .reduce((sum, c) => sum + (c.registration_count ?? 0), 0)
+    const builders = challenges
+      .reduce((sum, c) => sum + (c.registration_count ?? 0), 0)
+    return { missionsRun, agentsBuilt, builders }
+  }, [challenges])
+
+  // ── Ticker events (long-poll) ──────────────────────────────────────────────
+  const [tickerEvents, setTickerEvents] = useState<TickerEvent[]>([])
+  const lastEventIdRef = useRef(0)
+
+  useEffect(() => {
+    let destroyed = false
+    let backoffId: ReturnType<typeof setTimeout>
+
+    const poll = async (): Promise<void> => {
+      if (destroyed) return
+      try {
+        const url = `${getApiBase()}/api/v1/aiccore/events/poll?last_id=${lastEventIdRef.current}&timeout=15`
+        const res = await fetch(url)
+        if (!res.ok) throw new Error("poll failed")
+        const data = await res.json()
+        if (destroyed) return
+
+        const events: any[] = data.events ?? []
+        let newLastId = lastEventIdRef.current
+        const newItems: TickerEvent[] = []
+
+        for (const wrapper of events) {
+          const msg = wrapper.data
+          newLastId = Math.max(newLastId, wrapper.id)
+
+          if (msg.event_type === "submitted") {
+            const nick = msg.payload?.nickname ?? "A builder"
+            newItems.push({ id: `e${wrapper.id}`, text: `${nick} submitted their agent` })
+          } else if (msg.event_type === "flow_saved") {
+            const nick = msg.payload?.nickname
+            const station = msg.payload?.station_id ?? "?"
+            newItems.push({
+              id: `e${wrapper.id}`,
+              text: nick ? `${nick} joined Station ${station}` : `New builder joined Station ${station}`,
+            })
+          } else if (msg.type === "MISSION_LIVE") {
+            const title = msg.data?.title
+            newItems.push({ id: `e${wrapper.id}`, text: title ? `New mission started: ${title}` : "New mission started" })
+          } else if (msg.type === "MISSION_ENDED") {
+            newItems.push({ id: `e${wrapper.id}`, text: "Mission ended — demos or results follow" })
+          }
+        }
+
+        lastEventIdRef.current = newLastId
+        if (newItems.length > 0) {
+          setTickerEvents(prev => [...prev, ...newItems].slice(-MAX_TICKER))
+        }
+
+        void poll()
+      } catch {
+        if (!destroyed) backoffId = setTimeout(poll, 3_000)
+      }
+    }
+
+    void poll()
+    return () => { destroyed = true; clearTimeout(backoffId) }
+  }, [])
+
+  // ── Slides & rotation ──────────────────────────────────────────────────────
+  const slides = useMemo(
+    () => [
+      <HookSlide key="hook" />,
+      ...(activeChallenge ? [<MissionSlide key="mission" challenge={activeChallenge} />] : []),
+      <FeaturesSlide key="features" />,
+      <JoinSlide key="join" />,
+    ],
+    [activeChallenge],
+  )
+
+  const durations = useMemo(
+    () => activeChallenge ? SLIDE_DURATIONS : [SLIDE_DURATIONS[0], SLIDE_DURATIONS[2], SLIDE_DURATIONS[3]],
+    [activeChallenge],
+  )
+
+  const [currentSlide, setCurrentSlide] = useState(0)
+  const [fillStyle, setFillStyle] = useState<CSSProperties>({ width: "0%", transition: "none" })
+
+  // Reset to first slide when the number of slides changes (mission added/removed)
+  const prevSlidesLenRef = useRef(slides.length)
+  useEffect(() => {
+    if (prevSlidesLenRef.current !== slides.length) {
+      prevSlidesLenRef.current = slides.length
+      setCurrentSlide(0)
+    }
+  }, [slides.length])
+
+  // Advance slide + animate progress bar
+  const slidesRef  = useRef(slides)
+  const durationsRef = useRef(durations)
+  useEffect(() => { slidesRef.current = slides },    [slides])
+  useEffect(() => { durationsRef.current = durations }, [durations])
+
+  useEffect(() => {
+    const dur = durationsRef.current[currentSlide] ?? 8_000
+    // Reset progress, then animate in next frame so the CSS transition fires
+    setFillStyle({ width: "0%", transition: "none" })
+    const rafId = requestAnimationFrame(() => {
+      setFillStyle({ width: "100%", transition: `width ${dur / 1_000}s linear` })
+    })
+    const timerId = setTimeout(() => {
+      setCurrentSlide(prev => (prev + 1) % slidesRef.current.length)
+    }, dur)
+    return () => { cancelAnimationFrame(rafId); clearTimeout(timerId) }
+  }, [currentSlide])
+
+  // ── Ticker content (defaults when no events yet) ───────────────────────────
+  const DEFAULT_TICKER: TickerEvent[] = [
+    { id: "d1", text: "New missions every week" },
+    { id: "d2", text: "Register at any laptop in the room" },
+    { id: "d3", text: "Build AI agents — no code required" },
+    { id: "d4", text: "Submit before time runs out" },
   ]
+  const tickerContent = tickerEvents.length > 0 ? tickerEvents : DEFAULT_TICKER
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div
-      className="relative h-screen w-screen overflow-hidden flex"
-      style={{ background: "radial-gradient(ellipse at 40% 50%, #1a1208 0%, #0d0d0f 60%, #080808 100%)" }}
-    >
-      {/* Animated mesh — full canvas behind everything */}
-      <MeshBackground />
+    <>
+      <style>{`
+        @keyframes attractLivePulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.2; }
+        }
+        @keyframes attractTickerScroll {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+      `}</style>
 
-      {/* ── Left: full-height carousel (complements fixed YouTube on the right) ── */}
-      <div className="flex-1 min-w-0 relative flex flex-col overflow-hidden">
+      <div style={{
+        display: "flex", flexDirection: "column",
+        height: "100vh", width: "100vw", overflow: "hidden",
+        background: C.bgDeep, color: C.textPrim,
+        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+      }}>
 
-        {/* Top bar */}
-        <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-8 pt-5">
-          {/* Brand + LIVE badge */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 ring-1 ring-red-500/40">
-              <div
-                className="h-1.5 w-1.5 rounded-full bg-red-400"
-                style={{ animation: "tv-live-pulse 1.2s ease-in-out infinite" }}
-              />
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Live</span>
+        {/* ── TOP BAR ────────────────────────────────────────────────────── */}
+        <div style={{
+          background: C.bgSurface, borderBottom: `1px solid ${C.border}`,
+          display: "flex", alignItems: "center",
+          padding: "0 20px", height: 44, gap: 14, flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", color: C.gold, fontFamily: C.mono }}>AICCORE</span>
+          <span style={{ fontSize: 12, color: C.textDim, fontFamily: C.mono }}>/</span>
+          <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: "0.06em", color: C.textMuted, fontFamily: C.mono }}>MAKERSPACE</span>
+          <div style={{ width: 1, height: 18, background: C.border, flexShrink: 0 }} />
+
+          {/* Live pill — shown only when a mission is active */}
+          {status?.is_active && (
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "4px 10px", borderRadius: 4,
+              background: "rgba(62,207,90,0.12)", border: "1px solid rgba(62,207,90,0.25)",
+            }}>
+              <div style={{
+                width: 7, height: 7, borderRadius: "50%",
+                background: C.green, boxShadow: `0 0 6px ${C.green}`,
+                animation: "attractLivePulse 1.6s ease-in-out infinite",
+              }} />
+              <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.12em", color: C.green, textTransform: "uppercase", fontFamily: C.mono }}>
+                Mission Live
+              </span>
             </div>
-            <span className="flex items-center gap-2 text-[12px] font-bold tracking-wide text-white/70">
-              <AiccoreLogo size={22} forDarkBackground className="rounded-md ring-1 ring-white/15" />
-              {AICCORE_MAKERSPACE}
-            </span>
+          )}
+
+          {/* Countdown + progress + clock */}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 180 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: isUrgent ? "#e05050" : C.goldDim, minWidth: 50, letterSpacing: "0.04em", fontFamily: C.mono }}>
+                {countdownDisplay}
+              </span>
+              <div style={{ flex: 1, height: 3, background: "rgba(255,255,255,0.04)", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ height: "100%", background: isUrgent ? "#e05050" : C.goldDim, borderRadius: 2, width: `${pct ?? 0}%`, transition: "width 1s linear" }} />
+              </div>
+            </div>
+            <div style={{ width: 1, height: 18, background: C.border, flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: C.textDim, fontFamily: C.mono }}>{clock}</span>
           </div>
-          {/* Clock */}
-          <span className="text-[20px] font-mono font-bold text-white/40 tabular-nums">
-            <LiveClock />
-          </span>
         </div>
 
-        {/* Slide content — fades between slides */}
-        <div
-          className="relative z-10 flex-1"
-          style={{ opacity, transition: `opacity ${TRANSITION_MS}ms ease` }}
-        >
-          {slides[safeCurrent]}
-        </div>
+        {/* ── MAIN ───────────────────────────────────────────────────────── */}
+        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-        {/* Progress dots + bar — leave room for ticker at bottom */}
-        <div className="relative z-20 flex flex-col items-center gap-3 pb-12">
-          <div className="flex items-center gap-2.5">
-            {Array.from({ length: TOTAL }).map((_, i) => (
-              <button
-                key={i}
-                onClick={() => goTo(i)}
-                className={cn(
-                  "rounded-full transition-all duration-300",
-                  i === safeCurrent ? "w-7 h-2 bg-primary" : "w-2 h-2 bg-white/20 hover:bg-white/40",
-                )}
+          {/* ── LEFT: rotating slides ──────────────────────────────────── */}
+          <div style={{ flex: 1, position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", background: C.bgDeep }}>
+            {/* Ambient gradient overlay */}
+            <div style={{
+              position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0,
+              background: [
+                "radial-gradient(ellipse 65% 55% at 10% 85%, rgba(25,80,110,0.3) 0%, transparent 55%)",
+                "radial-gradient(ellipse 55% 45% at 90% 15%, rgba(80,45,110,0.22) 0%, transparent 55%)",
+              ].join(", "),
+            }} />
+
+            {/* Slides viewport */}
+            <div style={{ flex: 1, position: "relative", overflow: "hidden", zIndex: 1 }}>
+              {slides.map((slide, i) => (
+                <div
+                  key={i}
+                  style={{
+                    position: "absolute", inset: 0,
+                    opacity: i === currentSlide ? 1 : 0,
+                    transform: i === currentSlide ? "translateY(0)" : "translateY(18px)",
+                    transition: "opacity 0.6s ease, transform 0.6s ease",
+                    pointerEvents: i === currentSlide ? "auto" : "none",
+                  }}
+                >
+                  {slide}
+                </div>
+              ))}
+            </div>
+
+            {/* Cadence line */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 52px", flexShrink: 0, position: "relative", zIndex: 1 }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.gold, opacity: 0.5, display: "inline-block", flexShrink: 0 }} />
+              <span style={{ fontSize: 11, letterSpacing: "0.06em", color: "#7a7a84", fontWeight: 500, fontFamily: C.mono }}>
+                New mission every Friday
+              </span>
+            </div>
+
+            {/* Slide progress bar */}
+            <div style={{ height: 3, background: "rgba(255,255,255,0.04)", flexShrink: 0, position: "relative", zIndex: 1 }}>
+              <div style={{ height: "100%", background: C.gold, borderRadius: 2, ...fillStyle }} />
+            </div>
+          </div>
+
+          {/* ── RIGHT: persistent sidebar ──────────────────────────────── */}
+          <div style={{ width: 520, background: C.bgSurface, borderLeft: `1px solid ${C.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+
+            {/* Stats strip */}
+            <div style={{ display: "flex", borderBottom: `1px solid ${C.border}` }}>
+              {([
+                { num: stats.missionsRun, label: "Missions Run", gold: true  },
+                { num: stats.agentsBuilt, label: "Agents Built", gold: false },
+                { num: stats.builders,    label: "Builders",     gold: false },
+              ] as const).map((s, i, arr) => (
+                <div key={s.label} style={{ flex: 1, padding: "14px 16px", borderRight: i < arr.length - 1 ? `1px solid ${C.border}` : "none", textAlign: "center" }}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.gold ? C.gold : C.textPrim, lineHeight: 1, marginBottom: 3, fontFamily: C.mono }}>
+                    {s.num}
+                  </div>
+                  <div style={{ fontSize: 8, letterSpacing: "0.14em", color: C.textMuted, textTransform: "uppercase", fontWeight: 600, fontFamily: C.mono }}>
+                    {s.label}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Video header */}
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}` }}>
+              <div style={monoLabel}>Builder Walkthrough</div>
+            </div>
+
+            {/* Walkthrough video */}
+            <div style={{ flex: 1, minHeight: 0, overflow: "hidden", position: "relative", background: "#000" }}>
+              <video
+                src={MAKERSPACE_GUIDE_VIDEO_PATH}
+                autoPlay
+                loop
+                muted
+                playsInline
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
               />
-            ))}
-          </div>
-          <div className="w-48 h-0.5 bg-white/10 rounded-full overflow-hidden">
-            <div
-              key={safeCurrent}
-              className="h-full bg-primary/60 rounded-full origin-left"
-              style={{ animation: `tv-progress-fill ${dwellMs}ms linear forwards` }}
-            />
+            </div>
+
+            {/* Past Missions */}
+            {pastMissions.length > 0 && (
+              <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 16px" }}>
+                <div style={{ ...monoLabel, marginBottom: 10 }}>Past Missions</div>
+                {pastMissions.map((m, i) => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: i < pastMissions.length - 1 ? "1px solid rgba(255,255,255,0.03)" : "none" }}>
+                    <span style={{ fontSize: 8, fontWeight: 600, letterSpacing: "0.1em", padding: "3px 7px", borderRadius: 3, textTransform: "uppercase", background: "rgba(62,207,90,0.12)", color: C.green, border: "1px solid rgba(62,207,90,0.18)", whiteSpace: "nowrap", fontFamily: C.mono }}>
+                      Done
+                    </span>
+                    <span style={{ flex: 1, fontSize: 12, color: "#9a9aa2" }}>{m.title}</span>
+                    {m.start_time && (
+                      <span style={{ fontSize: 11, color: C.textMuted, fontFamily: C.mono }}>
+                        {new Date(m.start_time).toLocaleDateString([], { month: "short", day: "numeric" })}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Register CTA */}
+            <div style={{ borderTop: `1px solid ${C.border}`, padding: "16px", textAlign: "center", background: "rgba(240,192,64,0.03)" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.gold, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 4, fontFamily: C.mono }}>
+                Register at a Laptop
+              </div>
+              <div style={{ fontSize: 11, color: "#8a8a94", fontWeight: 300 }}>
+                Get your code and join the mission
+              </div>
+            </div>
+
           </div>
         </div>
+
+        {/* ── TICKER ──────────────────────────────────────────────────────── */}
+        <div style={{ background: "#111219", borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", height: 38, overflow: "hidden", flexShrink: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.14em", color: C.gold, textTransform: "uppercase", padding: "0 16px", borderRight: `1px solid ${C.border}`, height: "100%", display: "flex", alignItems: "center", whiteSpace: "nowrap", flexShrink: 0, fontFamily: C.mono }}>
+            Feed
+          </div>
+          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+            {/* Duplicate ticker content for seamless infinite scroll */}
+            <div style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", animation: "attractTickerScroll 40s linear infinite" }}>
+              {[...tickerContent, ...tickerContent].map((evt, i) => (
+                <span key={`${evt.id}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 22, fontSize: 12, color: "#8a8a94", letterSpacing: "0.02em", padding: "0 22px", fontFamily: C.mono }}>
+                  {evt.text}
+                  <span style={{ display: "inline-block", width: 4, height: 4, background: C.gold, borderRadius: "50%", flexShrink: 0 }} />
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
       </div>
-
-      {/* ── Right: live panel (flow diagram + stats + info) ── */}
-      <LivePanel challenges={challenges} />
-
-      {/* ── Full-width ticker — floats above both columns ── */}
-      <MarqueeTicker challenges={challenges} />
-    </div>
+    </>
   )
 }

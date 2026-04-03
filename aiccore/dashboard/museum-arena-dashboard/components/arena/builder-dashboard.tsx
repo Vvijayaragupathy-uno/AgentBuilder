@@ -13,6 +13,8 @@ import { SystemConfig } from "./system-config"
 import { StationStatus } from "./station-status"
 import { LoginPage } from "./login-page"
 import { LiveChallenges } from "./live-challenges"
+import { ArenaHero } from "./arena-hero"
+import { ArenaArchive } from "./arena-archive"
 import { ChallengesCatalog } from "./challenges-catalog"
 import { ChallengeDetail } from "./challenge-detail"
 import { cn, fetchWithCredentials, getApiBase } from "@/lib/utils"
@@ -239,12 +241,21 @@ function BuilderDashboardInner() {
               ) : (
                 <div className="pb-10">
                   {activeTab === "live" ? (
-                    <div className="flex flex-col gap-8">
-                      <LiveChallenges
-                        onViewAll={() => setActiveTab("challenges")}
-                        onSelectChallenge={(id) => { setSelectedChallengeId(id); setActiveTab("challenges") }}
-                      />
-                      <Leaderboard onDataUpdate={setStationCount} refreshKey={refreshKey} />
+                    <div className="flex flex-col gap-6">
+                      {/* Zone 1: Mission Banner */}
+                      <ArenaHero />
+
+                      {/* Zone 2: The Field + The War Board */}
+                      <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-6 items-start">
+                        <LiveChallenges
+                          onViewAll={() => setActiveTab("challenges")}
+                          onSelectChallenge={(id) => { setSelectedChallengeId(id); setActiveTab("challenges") }}
+                        />
+                        <Leaderboard onDataUpdate={setStationCount} refreshKey={refreshKey} />
+                      </div>
+
+                      {/* Zone 3: The Archive */}
+                      <ArenaArchive />
                     </div>
                   ) : activeTab === "challenges" ? (
                     selectedChallengeId

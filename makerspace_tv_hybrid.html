@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AICCORE Makerspace</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; width: 100%; overflow: hidden; }
+  body { background: #0c0d14; font-family: 'IBM Plex Sans', sans-serif; color: #f0eee6; }
+
+  :root {
+    --gold: #f0c040;
+    --gold-dim: #c49a20;
+    --bg-deep: #0c0d14;
+    --bg-surface: #10111a;
+    --bg-card: #151620;
+    --border: #1e2030;
+    --text-primary: #f0eee6;
+    --text-muted: #6a6a72;
+    --text-dim: #3a3a42;
+    --green: #3ecf5a;
+    --green-dim: rgba(62, 207, 90, 0.12);
+  }
+
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+  @keyframes tickerScroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-12px); }
+  }
+
+  /* ═══ SHELL ═══ */
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg-deep);
+  }
+
+  /* ─── TOP BAR ─── */
+  .topbar {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    height: 44px;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .topbar-logo { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--gold); }
+  .topbar-slash { font-size: 12px; color: var(--text-dim); }
+  .topbar-sub { font-size: 12px; font-weight: 500; letter-spacing: 0.06em; color: var(--text-muted); }
+  .topbar-divider { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 4px;
+    background: var(--green-dim);
+    border: 1px solid rgba(62,207,90,0.25);
+    cursor: default;
+  }
+  .live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: livePulse 1.6s ease-in-out infinite;
+  }
+  .live-label { font-size: 9px; font-weight: 600; letter-spacing: 0.12em; color: var(--green); text-transform: uppercase; }
+
+  .cd-wrap { display: flex; align-items: center; gap: 12px; min-width: 180px; }
+  .cd-time { font-size: 13px; font-weight: 500; color: var(--gold-dim); min-width: 50px; letter-spacing: 0.04em; }
+  .cd-time.urgent { color: #e05050; }
+  .cd-track { flex: 1; height: 3px; background: rgba(255,255,255,0.04); border-radius: 2px; overflow: hidden; }
+  .cd-fill { height: 100%; background: var(--gold-dim); border-radius: 2px; transition: width 1s linear; }
+  .cd-fill.urgent { background: #e05050; }
+  .clock { font-size: 11px; color: var(--text-dim); }
+
+  /* ─── MAIN ─── */
+  .main { flex: 1; display: flex; overflow: hidden; }
+
+  /* ══ LEFT — ROTATING SLIDES ══ */
+  .left {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-deep);
+  }
+  .left::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 65% 55% at 10% 85%, rgba(25, 80, 110, 0.3) 0%, transparent 55%),
+      radial-gradient(ellipse 55% 45% at 90% 15%, rgba(80, 45, 110, 0.22) 0%, transparent 55%),
+      radial-gradient(ellipse 40% 40% at 50% 50%, rgba(240, 192, 64, 0.04) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .left::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+      ellipse 45% 40% at 45% 50%,
+      rgba(240, 192, 64, 0.03) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .slides-viewport {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 48px 52px;
+    opacity: 0;
+    transform: translateY(18px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+    pointer-events: none;
+  }
+  .slide.active {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  .slide.exiting {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+
+  /* Slide 1: Hook */
+  .hook-title {
+    font-size: 56px;
+    font-weight: 800;
+    line-height: 1.0;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+  }
+  .hook-title .gold { color: var(--gold); }
+  .hook-sub {
+    font-size: 18px;
+    font-weight: 300;
+    color: var(--text-muted);
+    line-height: 1.5;
+    max-width: 480px;
+  }
+
+  /* Slide 2: Mission Detail */
+  .slide-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.2em;
+    color: var(--gold); text-transform: uppercase; margin-bottom: 14px;
+  }
+  .mission-title-big {
+    font-size: 40px; font-weight: 700; color: var(--text-primary);
+    line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 8px;
+  }
+  .mission-sub-big {
+    font-size: 15px; font-weight: 300; color: var(--text-muted);
+    line-height: 1.5; margin-bottom: 28px; max-width: 440px;
+  }
+  .mission-meta {
+    display: flex; gap: 28px;
+    padding-top: 16px; border-top: 1px solid var(--border);
+  }
+  .mm-k { font-size: 9px; letter-spacing: 0.12em; color: var(--text-muted); text-transform: uppercase; margin-bottom: 3px; }
+  .mm-v { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+
+  /* Slide 3: Features */
+  .features-title {
+    font-size: 32px; font-weight: 700; color: var(--text-primary);
+    letter-spacing: -0.02em; margin-bottom: 6px;
+  }
+  .features-sub {
+    font-size: 14px; font-weight: 300; color: var(--text-muted);
+    margin-bottom: 28px;
+  }
+  .features-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .feat-card {
+    background: rgba(21, 22, 32, 0.65);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px 16px;
+    text-align: center;
+  }
+  .feat-icon {
+    width: 36px; height: 36px;
+    border: 1.5px solid var(--gold);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 12px;
+    color: var(--gold);
+    font-size: 16px;
+  }
+  .feat-name {
+    font-size: 13px; font-weight: 700; color: var(--text-primary);
+    text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
+  }
+  .feat-desc { font-size: 11px; font-weight: 300; color: var(--text-muted); line-height: 1.4; }
+
+  /* Slide 4: How to Join */
+  .join-title {
+    font-size: 38px; font-weight: 800; color: var(--text-primary);
+    letter-spacing: -0.02em; margin-bottom: 6px; line-height: 1.05;
+  }
+  .join-title .gold { color: var(--gold); }
+  .steps-grid {
+    margin-top: 24px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .step-row {
+    display: flex; align-items: center; gap: 20px;
+    padding: 16px 20px;
+    background: rgba(21, 22, 32, 0.6);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .step-num {
+    font-size: 28px; font-weight: 700; color: var(--gold);
+    opacity: 0.4; min-width: 48px;
+  }
+  .step-title {
+    font-size: 16px; font-weight: 700; color: var(--text-primary);
+    text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 2px;
+  }
+  .step-desc { font-size: 12px; font-weight: 300; color: var(--text-muted); }
+  .step-arrow { margin-left: auto; color: var(--text-dim); font-size: 18px; }
+
+  /* Cadence line */
+  .cadence-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 52px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .cadence-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--gold);
+    opacity: 0.5;
+  }
+  .cadence-text {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: #7a7a84;
+    font-weight: 500;
+  }
+
+  /* Slide progress */
+  .slide-progress-bar {
+    height: 3px;
+    background: rgba(255,255,255,0.04);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .slide-progress-fill {
+    height: 100%;
+    background: var(--gold);
+    width: 0%;
+    transition: width 0.3s linear;
+  }
+
+  /* ══ RIGHT — PERSISTENT ══ */
+  .right {
+    width: 520px;
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  /* Stats */
+  .stats-strip {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-cell {
+    flex: 1;
+    padding: 14px 16px;
+    border-right: 1px solid var(--border);
+    text-align: center;
+  }
+  .stat-cell:last-child { border-right: none; }
+  .stat-num { font-size: 24px; font-weight: 700; color: var(--text-primary); line-height: 1; margin-bottom: 3px; }
+  .stat-num.gold { color: var(--gold); }
+  .stat-k { font-size: 8px; letter-spacing: 0.14em; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
+
+  /* Builder Preview header */
+  .rp-header { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .rp-title { font-size: 9px; font-weight: 600; letter-spacing: 0.16em; color: var(--text-muted); text-transform: uppercase; margin-bottom: 2px; }
+  .rp-sub { font-size: 11px; color: #8a8a94; font-weight: 300; }
+
+  /* Video */
+  .video-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+    background: #000;
+  }
+  .reel-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* Past Missions */
+  .past-section { border-top: 1px solid var(--border); padding: 12px 16px; }
+  .past-title { font-size: 9px; font-weight: 600; letter-spacing: 0.16em; color: var(--text-muted); text-transform: uppercase; margin-bottom: 10px; }
+  .past-item { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .past-item:last-child { border-bottom: none; }
+  .past-badge {
+    font-size: 8px; font-weight: 600; letter-spacing: 0.1em;
+    padding: 3px 7px; border-radius: 3px; text-transform: uppercase;
+    background: var(--green-dim); color: var(--green);
+    border: 1px solid rgba(62,207,90,0.18); white-space: nowrap;
+  }
+  .past-name { flex: 1; font-size: 12px; color: #9a9aa2; }
+  .past-date { font-size: 11px; color: var(--text-muted); }
+
+  /* Register CTA */
+  .register-cta {
+    border-top: 1px solid var(--border);
+    padding: 16px 16px;
+    text-align: center;
+    background: rgba(240, 192, 64, 0.03);
+  }
+  .register-title {
+    font-size: 14px; font-weight: 700; color: var(--gold);
+    letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px;
+  }
+  .register-sub { font-size: 11px; color: #8a8a94; font-weight: 300; }
+
+  /* ─── TICKER ─── */
+  .ticker-bar {
+    background: #111219;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center;
+    height: 38px; overflow: hidden; flex-shrink: 0;
+  }
+  .ticker-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em; color: var(--gold);
+    text-transform: uppercase; padding: 0 16px;
+    border-right: 1px solid var(--border);
+    height: 100%; display: flex; align-items: center;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .ticker-scroll { flex: 1; overflow: hidden; position: relative; }
+  .ticker-inner {
+    display: inline-flex; align-items: center; white-space: nowrap;
+    animation: tickerScroll 40s linear infinite;
+  }
+  .ti { font-size: 12px; color: #8a8a94; letter-spacing: 0.02em; padding: 0 22px; }
+  .td { display: inline-block; width: 4px; height: 4px; background: var(--gold); border-radius: 50%; }
+
+  /* SVG icons in feature cards */
+  .feat-icon svg { width: 20px; height: 20px; stroke: var(--gold); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ═══ TOP BAR ═══ -->
+  <div class="topbar">
+    <span class="topbar-logo mono">AICCORE</span>
+    <span class="topbar-slash mono">/</span>
+    <span class="topbar-sub mono">MAKERSPACE</span>
+    <div class="topbar-divider"></div>
+    <div class="live-pill">
+      <div class="live-dot"></div>
+      <span class="live-label mono">Mission Live</span>
+    </div>
+    <div class="topbar-right">
+      <div class="cd-wrap">
+        <span class="cd-time mono" id="cd-time">23:47</span>
+        <div class="cd-track"><div class="cd-fill" id="cd-fill" style="width:79%"></div></div>
+      </div>
+      <div class="topbar-divider"></div>
+      <span class="clock mono" id="clock">--:-- --</span>
+    </div>
+  </div>
+
+  <!-- ═══ MAIN ═══ -->
+  <div class="main">
+
+    <!-- ══ LEFT — ROTATING SLIDES ══ -->
+    <div class="left">
+      <div class="slides-viewport">
+
+        <!-- SLIDE 1: Hook -->
+        <div class="slide active" data-slide="0">
+          <div class="hook-title">
+            STUDENTS<br>ARE<br><span class="gold">BUILDING AI</span><br>HERE.
+          </div>
+          <div class="hook-sub">Come see them build intelligent agents — live.</div>
+        </div>
+
+        <!-- SLIDE 2: Active Mission -->
+        <div class="slide" data-slide="1">
+          <div class="slide-label mono">Active Mission</div>
+          <div class="mission-title-big">Build an AI Chatbot</div>
+          <div class="mission-sub-big">Develop a conversational agent that can assist students — wire it visually, no code required.</div>
+          <div class="mission-meta">
+            <div><div class="mm-k mono">Builder</div><div class="mm-v mono">Langflow</div></div>
+            <div><div class="mm-k mono">Level</div><div class="mm-v mono">Beginner</div></div>
+            <div><div class="mm-k mono">Arena</div><div class="mm-v mono">Main Floor</div></div>
+            <div><div class="mm-k mono">Duration</div><div class="mm-v mono">30 min</div></div>
+            <div><div class="mm-k mono">Capacity</div><div class="mm-v mono">3 / 10</div></div>
+          </div>
+        </div>
+
+        <!-- SLIDE 3: Features -->
+        <div class="slide" data-slide="2">
+          <div class="slide-label mono">What You'll Use</div>
+          <div class="features-title">Drag. Drop. Deploy.</div>
+          <div class="features-sub">Full AI agents without writing a single line of code.</div>
+          <div class="features-grid">
+            <div class="feat-card">
+              <div class="feat-icon">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              </div>
+              <div class="feat-name">Drag &<br>Drop</div>
+              <div class="feat-desc">Connect components visually</div>
+            </div>
+            <div class="feat-card">
+              <div class="feat-icon">
+                <svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0-4h18"/></svg>
+              </div>
+              <div class="feat-name">Visual<br>Logic</div>
+              <div class="feat-desc">Wire prompts, tools, and steps on canvas</div>
+            </div>
+            <div class="feat-card">
+              <div class="feat-icon">
+                <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              </div>
+              <div class="feat-name">No<br>Code</div>
+              <div class="feat-desc">Build without writing a line</div>
+            </div>
+            <div class="feat-card">
+              <div class="feat-icon">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+              </div>
+              <div class="feat-name">Live<br>Agents</div>
+              <div class="feat-desc">See them think in real time</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SLIDE 4: How to Join -->
+        <div class="slide" data-slide="3">
+          <div class="slide-label mono">How to Participate</div>
+          <div class="join-title">JOIN THE<br><span class="gold">MISSION</span></div>
+          <div class="steps-grid">
+            <div class="step-row">
+              <span class="step-num mono">01</span>
+              <div><div class="step-title">Find a Laptop</div><div class="step-desc">Use any device in the room to get started</div></div>
+              <span class="step-arrow">→</span>
+            </div>
+            <div class="step-row">
+              <span class="step-num mono">02</span>
+              <div><div class="step-title">Register</div><div class="step-desc">Enter your name to get a builder code</div></div>
+              <span class="step-arrow">→</span>
+            </div>
+            <div class="step-row">
+              <span class="step-num mono">03</span>
+              <div><div class="step-title">Open the Mission</div><div class="step-desc">Build your flow for the mission running in the room</div></div>
+              <span class="step-arrow">→</span>
+            </div>
+            <div class="step-row">
+              <span class="step-num mono">04</span>
+              <div><div class="step-title">Submit</div><div class="step-desc">Hit submit before time runs out — your agent runs live</div></div>
+              <span class="step-arrow">→</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Cadence line -->
+      <div class="cadence-line">
+        <span class="cadence-dot"></span>
+        <span class="cadence-text mono">New mission every Friday</span>
+      </div>
+
+      <!-- Slide progress -->
+      <div class="slide-progress-bar">
+        <div class="slide-progress-fill" id="slide-progress"></div>
+      </div>
+    </div>
+
+    <!-- ══ RIGHT — PERSISTENT ══ -->
+    <div class="right">
+
+      <!-- Stats strip — cumulative -->
+      <div class="stats-strip">
+        <div class="stat-cell">
+          <div class="stat-num gold mono">47</div>
+          <div class="stat-k mono">Missions Run</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num mono">182</div>
+          <div class="stat-k mono">Agents Built</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num mono">94</div>
+          <div class="stat-k mono">Builders</div>
+        </div>
+      </div>
+
+      <!-- Builder Walkthrough Video -->
+      <div class="rp-header">
+        <div class="rp-title mono">Builder Walkthrough</div>
+      </div>
+
+      <div class="video-wrap">
+        <video
+          src="https://aiccoredashboard-production.up.railway.app/video.mp4"
+          autoplay
+          loop
+          muted
+          playsinline
+          class="reel-video"
+        ></video>
+      </div>
+
+      <!-- Past Missions -->
+      <div class="past-section">
+        <div class="past-title mono">Past Missions</div>
+        <div class="past-item">
+          <span class="past-badge mono">Done</span>
+          <span class="past-name">Sentiment Classifier</span>
+          <span class="past-date mono">Mar 23</span>
+        </div>
+        <div class="past-item">
+          <span class="past-badge mono">Done</span>
+          <span class="past-name">Web Research Agent</span>
+          <span class="past-date mono">Mar 20</span>
+        </div>
+        <div class="past-item">
+          <span class="past-badge mono">Done</span>
+          <span class="past-name">RAG Q&amp;A Bot</span>
+          <span class="past-date mono">Mar 18</span>
+        </div>
+      </div>
+
+      <!-- Register CTA -->
+      <div class="register-cta">
+        <div class="register-title mono">Register at a Laptop</div>
+        <div class="register-sub">Get your code and join the mission</div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ═══ TICKER — dynamic events ═══ -->
+  <div class="ticker-bar">
+    <div class="ticker-tag mono">Feed</div>
+    <div class="ticker-scroll">
+      <div class="ticker-inner" id="ticker-inner">
+        <!-- populated by JS -->
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ─── Clock ───
+  function updateClock() {
+    const now = new Date();
+    let h = now.getHours();
+    const m = now.getMinutes();
+    const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    document.getElementById('clock').textContent =
+      String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ' ' + ap;
+  }
+  updateClock();
+  setInterval(updateClock, 10000);
+
+  // ─── Countdown ───
+  const TOTAL = 30 * 60;
+  let secs = 23 * 60 + 47;
+  function tick() {
+    if (secs <= 0) return;
+    secs--;
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    const timeEl = document.getElementById('cd-time');
+    const fillEl = document.getElementById('cd-fill');
+    const pct = Math.round((secs / TOTAL) * 100);
+    const urgent = secs < 300;
+    timeEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    timeEl.className = 'cd-time mono' + (urgent ? ' urgent' : '');
+    fillEl.style.width = pct + '%';
+    fillEl.className = 'cd-fill' + (urgent ? ' urgent' : '');
+  }
+  setInterval(tick, 1000);
+
+  // ─── Slide Rotation ───
+  const SLIDE_DURATIONS = [16000, 8000, 8000, 8000]; // slide 1 holds longer
+  const slides = document.querySelectorAll('.slide');
+  const progressBar = document.getElementById('slide-progress');
+  let currentSlide = 0;
+  let slideTimer = null;
+
+  function goToSlide(index) {
+    slides.forEach(s => {
+      s.classList.remove('active');
+      s.classList.remove('exiting');
+    });
+
+    slides[index].classList.add('active');
+    currentSlide = index;
+
+    const duration = SLIDE_DURATIONS[index];
+
+    progressBar.style.transition = 'none';
+    progressBar.style.width = '0%';
+
+    requestAnimationFrame(() => {
+      progressBar.style.transition = 'width ' + (duration / 1000) + 's linear';
+      progressBar.style.width = '100%';
+    });
+
+    clearTimeout(slideTimer);
+    slideTimer = setTimeout(() => {
+      goToSlide((currentSlide + 1) % slides.length);
+    }, duration);
+  }
+
+  goToSlide(0);
+
+  // ─── Dynamic Ticker ───
+  // Simulated live events — in production, these would come from your API/websocket
+  const TICKER_EVENTS = [
+    { type: 'join', name: 'Marcus T.', time: '12:31 PM' },
+    { type: 'join', name: 'Priya K.', time: '12:28 PM' },
+    { type: 'submit', name: 'Alex R.', agent: 'Study Buddy Bot', time: '12:25 PM' },
+    { type: 'join', name: 'Jordan M.', time: '12:22 PM' },
+    { type: 'mission', text: 'New mission started: Build an AI Chatbot' },
+    { type: 'milestone', text: '182 agents built in AICCORE Makerspace' },
+    { type: 'join', name: 'Sam L.', time: '12:18 PM' },
+    { type: 'submit', name: 'Priya K.', agent: 'Research Assistant', time: '12:15 PM' },
+  ];
+
+  function formatEvent(evt) {
+    switch (evt.type) {
+      case 'join': return `${evt.name} joined the mission · ${evt.time}`;
+      case 'submit': return `${evt.name} submitted "${evt.agent}" · ${evt.time}`;
+      case 'mission': return evt.text;
+      case 'milestone': return `✦ ${evt.text}`;
+      default: return evt.text || '';
+    }
+  }
+
+  function buildTickerContent() {
+    const inner = document.getElementById('ticker-inner');
+    if (!inner) return;
+    // Build two copies for seamless loop
+    let html = '';
+    for (let copy = 0; copy < 2; copy++) {
+      TICKER_EVENTS.forEach(evt => {
+        html += '<span class="ti mono">' + formatEvent(evt) + '</span>';
+        html += '<span class="td"></span>';
+      });
+    }
+    inner.innerHTML = html;
+  }
+
+  buildTickerContent();
+</script>
+
+</body>
+</html>

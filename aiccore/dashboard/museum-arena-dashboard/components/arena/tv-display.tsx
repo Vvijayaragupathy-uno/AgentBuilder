@@ -649,7 +649,6 @@ function TVDisplayInner() {
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-background">
       <TVAmbientAudio />
-
       {current === "attract" && (
         <TVAttract challenges={challenges} />
       )}

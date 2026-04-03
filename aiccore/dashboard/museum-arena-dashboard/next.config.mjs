@@ -1,3 +1,9 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+/** Directory containing this config — the real Next app root (avoids monorepo lockfile confusion). */
+const appDir = path.dirname(fileURLToPath(import.meta.url))
+
 /** @type {import('next').NextConfig} */
 function normalizeRewriteUpstream(raw) {
   const s = (raw || "").trim()
@@ -14,6 +20,13 @@ const upstream = normalizeRewriteUpstream(
 )
 
 const nextConfig = {
+  /**
+   * Without this, Next may infer `AgentBuilder/` as the workspace root (extra package-lock.json there),
+   * which breaks Turbopack/Tailwind content paths and can make `/tv` look unstyled or stale vs source.
+   */
+  turbopack: {
+    root: appDir,
+  },
   typescript: {
     // Fix reported TS errors instead of hiding them (run `npm run build` locally).
     ignoreBuildErrors: false,
